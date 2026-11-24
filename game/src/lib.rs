@@ -10,6 +10,7 @@ pub mod blackhole;
 pub mod boarding;
 pub mod briefing;
 pub mod campaign;
+pub mod cli;
 pub mod clips;
 pub mod cloak;
 pub mod collision;
@@ -201,6 +202,10 @@ pub fn run(view: fn(&mut App), setup_view: fn(&mut App)) {
     if let Some(code) = rules::cli::dump_schema(&args) {
         exit::quit(code);
     }
+    // `--version` and `--dump-schemas <dir>` need neither a window nor assets.
+    if let Some(code) = cli::quick(&args) {
+        exit::quit(code);
+    }
     let script = args.iter().position(|a| a == "--script").map(|i| {
         args.get(i + 1).ok_or_else(|| "--script requires a name".to_owned()).and_then(|name| smoke::Script::parse(name)).unwrap_or_else(|err| {
             eprintln!("{err}");
@@ -229,7 +234,9 @@ pub fn run(view: fn(&mut App), setup_view: fn(&mut App)) {
     if player && let Some(dir) = base.parent() {
         setup::report_crashes(dir.to_path_buf());
     }
-    let installed = modding::installed(bundled_mods_dir().as_deref()).into_iter().filter(|m| m.enabled).map(|m| m.dir);
+    let all_mods = modding::installed(bundled_mods_dir().as_deref());
+    modding::log_warnings(&all_mods, &mods);
+    let installed = all_mods.into_iter().filter(|m| m.enabled).map(|m| m.dir);
     modding::set_active(installed.chain(mods).collect());
     let layers: Vec<PathBuf> = std::iter::once(content_dir()).chain(modding::active().iter().cloned()).collect();
     let (root, report) = modding::overlay_report(&base, &layers, own_overlay());

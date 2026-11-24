@@ -1,7 +1,9 @@
 //! Ship JSON schemas; conversion keeps source ordering and the existing game-to-Bevy mapping.
 use super::*;
+use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::de::{MapAccess, Visitor};
+use std::collections::BTreeMap;
 use std::fmt;
 use std::path::Path;
 
@@ -36,57 +38,117 @@ where
     deserializer.deserialize_map(Entries(std::marker::PhantomData))
 }
 
-#[derive(Deserialize)]
-struct ShipDoc {
+/// `ships/<Id>/ship.json` (layout and defaults: docs/data-format.md "ship.json keys"). Unknown keys are allowed and ignored.
+#[derive(Deserialize, JsonSchema)]
+#[schemars(title = "ship.json")]
+pub(super) struct ShipDoc {
+    /// Editor hint: the schema this file follows. Ignored by the loader.
+    #[serde(rename = "$schema", default)]
+    _schema: Option<String>,
+    /// Not retail: the ship folder whose `geometry.json` this ship uses (default: its own folder).
     geometry: Option<String>,
+    /// Not retail: the ship folder whose `model.glb` this ship uses (default: its own folder).
     model: Option<String>,
+    /// Name of the scene the ship appears in on the fleet screen; none when absent.
     scene: Option<String>,
+    /// Race of the hull (empty when absent).
     #[serde(default)]
     race: String,
+    /// `true`: the ship is offered on the fleet screen (default `false`).
     #[serde(default)]
     skirmish: bool,
+    /// Core hit points. Default: with a model, a quarter of the hull sections' HP (at least 50); without one, 100.
     core_hp: Option<f64>,
+    /// Physics; a missing value is the PROVISIONAL default (about a Navy Cutter's: Mass 4000, MaxThrust 60000, MaxSpeed 8, RotationalFriction 20, MaxAngularAcceleration 3).
     #[serde(default)]
     physics: ShipPhysics,
+    /// Hull sections by label, in order. Default: built from the model's layers. Each needs `layer`, `material`, `hp`, `core_pct`, `vital_ship`, `vital_speed`, `vital_turn`.
     #[serde(default, deserialize_with = "ordered")]
+    #[schemars(with = "BTreeMap<String, SectionDoc>")]
     sections: Vec<(String, SectionDoc)>,
+    /// Gun mounts by label, in order. Each needs `gun` (a key of `guns.json`) and `arc_deg`; `pos`/`rot` default to the model's hardpoint node of that name.
     #[serde(default, deserialize_with = "ordered")]
+    #[schemars(with = "BTreeMap<String, MountDoc>")]
     guns: Vec<(String, MountDoc)>,
+    /// Engine ports. Default: from the model's `EnginePortPlacement` nodes.
     engines: Option<Vec<EngineDoc>>,
+    /// Wake emitters. Default: from the model's `WakePlacement` nodes.
     wakes: Option<Vec<WakeDoc>>,
+    /// Flag attachment points. Default: from the model's `FlagAttachmentPoint` nodes.
     flags: Option<Vec<FlagDoc>>,
+    /// Effect played when the ship blows up. Default: by race and size.
     explosion_fx: Option<String>,
+    /// Engine sound names. Default: by race and size.
     engine_snd: Option<Vec<Option<String>>>,
+    /// Selection ring size (default 0.65).
     ring: Option<f64>,
+    /// AI sight range (default 400).
     sight: Option<f64>,
+    /// Effect played while the ship is repaired. Default: by race and size.
     repair_fx: Option<String>,
+    /// Whether the ship can cloak. Default: `true` only for ids containing `Submersible`.
     cloakable: Option<bool>,
+    /// Not retail: `true` for a hull that burns fuel, so a nebula's drain does not slow it (default `false`).
     fuel: Option<bool>,
+    /// Fleet cost in victory points (default 0).
     #[serde(default)]
     points: u64,
+    /// Crew posts by role (`Gunners`, `Captains`, `First Mates`, `Navigators`, `Engineers`, `Riggers`, `Fighters`, `Lookouts`). Default: one gunner per two guns, a captain, mate, navigator, engineer, a rigger per sail, a fighter or two.
     crew_posts: Option<HashMap<String, u64>>,
+    /// Name shown for the hull. Default: the hull's name string.
     display_name: Option<String>,
+    /// Icon name. Default: named from the ship id.
     icon: Option<String>,
+    /// Number of lifeboats (default 0).
     #[serde(default)]
     lifeboats: u64,
+    /// `true` for a lifeboat hull (default `false`).
     #[serde(default)]
     is_lifeboat: bool,
+    /// Bounding sphere. Default: from the model.
     sphere: Option<SphereDoc>,
+    /// Not retail: crew places for deck crews, added to the model's `Crew_*` nodes (a node of the same name replaces the model's).
     #[serde(default)]
     crew_nodes: Vec<crew_nodes::CrewNodeDoc>,
+    /// Not retail: where a tow line attaches, ship frame, game axes. When present it wins over the model's `TowerPoint` / `ToweePoint` nodes.
+    tow: Option<TowDoc>,
+    /// Not retail: where homing torpedoes aim, ship frame, game axes (x starboard, y forward, z up). When present it wins over the model's `TorpedoHomingPoint` node.
+    homing: Option<[f64; 3]>,
 }
 
-/// PROVISIONAL defaults, about a Navy Cutter's, for a ship that states no physics.
-#[derive(Deserialize)]
+/// The schema of `ship.json`.
+pub(super) fn schema() -> Value {
+    serde_json::to_value(schemars::SchemaGenerator::default().into_root_schema_for::<ShipDoc>()).expect("schema is JSON")
+}
+
+/// Not retail: the two ends of a tow, ship frame, game axes (the convention of a gun's `pos`).
+#[derive(Deserialize, JsonSchema)]
+struct TowDoc {
+    /// Where this ship holds the line when it tows another (the tower).
+    tower: [f64; 3],
+    /// Where the line fastens when another ship tows this one (the towee).
+    towee: [f64; 3],
+}
+
+/// PROVISIONAL defaults, about a Navy Cutter's, for a ship that states no physics. Keys are PascalCase (`Mass`, not `mass`).
+#[derive(Deserialize, JsonSchema)]
 #[serde(rename_all = "PascalCase", default)]
 struct ShipPhysics {
+    /// Mass (default 4000).
     mass: f64,
+    /// Maximum engine thrust (default 60000).
     max_thrust: f64,
+    /// Top speed (default 8).
     max_speed: f64,
+    /// Rotational friction (default 20).
     rotational_friction: f64,
+    /// Maximum angular acceleration (default 3).
     max_angular_acceleration: f64,
+    /// Collision box minimum corner, up to 3 numbers (x, y, z; missing ones are 0). Default: from the model.
     min_extents: Option<Vec<f64>>,
+    /// Collision box maximum corner. Default: from the model.
     max_extents: Option<Vec<f64>>,
+    /// Centre of mass. Default: from the model.
     center_of_mass: Option<Vec<f64>>,
 }
 impl Default for ShipPhysics {
@@ -104,74 +166,117 @@ impl Default for ShipPhysics {
     }
 }
 
-#[derive(Deserialize)]
+/// One hull section.
+#[derive(Deserialize, JsonSchema)]
 struct SectionDoc {
+    /// The model layer (geometry.json key) this section covers.
     layer: String,
+    /// Material, which picks the damage multiplier.
     material: String,
+    /// Hit points of the section.
     hp: f64,
+    /// Share of the section's damage that also hits the core.
     core_pct: f64,
+    /// Losing it sinks the ship.
     vital_ship: bool,
+    /// Losing it stops the ship.
     vital_speed: bool,
+    /// Losing it stops the ship turning.
     vital_turn: bool,
+    /// Losing it fails a mission that asks for the section (default `false`).
     #[serde(default)]
     vital_mission: bool,
-    /// Absent in imports that predate it: every section swapped then.
+    /// Absent in imports that predate it: every section swapped then (default `true`).
     #[serde(default = "yes")]
     swappable: bool,
+    /// Break-up effect when the section is destroyed.
     destruct: Option<DestructDoc>,
+    /// Debris model and pivot.
     debris: Option<DebrisDoc>,
+    /// Effect played by the debris.
     debris_fx: Option<String>,
-    /// Layers of the neighbouring sections; absent in imports that predate it.
+    /// Layers of the neighbouring sections (empty when absent).
     #[serde(default)]
     adjacent: Vec<String>,
+    /// Critical hits this section can suffer (empty when absent).
     #[serde(default)]
     criticals: Vec<String>,
 }
 fn yes() -> bool {
     true
 }
-#[derive(Deserialize)]
+/// How a destroyed section breaks up.
+#[derive(Deserialize, JsonSchema)]
 struct DestructDoc {
+    /// Effect name.
     fx: Option<String>,
+    /// Seconds after destruction when the effect starts.
     start: f64,
+    /// Seconds after destruction when the effect ends.
     end: f64,
+    /// Where it plays, ship frame, game axes.
     point: [f64; 3],
 }
-#[derive(Deserialize)]
+/// Debris a destroyed section leaves.
+#[derive(Deserialize, JsonSchema)]
 struct DebrisDoc {
+    /// Debris model name.
     model: String,
+    /// Pivot point, ship frame, game axes.
     pivot: [f64; 3],
 }
-#[derive(Deserialize)]
+/// One gun mount.
+#[derive(Deserialize, JsonSchema)]
 struct MountDoc {
+    /// Position, ship frame, game axes (x starboard, y forward, z up). Default: the model's hardpoint node of the mount's label.
     pos: Option<[f64; 3]>,
+    /// Rotation, as a crew node's `rot`. Default: the model's hardpoint node.
     rot: Option<[f64; 3]>,
+    /// Firing arc in degrees.
     arc_deg: f64,
+    /// The gun fitted: a key of `data/weapons/guns.json`.
     gun: String,
+    /// Weapon-panel bank (`Bank1`, ...). Default: the nearest weapon-panel slot.
     bank: Option<String>,
+    /// The section layer the mount sits on (none when absent).
     parent_layer: Option<String>,
 }
-#[derive(Deserialize)]
+/// One engine port.
+#[derive(Deserialize, JsonSchema)]
 struct EngineDoc {
+    /// Name of the port.
     label: Option<String>,
+    /// The section layer it belongs to.
     parent_layer: Option<String>,
+    /// Position, ship frame, game axes.
     pos: Option<[f64; 3]>,
+    /// Rotation; the first number is the yaw about the up axis.
     rot: Option<[f64; 3]>,
+    /// Exhaust effect.
     fx: Option<String>,
 }
-#[derive(Deserialize)]
+/// One wake emitter.
+#[derive(Deserialize, JsonSchema)]
 struct WakeDoc {
+    /// Position, ship frame, game axes.
     pos: [f64; 3],
+    /// Effect name.
     fx: String,
 }
-#[derive(Deserialize)]
+/// One flag attachment point.
+#[derive(Deserialize, JsonSchema)]
 struct FlagDoc {
+    /// Name; the pole's ends contain `flag` and `top` / `bot`.
     label: String,
+    /// Position, ship frame, game axes.
     pos: [f64; 3],
 }
-#[derive(Deserialize)]
+/// A bounding sphere.
+#[derive(Deserialize, JsonSchema)]
 struct SphereDoc {
+    /// Centre, ship frame, game axes.
     center: [f64; 3],
+    /// Radius.
     radius: f64,
 }
 #[derive(Deserialize)]
@@ -353,8 +458,12 @@ fn try_load_class(root: &Path, name: &str, guns: &HashMap<String, GunDef>) -> Re
         is_lifeboat: j.is_lifeboat,
         sphere: j.sphere.map_or((centre, radius), |s| (point(s.center), s.radius as f32)),
         // PROVISIONAL hull-end fallback for custom models without authored tow/homing nodes.
-        tow_points: [node_point("TowerPoint").unwrap_or(Vec3::new(0.0, 0.0, bounds[1].z)), node_point("ToweePoint").unwrap_or(Vec3::new(0.0, 0.0, bounds[0].z))],
-        homing_point: node_point("TorpedoHomingPoint").unwrap_or((hmn + hmx) * 0.5),
+        // Not retail: `tow` and `homing` in ship.json win over the model's nodes.
+        tow_points: match &j.tow {
+            Some(t) => [point(t.tower), point(t.towee)],
+            None => [node_point("TowerPoint").unwrap_or(Vec3::new(0.0, 0.0, bounds[1].z)), node_point("ToweePoint").unwrap_or(Vec3::new(0.0, 0.0, bounds[0].z))],
+        },
+        homing_point: j.homing.map(point).or_else(|| node_point("TorpedoHomingPoint")).unwrap_or((hmn + hmx) * 0.5),
     })
 }
 
@@ -454,6 +563,33 @@ mod tests {
         doc["crew_nodes"][1] = serde_json::json!({"name": "Crew_Dance_0", "pos": [0, 0, 0]});
         let error = Fixture::new(doc, geometry()).load().err().unwrap();
         assert!(error.contains("ship.json") && error.contains("crew_nodes[1].name") && error.contains("Crew_Dance_0"), "{error}");
+    }
+    #[test]
+    fn tow_and_homing_points_in_ship_json_win_over_the_hull_ends_and_absent_keys_change_nothing() {
+        let plain = Fixture::new(ship(), geometry()).load().unwrap();
+        let mut doc = ship();
+        doc["tow"] = serde_json::json!({"tower": [1, 2, 3], "towee": [4, 5, 6]});
+        doc["homing"] = serde_json::json!([7, 8, 9]);
+        let c = Fixture::new(doc, geometry()).load().unwrap();
+        assert_eq!(c.tow_points, [Vec3::new(1.0, 3.0, -2.0), Vec3::new(4.0, 6.0, -5.0)], "game axes, as a gun's pos");
+        assert_eq!(c.homing_point, Vec3::new(7.0, 9.0, -8.0));
+        // Only one given: the other keeps its fallback.
+        let mut half = ship();
+        half["homing"] = serde_json::json!([1, 1, 1]);
+        let h = Fixture::new(half, geometry()).load().unwrap();
+        assert_eq!(h.tow_points, plain.tow_points);
+        assert_ne!(h.homing_point, plain.homing_point);
+        // A tow without both ends is an error naming the file.
+        let mut bad = ship();
+        bad["tow"] = serde_json::json!({"tower": [1, 2, 3]});
+        let error = Fixture::new(bad, geometry()).load().err().unwrap();
+        assert!(error.contains("ship.json") && error.contains("towee"), "{error}");
+    }
+    #[test]
+    fn a_schema_key_in_ship_json_is_ignored() {
+        let mut doc = ship();
+        doc["$schema"] = serde_json::json!("https://example.invalid/ship.schema.json");
+        assert!(Fixture::new(doc, geometry()).load().is_ok());
     }
     #[test]
     fn missing_file_and_mod_symlink_errors_identify_the_source() {

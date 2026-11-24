@@ -7,6 +7,7 @@
 //! - [`overlay_into`]: the merged asset tree of a base plus mods, built into a folder the tool chooses. The game's shared
 //!   `local/overlay` is never used, so several tools and game instances can run side by side (#136).
 //! - [`rule_schema`]: the mission rule vocabulary as JSON, the same document `--dump-rule-schema` writes.
+//! - [`schemas`]: JSON Schemas of `ship.json`, `guns.json`, `bullets.json`, `data/crew_nodes.json` and `mod.json` (`--dump-schemas <dir>`).
 //! - [`check_mission`] / [`known_names`]: the mission checker behind `--check-mission`, on JSON values in memory.
 //!
 //! Shared code: no UI and no view imports.
@@ -40,6 +41,15 @@ pub fn overlay_into(base: &Path, mods: &[PathBuf], out: &Path) -> Result<ModRepo
 /// Needs no assets.
 pub fn rule_schema() -> Value {
     crate::rules::schema::to_json()
+}
+
+/// The JSON Schemas (draft 2020-12) of the files a modder writes, as `(file name, schema)`: `ship.schema.json`, `guns.schema.json`,
+/// `bullets.schema.json`, `crew_nodes.schema.json`, `mod.schema.json`; the files `--dump-schemas <dir>` writes. Generated from the
+/// types the loader reads, so they cannot drift from it. Unknown keys stay allowed, as in the loader. Needs no assets.
+pub fn schemas() -> Vec<(&'static str, Value)> {
+    let mut all = crate::data::schemas();
+    all.push(("mod.schema.json", crate::modding::schema()));
+    all
 }
 
 /// Checks a mission's rules like `--check-mission`: `mission` is `mission.json` (or a skirmish map's `script.json`, then `skirmish`
@@ -114,6 +124,110 @@ mod tests {
         let written: Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
         assert_eq!(written, rule_schema());
         assert!(!ENGINE_VERSION.is_empty());
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// Keys of `value` that the schema `node` does not list (following `$ref` into the root's `$defs`); empty when all are known.
+    fn unknown_keys(root: &Value, node: &Value, value: &Value, at: &str, out: &mut Vec<String>) {
+        if let Some(r) = node["$ref"].as_str() {
+            let target = root.pointer(r.trim_start_matches('#')).unwrap_or_else(|| panic!("dangling $ref {r}"));
+            return unknown_keys(root, target, value, at, out);
+        }
+        if let Some(variants) = node["anyOf"].as_array() {
+            // An optional type is `anyOf [T, null]`: the variant with the fewest unknown keys is the one meant.
+            let best = variants
+                .iter()
+                .filter(|v| v["type"] != "null")
+                .map(|v| {
+                    let mut o = vec![];
+                    unknown_keys(root, v, value, at, &mut o);
+                    o
+                })
+                .min_by_key(Vec::len)
+                .unwrap_or_default();
+            out.extend(best);
+            return;
+        }
+        if let (Some(obj), Some(props)) = (value.as_object(), node["properties"].as_object()) {
+            for (k, v) in obj {
+                match props.get(k) {
+                    Some(p) => unknown_keys(root, p, v, &format!("{at}.{k}"), out),
+                    None if node["additionalProperties"].is_object() => unknown_keys(root, &node["additionalProperties"], v, &format!("{at}.{k}"), out),
+                    None => out.push(format!("{at}.{k}")),
+                }
+            }
+        } else if let (Some(obj), Some(extra)) = (value.as_object(), node["additionalProperties"].as_object().map(|_| &node["additionalProperties"])) {
+            for (k, v) in obj {
+                unknown_keys(root, extra, v, &format!("{at}.{k}"), out);
+            }
+        } else if let (Some(items), Some(arr)) = (node.get("items"), value.as_array()) {
+            for (i, v) in arr.iter().enumerate() {
+                unknown_keys(root, items, v, &format!("{at}[{i}]"), out);
+            }
+        }
+    }
+
+    #[test]
+    fn schemas_are_2020_12_for_every_file_a_modder_writes() {
+        let all = schemas();
+        let names: Vec<_> = all.iter().map(|(n, _)| *n).collect();
+        assert_eq!(names, ["ship.schema.json", "guns.schema.json", "bullets.schema.json", "crew_nodes.schema.json", "mod.schema.json"]);
+        for (name, schema) in &all {
+            let text = serde_json::to_string(schema).unwrap();
+            let back: Value = serde_json::from_str(&text).unwrap();
+            assert_eq!(back["$schema"], "https://json-schema.org/draft/2020-12/schema", "{name}");
+            assert!(schema.get("additionalProperties") != Some(&Value::Bool(false)), "{name}: unknown keys stay allowed");
+        }
+        let ship = &all[0].1;
+        assert!(ship["properties"]["tow"]["description"].as_str().unwrap().contains("tow line"));
+        assert!(ship["properties"]["core_hp"]["description"].as_str().unwrap().contains("Core hit points"));
+        assert!(ship["properties"]["$schema"].is_object(), "an editor may write the $schema key");
+        assert!(all[4].1["properties"]["requires"]["description"].as_str().unwrap().contains("mods"));
+    }
+
+    #[test]
+    fn a_representative_file_of_each_kind_uses_only_keys_the_schema_knows() {
+        let all = schemas();
+        let ship = json!({
+            "$schema": "ship.schema.json", "race": "Test", "skirmish": true, "core_hp": 60, "points": 10, "fuel": false,
+            "physics": {"Mass": 100, "MaxThrust": 10, "MaxSpeed": 5, "RotationalFriction": 1, "MaxAngularAcceleration": 1, "MinExtents": [0, 0, 0]},
+            "sections": {"Hull": {"layer": "Hull", "material": "Wood", "hp": 10, "core_pct": 0.5, "vital_ship": true, "vital_speed": false, "vital_turn": false,
+                                  "destruct": {"fx": "X", "start": 1, "end": 2, "point": [0, 0, 0]}, "debris": {"model": "m", "pivot": [0, 0, 0]}}},
+            "guns": {"Gun_A": {"pos": [0, 1, 2], "rot": [0, 0, 0], "arc_deg": 90, "gun": "Gun", "bank": "Bank1"}},
+            "engines": [{"label": "E", "pos": [0, 0, 0], "rot": [0, 0, 0], "fx": "F"}], "wakes": [{"pos": [0, 0, 0], "fx": "W"}], "flags": [{"label": "Flag_Top", "pos": [0, 0, 0]}],
+            "crew_posts": {"Gunners": 2}, "sphere": {"center": [0, 0, 0], "radius": 3},
+            "crew_nodes": [{"name": "Crew_Walk_P_0", "pos": [0, 0, 0], "rot": [0, 0, 0]}],
+            "tow": {"tower": [0, 1, 2], "towee": [0, -1, 2]}, "homing": [0, 0, 1]
+        });
+        let gun = json!({"$schema": "x", "Gun": {"MuzzleSpeed": 1, "TimeBetweenBursts": 1, "BulletsPerBurst": 1, "DuringBurstReloadTime": 1, "EffectiveRange_Range": 1, "LongRange_Range": 1,
+            "MaximumRange_Range": 1, "EffectiveRange_AccuracyDeviation": 1, "LongRange_AccuracyDeviation": 1, "MaximumRange_AccuracyDeviation": 1, "BulletAffectedByGravity": false,
+            "BulletTypeName_Primary": "B", "visual": {"base": "a", "pivot": [0, 0, 0], "muzzles": [[0, 0, 0]]}, "HorizontalRotationSpeed": 1, "VerticalRotationSpeed": 1,
+            "VerticalMinAngle": 0, "VerticalMaxAngle": 1, "Mount Type": "Medium Mount", "beam": {"charge": 1}}});
+        let bullet = json!({"B": {"lifetime": 1, "impact_vol": 1, "impact_max": 1, "impact_snd": {"Wood": ["a"]}, "damage": {"Wood": [1, 2, 0, 0, 0]}, "hit_fx": "H", "physics": {"Mass": 1}}});
+        let crew = json!({"$schema": "x", "Town": [{"name": "Crew_Walk_A_0", "pos": [0, 0, 0]}]});
+        let modjson = json!({"$schema": "mod.schema.json", "id": "m", "name": "M", "version": "1", "description": "d", "category": "Ships", "missions": ["a"], "default": true,
+            "format": 1, "game_version": "0.2.0", "requires": ["other"]});
+        for ((name, schema), doc) in all.iter().zip([ship, gun, bullet, crew, modjson]) {
+            let mut unknown = vec![];
+            unknown_keys(schema, schema, &doc, "", &mut unknown);
+            assert!(unknown.is_empty(), "{name}: keys the schema does not know: {unknown:?}");
+        }
+        // The checker itself notices a typo.
+        let mut unknown = vec![];
+        unknown_keys(&all[0].1, &all[0].1, &json!({"sigth": 1, "tow": {"tower": [0, 0, 0], "tow": 1}}), "", &mut unknown);
+        assert_eq!(unknown, [".sigth", ".tow.tow"]);
+    }
+
+    #[test]
+    fn the_schema_key_is_ignored_by_the_loaders_of_the_whole_file_types() {
+        let dir = scratch("schemakey");
+        std::fs::create_dir_all(dir.join("data/weapons")).unwrap();
+        std::fs::write(dir.join("data/weapons/guns.json"), r#"{"$schema": "x"}"#).unwrap();
+        std::fs::write(dir.join("data/weapons/bullets.json"), r#"{"$schema": "x"}"#).unwrap();
+        std::fs::write(dir.join("data/crew_nodes.json"), r#"{"$schema": "x", "Town": [{"name": "Crew_Walk_A_0", "pos": [0, 0, 0]}]}"#).unwrap();
+        let (guns, bullets) = crate::data::load_weapons(&dir);
+        assert!(guns.is_empty() && bullets.is_empty());
+        assert_eq!(crate::data::crew_nodes::load_scenery(&dir).len(), 1);
         std::fs::remove_dir_all(dir).unwrap();
     }
 

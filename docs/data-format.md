@@ -191,6 +191,8 @@ Gun entries in `data/weapons/guns.json` are retail apart from one engine key, `b
 | `cloakable` | retail | bool | no | `true` only for ids containing `Submersible` |
 | `fuel` | engine | bool | no | `false` |
 | `crew_nodes` | engine | array of `{name, pos, rot?}` | no | none; crew places for deck crews, added to the model's `Crew_*` nodes (a node of the same name replaces the model's); `name` is a `Crew_<Kind>_...` node name, `pos`/`rot` as a gun's, ship frame |
+| `tow` | engine | `{"tower": [x, y, z], "towee": [x, y, z]}` | no | the model's `TowerPoint` / `ToweePoint` nodes, else the hull ends; where the tow line is held (tower) and fastened (towee), ship frame, game axes as a gun's `pos`; wins over the nodes when present |
+| `homing` | engine | `[x, y, z]` | no | the model's `TorpedoHomingPoint` node, else the vital hull's centre; where homing torpedoes aim, ship frame, game axes; wins over the node when present |
 | `crew_posts` | retail | object | no | one gunner per two guns, a captain, mate, navigator, engineer, a rigger per sail, a fighter or two |
 | `lifeboats` | retail | integer | no | `0` |
 | `is_lifeboat` | retail | bool | no | `false` |
@@ -205,7 +207,7 @@ nothing. Check the spelling against the tables above when a change has no effect
   the key is dropped.
 - **A misspelt key** (`sigth`, `Maxspeed`) is an unknown key, so it is dropped, while a known key with a value of the wrong type is an
   error that stops the game at launch naming the file.
-- **`mod.json`**: `game_version` and `requires` are not read yet (`docs/modding.md` "Sharing a mod").
+- **`mod.json`**: unknown keys are ignored; `game_version`, `requires` and `format` are read and only warn (`docs/modding.md` "Sharing a mod"). A `$schema` key is ignored in every file (`docs/modding.md` "JSON schemas").
 - **Object files that are not valid JSON objects** in a merged path (`docs/modding.md` rule table) are not ignored; they replace the
   table below them.
 

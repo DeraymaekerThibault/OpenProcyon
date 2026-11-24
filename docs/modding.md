@@ -77,7 +77,7 @@ see the result and ["Troubleshooting"](#troubleshooting) what to check when noth
   `retail:<texture>` material (see "A ship from a model"). What you ship must be your own work or under a licence that allows
   redistribution; put a `LICENSE` file in the folder.
 - **Say which engine you need.** The engine is pre-1.0: file layouts can still change and a mod may need small fixes after an
-  update. Give the OpenProcyon version (or later) you tested with. `game_version` and `requires` in `mod.json` are not read yet.
+  update. Give the OpenProcyon version (or later) you tested with, in `mod.json` `game_version` (the engine warns when it is older than that).
 - **You support your mod.** The project maintains the engine and the examples in `mods/`, nothing else. Questions and bugs
   about a mod go to its author. Report a problem to OpenProcyon only when it also happens with no third-party mods switched on,
   or when a few files of your own show it. This guide is the help there is for making mods: there is no promise of an answer to
@@ -116,7 +116,43 @@ prints `mod <name> <version> <description>` to the console when it lays each mod
 | `category` | the Mods screen's filter (default "Other") |
 | `missions` | the order of a mod campaign's missions (see the custom-mission row below) |
 | `default` | bundled mods only: on until switched off; ignored in user mods |
-| `game_version`, `requires` | not read yet (nothing in the engine looks at them; say in your README which version you tested) |
+| `format` | the mod file-format version, an integer; the engine reads format 1 (current), and a missing key means 1. A larger number logs a warning that some of the mod may be ignored |
+| `game_version` | the oldest engine version the mod was made for, `"x.y.z"` (compared with `--version`). A newer requirement logs `warning: mod "<id>" asks for OpenProcyon x.y.z or newer; this is ...` at launch; the mod still loads |
+| `requires` | ids of other mods this one needs, `["base-pack"]`. One that is not installed, or installed but switched off, logs a warning naming both mods; the mod still loads (a `--mod` folder counts as installed). The Mods screen's model (`ModList::warnings`) carries the same text |
+| `$schema` | editor hint, ignored (see "JSON schemas") |
+
+Keys the loader does not know are ignored, and a known key of the wrong type counts as absent.
+
+### JSON schemas
+
+`openprocyon --dump-schemas <dir>` writes JSON Schemas (draft 2020-12) for the files a mod writes: `ship.schema.json` (`ships/<Id>/ship.json`),
+`guns.schema.json` and `bullets.schema.json` (`data/weapons/*.json`), `crew_nodes.schema.json` (`data/crew_nodes.json`) and
+`mod.schema.json` (`mod.json`). It needs no game assets and exits 0. They are generated from the types the loader reads, so key names,
+types and the field descriptions in the editor's hover are what the game really takes; tools linking the engine get the same from
+`openprocyon::authoring::schemas()`. Unknown keys stay allowed (the loader ignores them), so a misspelt key is not an error in the editor but
+is not offered either. Required keys are those of a complete retail-style file: a mod ship that `extends` another or a gun entry that only
+changes a few keys of a retail gun (files merged key by key) shows "missing property" warnings you can ignore.
+
+In VS Code, either name the schema in the file (the loader ignores a `$schema` key):
+
+```json
+{ "$schema": "../../schemas/ship.schema.json", "extends": "Ship_Navy_Cutter" }
+```
+
+or map files to schemas once in `.vscode/settings.json`:
+
+```json
+{ "json.schemas": [
+  { "fileMatch": ["ships/*/ship.json"], "url": "./schemas/ship.schema.json" },
+  { "fileMatch": ["data/weapons/guns.json"], "url": "./schemas/guns.schema.json" },
+  { "fileMatch": ["data/weapons/bullets.json"], "url": "./schemas/bullets.schema.json" },
+  { "fileMatch": ["data/crew_nodes.json"], "url": "./schemas/crew_nodes.schema.json" },
+  { "fileMatch": ["mod.json"], "url": "./schemas/mod.schema.json" }
+] }
+```
+
+`$schema` is ignored in `ship.json`, `mod.json`, `guns.json`, `bullets.json` and `data/crew_nodes.json`. For `--dump-rule-schema` (mission rules) see "Authoring missions".
+
 
 ## Testing a mod
 
@@ -126,13 +162,14 @@ prints `mod <name> <version> <description>` to the console when it lays each mod
 | start a battle at once | `--map <id>` (a skirmish map such as `red_rover`, or your mod's map), `--mission N`, with `--ship Ship_Id` (your own ship), `--allies A,B`, `--enemies A,B` (`none` for no enemies) and `--speed N` (fast-forward); `--menu skirmish` (or `mods`) opens that screen; `--lobby "map=border_dispute;points=1000;limit=10;slots=human,7*computer"` sets the skirmish lobby up (see `docs/development.md`) |
 | a picture | `./openprocyon --mod x --map red_rover --ship Ship_Id --shot out.png --shot-frame 300 [--dist D --yaw Y --pitch P]` writes a 1280x720 PNG and exits; a list `--shot-frame 100,300` writes `out_100.png`, `out_300.png`. In a checkout `tools/shot.sh local/x.png` does the same through cargo and checks the picture is not black (`--script damage`, `fxtest`, `victory`, ... stage a situation; the names are listed in `game/src/smoke/mod.rs`) |
 | what the merged files look like | open them in `local/overlay/` (above) |
+| the engine version | `--version` prints `OpenProcyon <version>` and exits, with no window or assets (compare with a mod's `game_version`) |
 | mission mistakes | `--check-mission <map id> --mod <dir>`, `--rule-trace`, `--why "<rule>"`, `--fire-rule`, the developer console (`~`); `--dump-rule-schema` needs no assets (all in "Authoring missions" and `docs/missions.md`) |
 | numbers | `PROCYON_TRACE=<file.csv>` writes every ship's position, velocity, heading and section hit points (and, in `<file>.shells.csv`, every shell) once per simulation step: compare a gun's range or a ship's speed with what you meant. `PROCYON_PROFILE=1` logs frame times, for the cost of a look (`docs/development.md`) |
 | logs | the console shows everything; the same text is written to `<user data dir>/logs/openprocyon.log` (the run before is `openprocyon.previous.log`), starting with the version and your arguments and ending with any panic. The overlay's `mod <name> <version> <description>` line and the retail-texture warning are plain console output and may not be in the log file |
 
 Tools that link the engine as a library (an editor, a checker) use `openprocyon::authoring` instead of the game's internals: it finds the
 imported assets without side effects, builds a mod overlay into a folder of the tool's own (the game's `local/overlay` is not touched, so
-several instances can run at once), and returns the rule schema and the mission checker's findings as values.
+several instances can run at once), and returns the rule schema, the JSON Schemas of the mod files (`schemas()`) and the mission checker's findings as values.
 
 Restart the game after every change: the overlay, the merged tables, the string table, the sound index and the render profile are
 all read once at launch.
@@ -217,6 +254,7 @@ rules. Data keys the engine adds are also listed per file: ship and gun keys in 
 | Game-speed buttons | `data/hud/speed.json` (the bundled `game-speed` mod, on by default) | control | `game/src/panels.rs`, `game/src/classic/panels.rs` |
 | Pause key | always | control | `game/src/view.rs` |
 | Replace a retail texture by name (`textures/<name>.png` swapped into every model that uses it) | `textures/<name>.png` in a mod | presentation | `game/src/retail_tex.rs`, `game/src/modding.rs` |
+| Tow and homing points in `ship.json` (`tow`, `homing`) | a `tow` / `homing` key in `ship.json` | simulation | `game/src/data/ships.rs` |
 | Crew places in JSON (deck crews and townsfolk without editing a model) | a `crew_nodes` key in `ship.json`, or `data/crew_nodes.json` | presentation | `game/src/data/crew_nodes.rs`, `game/src/render/deckhands.rs` |
 | Number keys: primary ship on 1, secondaries on 2..9, 0, `\` | always | control | `game/src/bindings.rs` |
 | Mods page and its main-menu button, the HD skies bake | always | control | `game/src/menu/mods.rs`, `game/src/classic/menu.rs` |

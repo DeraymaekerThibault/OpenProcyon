@@ -53,8 +53,70 @@ pub fn merge(base: &mut Value, over: &Value) {
     }
 }
 
+/// The file-format version of `mod.json` and of the mod layout this engine reads. A `mod.json` without `format` is version 1.
+pub const MOD_FORMAT: u32 = 1;
+
+/// `mod.json` (docs/modding.md "Sharing a mod"). Every field is read leniently: a value of the wrong type counts as absent, and
+/// unknown keys are allowed and ignored, so a hand-written file never stops a mod from loading.
+#[derive(Clone, Debug, Default, serde::Deserialize, schemars::JsonSchema)]
+#[schemars(title = "mod.json")]
+pub struct ModJson {
+    /// Editor hint: the schema this file follows. Ignored by the loader.
+    #[serde(rename = "$schema", default, deserialize_with = "crate::data::lenient")]
+    pub schema: Option<String>,
+    /// The mod's id, which `mods.json` and other mods' `requires` use. Default: the folder name.
+    #[serde(default, deserialize_with = "crate::data::lenient")]
+    pub id: Option<String>,
+    /// The name shown in the Mods screen. Default: the id.
+    #[serde(default, deserialize_with = "crate::data::lenient")]
+    pub name: Option<String>,
+    /// The mod's own version, shown in the Mods screen.
+    #[serde(default, deserialize_with = "crate::data::lenient")]
+    pub version: Option<String>,
+    /// A line shown in the Mods screen.
+    #[serde(default, deserialize_with = "crate::data::lenient")]
+    pub description: Option<String>,
+    /// The Mods screen's filter (`Ships`, `Visuals`, ...). Default `Other`.
+    #[serde(default, deserialize_with = "crate::data::lenient")]
+    pub category: Option<String>,
+    /// The order of a mod campaign's missions (map ids); missions not listed follow, by id.
+    #[serde(default, deserialize_with = "crate::data::lenient")]
+    pub missions: Option<Vec<String>>,
+    /// Bundled mods only: on until the player switches it off. Ignored in user mods.
+    #[serde(default, deserialize_with = "crate::data::lenient")]
+    pub default: Option<bool>,
+    /// The mod file-format version (an integer). The engine reads format 1; absent means 1.
+    #[serde(default, deserialize_with = "crate::data::lenient")]
+    pub format: Option<u32>,
+    /// The oldest engine version the mod was made for, as `"x.y.z"`. A newer requirement logs a warning naming the mod; the mod still loads.
+    #[serde(default, deserialize_with = "crate::data::lenient")]
+    pub game_version: Option<String>,
+    /// Ids of mods this one needs. A missing or switched-off one logs a warning naming both; the mod still loads.
+    #[serde(default, deserialize_with = "crate::data::lenient")]
+    pub requires: Option<Vec<String>>,
+}
+
+/// `x.y.z` (missing parts are 0, a leading `v` and anything after `-` or `+` are ignored) as numbers; `None` when it is not a version.
+pub fn parse_version(text: &str) -> Option<[u64; 3]> {
+    let core = text.trim().trim_start_matches('v').split(['-', '+']).next()?;
+    let mut parts = core.split('.');
+    let mut out = [0; 3];
+    for slot in &mut out {
+        match parts.next() {
+            Some(p) => *slot = p.trim().parse().ok()?,
+            None => break,
+        }
+    }
+    parts.next().is_none().then_some(out)
+}
+
+/// The schema of `mod.json`.
+pub fn schema() -> Value {
+    serde_json::to_value(schemars::SchemaGenerator::default().into_root_schema_for::<ModJson>()).expect("schema is JSON")
+}
+
 /// A mod folder found in `<user dir>/mods/`.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct Installed {
     pub id: String,
     pub name: String,
@@ -66,6 +128,39 @@ pub struct Installed {
     pub enabled: bool,
     /// A bundled mod whose `mod.json` has `"default": true`: on until the player switches it off.
     pub default: bool,
+    /// `mod.json` `format` (1 when absent).
+    pub format: u32,
+    /// `mod.json` `game_version`: the oldest engine version the mod asks for (empty when absent).
+    pub game_version: String,
+    /// `mod.json` `requires`: ids of the mods this one needs.
+    pub requires: Vec<String>,
+}
+
+impl Installed {
+    /// Warnings about this mod's `game_version` and `format` against this engine, and about `requires` against the other `mods`
+    /// (only switched-on ones count). Nothing here stops a mod from loading.
+    pub fn warnings(&self, mods: &[Installed], engine: &str) -> Vec<String> {
+        let mut out = vec![];
+        let label = format!("mod {:?}", self.id);
+        if !self.game_version.is_empty() {
+            match (parse_version(&self.game_version), parse_version(engine)) {
+                (Some(want), Some(have)) if want > have => out.push(format!("{label} asks for OpenProcyon {} or newer; this is {engine}, so it may not work", self.game_version)),
+                (None, _) => out.push(format!("{label}: game_version {:?} is not a version like \"0.2.0\"; ignored", self.game_version)),
+                _ => {}
+            }
+        }
+        if self.format > MOD_FORMAT {
+            out.push(format!("{label} is mod format {}; this engine reads format {MOD_FORMAT}, so some of it may be ignored", self.format));
+        }
+        for need in &self.requires {
+            match mods.iter().find(|m| m.id == *need) {
+                None => out.push(format!("{label} requires mod {need:?}, which is not installed")),
+                Some(m) if !m.enabled => out.push(format!("{label} requires mod {need:?}, which is installed but switched off")),
+                Some(_) => {}
+            }
+        }
+        out
+    }
 }
 
 /// Mods are installed by unzipping into this folder; `mods.json` beside it (`{"enabled": ["id", ...], "disabled": ["id", ...]}`, load order,
@@ -85,21 +180,58 @@ pub fn installed_in(user: &Path, bundled: Option<&Path>) -> Vec<Installed> {
     for (dir, is_bundled) in [(Some(user.join("mods")), false), (bundled.map(Path::to_path_buf), true)] {
         let Some(dir) = dir else { continue };
         for e in std::fs::read_dir(dir).into_iter().flatten().flatten().filter(|e| e.path().is_dir()) {
-            let meta = read(&e.path().join("mod.json")).unwrap_or_default();
-            let text = |k: &str| meta[k].as_str().unwrap_or_default().to_string();
-            let id = Some(text("id")).filter(|s| !s.is_empty()).unwrap_or_else(|| e.file_name().to_string_lossy().into_owned());
+            let meta: ModJson = read(&e.path().join("mod.json")).and_then(|v| serde_json::from_value(v).ok()).unwrap_or_default();
+            let text = |v: &Option<String>| v.clone().unwrap_or_default();
+            let id = meta.id.clone().filter(|s| !s.is_empty()).unwrap_or_else(|| e.file_name().to_string_lossy().into_owned());
             if found.iter().any(|m| m.id == id) {
                 continue;
             }
-            let name = Some(text("name")).filter(|s| !s.is_empty()).unwrap_or_else(|| id.clone());
-            let category = Some(text("category")).filter(|s| !s.is_empty()).unwrap_or_else(|| "Other".into());
-            let default = is_bundled && meta["default"].as_bool() == Some(true);
+            let name = meta.name.clone().filter(|s| !s.is_empty()).unwrap_or_else(|| id.clone());
+            let category = meta.category.clone().filter(|s| !s.is_empty()).unwrap_or_else(|| "Other".into());
+            let default = is_bundled && meta.default == Some(true);
             let enabled = on.contains(&id) || (default && !off.contains(&id));
-            found.push(Installed { enabled, default, id, name, version: text("version"), description: text("description"), category, dir: e.path() });
+            found.push(Installed {
+                enabled,
+                default,
+                id,
+                name,
+                version: text(&meta.version),
+                description: text(&meta.description),
+                category,
+                dir: e.path(),
+                format: meta.format.unwrap_or(MOD_FORMAT),
+                game_version: text(&meta.game_version),
+                requires: meta.requires.clone().unwrap_or_default(),
+            });
         }
     }
     found.sort_by_key(|m| (on.iter().position(|i| *i == m.id).unwrap_or(usize::MAX), m.id.clone()));
     found
+}
+
+/// Prints the `game_version` / `format` / `requires` warnings of the switched-on mods (`Installed::warnings`) to stderr, one line each.
+/// `folders` are the `--mod` folders: they count as installed and on for `requires` (by folder name, or the `id` of their `mod.json`).
+pub fn log_warnings(all: &[Installed], folders: &[PathBuf]) {
+    let mut every = all.to_vec();
+    for dir in folders {
+        let meta: ModJson = read(&dir.join("mod.json")).and_then(|v| serde_json::from_value(v).ok()).unwrap_or_default();
+        let id = meta.id.filter(|s| !s.is_empty()).unwrap_or_else(|| dir.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default());
+        if !every.iter().any(|m| m.id == id && m.enabled) {
+            every.push(Installed {
+                enabled: true,
+                id,
+                format: meta.format.unwrap_or(MOD_FORMAT),
+                game_version: meta.game_version.unwrap_or_default(),
+                requires: meta.requires.unwrap_or_default(),
+                ..Installed::default()
+            });
+        }
+    }
+    for m in every.iter().filter(|m| m.enabled) {
+        for w in m.warnings(&every, crate::authoring::ENGINE_VERSION) {
+            eprintln!("warning: {w}");
+        }
+    }
 }
 
 pub fn installed(bundled: Option<&Path>) -> Vec<Installed> {
@@ -475,6 +607,66 @@ fn apply_file(name: &str, from: &Path, to: &Path, base: &Path, doc: Option<&Valu
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn mod_json_new_keys_default_and_read_leniently() {
+        let none: ModJson = serde_json::from_str("{}").unwrap();
+        assert_eq!((none.format, none.game_version, none.requires), (None, None, None));
+        let all: ModJson = serde_json::from_str(r#"{"$schema": "x", "format": 1, "game_version": "0.2.0", "requires": ["a", "b"], "future": 1}"#).unwrap();
+        assert_eq!((all.format, all.game_version.as_deref(), all.requires), (Some(1), Some("0.2.0"), Some(vec!["a".into(), "b".into()])));
+        let wrong: ModJson = serde_json::from_str(r#"{"format": "one", "game_version": 2, "requires": "a", "name": 5}"#).unwrap();
+        assert_eq!((wrong.format, wrong.game_version, wrong.requires, wrong.name), (None, None, None, None), "wrong types count as absent");
+        let dir = std::env::temp_dir().join(format!("procyon-modjson-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        for (f, meta) in [("plain", "{}"), ("new", r#"{"format": 2, "game_version": "9.0.0", "requires": ["plain", "ghost"]}"#)] {
+            std::fs::create_dir_all(dir.join("mods").join(f)).unwrap();
+            std::fs::write(dir.join("mods").join(f).join("mod.json"), meta).unwrap();
+        }
+        let list = installed_in(&dir, None);
+        let by = |id: &str| list.iter().find(|m| m.id == id).unwrap().clone();
+        assert_eq!((by("plain").format, by("plain").game_version.as_str(), by("plain").requires.len()), (1, "", 0));
+        assert_eq!((by("new").format, by("new").game_version.as_str(), by("new").requires.clone()), (2, "9.0.0", vec!["plain".to_string(), "ghost".to_string()]));
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn versions_compare_as_numbers() {
+        assert_eq!(parse_version("0.2.0"), Some([0, 2, 0]));
+        assert_eq!(parse_version("v1.10"), Some([1, 10, 0]));
+        assert_eq!(parse_version("0.3.1-beta+x"), Some([0, 3, 1]));
+        assert_eq!(parse_version("1.2.3.4"), None);
+        assert_eq!(parse_version("soon"), None);
+        assert!(parse_version("0.10.0") > parse_version("0.9.9"), "not as text");
+    }
+
+    #[test]
+    fn warnings_name_the_mod_for_a_newer_engine_requirement_and_missing_or_disabled_requirements() {
+        let mod_ = |id: &str, enabled: bool, game_version: &str, requires: &[&str]| Installed {
+            id: id.into(),
+            enabled,
+            format: 1,
+            game_version: game_version.into(),
+            requires: requires.iter().map(|s| s.to_string()).collect(),
+            ..Installed::default()
+        };
+        let all = [
+            mod_("base", true, "", &[]),
+            mod_("off", false, "", &[]),
+            mod_("fancy", true, "0.10.0", &["base", "off", "ghost"]),
+            mod_("old", true, "0.2.0", &[]),
+            mod_("odd", true, "x", &[]),
+        ];
+        assert!(all[0].warnings(&all, "0.2.0").is_empty());
+        let w = all[2].warnings(&all, "0.9.0");
+        assert_eq!(w.len(), 3, "{w:?}");
+        assert!(w[0].contains("\"fancy\"") && w[0].contains("0.10.0") && w[0].contains("0.9.0"), "{w:?}");
+        assert!(w[1].contains("\"off\"") && w[1].contains("switched off"), "{w:?}");
+        assert!(w[2].contains("\"ghost\"") && w[2].contains("not installed"), "{w:?}");
+        assert!(all[3].warnings(&all, "0.2.0").is_empty(), "the same version is enough");
+        assert_eq!(all[4].warnings(&all, "0.2.0").len(), 1, "an unreadable version is reported, not fatal");
+        let newer = Installed { format: MOD_FORMAT + 1, ..mod_("f", true, "", &[]) };
+        assert!(newer.warnings(&[], "0.2.0")[0].contains("format"));
+    }
 
     #[test]
     fn the_merged_list_in_docs_modding_md_is_this_one() {

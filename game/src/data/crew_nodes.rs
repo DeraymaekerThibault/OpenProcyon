@@ -6,18 +6,21 @@
 //! Presentation only: nothing here reaches the simulation, and a profile with no `deckhands` block never draws them.
 use super::ships::{mount_rotation, point};
 use super::*;
+use schemars::JsonSchema;
 use serde::Deserialize;
+use std::collections::BTreeMap;
 
 /// The kinds `Crew_<Kind>_...` the deck crews understand (`render/deckhands.rs`).
 const KINDS: [&str; 6] = ["Walk", "Gun", "Post", "Work", "Climb", "Count"];
 
 /// One entry of a `crew_nodes` list.
-#[derive(Deserialize)]
+#[derive(Deserialize, JsonSchema)]
 pub(super) struct CrewNodeDoc {
+    /// The node's name: `Crew_Walk_<lane>_<k>`, `Crew_Gun_*`, `Crew_Post_*`, `Crew_Work_*`, `Crew_Climb_<shroud>_a` / `_b` or `Crew_Count_<n>`.
     name: String,
     /// Ship frame, game axes (x starboard, y forward, z up): the convention of a gun's `pos`.
     pos: [f64; 3],
-    /// The convention of a gun's `rot`: the way the figure faces at the place.
+    /// Rotation, the convention of a gun's `rot`: the way the figure faces at the place.
     rot: Option<[f64; 3]>,
 }
 
@@ -61,9 +64,17 @@ pub fn combine(mut model: Vec<CrewNode>, json: &[CrewNode]) -> Vec<CrewNode> {
 /// not read, or a type with a bad entry, is reported by file and field and left out; the game carries on without those crews.
 pub fn load_scenery(root: &std::path::Path) -> HashMap<String, Vec<CrewNode>> {
     let rel = "data/crew_nodes.json";
-    let Some(file) = load_or_base::<HashMap<String, Vec<CrewNodeDoc>>>(&root.join(rel), None, "no crews on scenery from it") else { return HashMap::new() };
+    let Some(mut file) = load_or_base::<BTreeMap<String, Value>>(&root.join(rel), None, "no crews on scenery from it") else { return HashMap::new() };
+    file.remove("$schema"); // an editor hint (`docs/modding.md` "JSON schemas"), not a scenery type
     let mut out = HashMap::new();
-    for (ty, docs) in file {
+    for (ty, list) in file {
+        let docs = match serde_json::from_value::<Vec<CrewNodeDoc>>(list) {
+            Ok(d) => d,
+            Err(e) => {
+                eprintln!("error: {rel}: {ty:?}: {e}; the crews of {ty:?} are left out");
+                continue;
+            }
+        };
         match nodes(&docs, &format!("{rel}: {ty:?}")) {
             Ok(n) => {
                 out.insert(ty, n);
@@ -72,6 +83,11 @@ pub fn load_scenery(root: &std::path::Path) -> HashMap<String, Vec<CrewNode>> {
         }
     }
     out
+}
+
+/// The schema of `data/crew_nodes.json`: an object of node lists by scenery type.
+pub(super) fn schema() -> Value {
+    super::weapons::table_schema::<Vec<CrewNodeDoc>>("data/crew_nodes.json")
 }
 
 /// The type of a piece of map scenery (`type` in the map's `objects`), keying its entry in `data/crew_nodes.json`.
