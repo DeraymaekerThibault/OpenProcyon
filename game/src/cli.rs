@@ -1,6 +1,7 @@
-//! The command-line flags that print something and exit, before any window, asset or mod work: `--version` and
-//! `--dump-schemas <dir>`. (The mission-authoring flags are in `rules/cli.rs`.)
+//! The command-line flags that print something and exit, before any window, asset or mod work: `--version`,
+//! `--dump-schemas <dir>` and `--check-mod <dir> [--json]`. (The mission-authoring flags are in `rules/cli.rs`.)
 
+use std::io::Write;
 use std::path::Path;
 
 /// Runs `--version` or `--dump-schemas <dir>` when given and returns the exit status; `None` when neither is.
@@ -8,6 +9,9 @@ pub fn quick(args: &[String]) -> Option<i32> {
     if args.iter().skip(1).any(|a| a == "--version") {
         println!("OpenProcyon {}", crate::authoring::ENGINE_VERSION);
         return Some(0);
+    }
+    if let Some(i) = args.iter().position(|a| a == "--check-mod") {
+        return Some(check_mod(args.get(i + 1).filter(|a| !a.starts_with("--")), args.iter().any(|a| a == "--json")));
     }
     let i = args.iter().position(|a| a == "--dump-schemas")?;
     let Some(dir) = args.get(i + 1).filter(|a| !a.starts_with("--")) else {
@@ -24,6 +28,33 @@ pub fn quick(args: &[String]) -> Option<i32> {
             Some(2)
         }
     }
+}
+
+/// `--check-mod <dir> [--json]`: prints the findings of `authoring::check_mod` and returns 1 when there are errors, else 0 (2: no folder
+/// given). Plain output is one line per finding, `<file>: <level>: <path>: <message>`, then `<mod>: N errors, M warnings`; `--json` prints one
+/// object `{"mod", "engine", "errors", "warnings", "findings": [...]}` (a finding's fields are those of `authoring::Finding`).
+fn check_mod(dir: Option<&String>, json: bool) -> i32 {
+    let Some(dir) = dir else {
+        eprintln!("--check-mod takes the mod's folder");
+        return 2;
+    };
+    let base = crate::authoring::base_assets();
+    let findings = crate::authoring::check_mod(Path::new(dir), base.as_deref());
+    let errors = findings.iter().filter(|f| f.level == crate::authoring::Level::Error).count();
+    let warnings = findings.len() - errors;
+    // A closed pipe (`| head`) is not an error.
+    let out = &mut std::io::stdout();
+    if json {
+        let doc = serde_json::json!({"mod": dir, "engine": crate::authoring::ENGINE_VERSION, "errors": errors, "warnings": warnings, "findings": findings});
+        let _ = writeln!(out, "{}", serde_json::to_string_pretty(&doc).expect("findings are JSON"));
+    } else {
+        for f in &findings {
+            let _ = if f.file.is_empty() { writeln!(out, "{f}") } else { writeln!(out, "{}: {f}", f.file) };
+        }
+        let name = Path::new(dir).file_name().map_or_else(|| dir.clone(), |n| n.to_string_lossy().into_owned());
+        let _ = writeln!(out, "{name}: {errors} errors, {warnings} warnings");
+    }
+    i32::from(errors > 0)
 }
 
 /// Writes every schema of `authoring::schemas` as `<dir>/<name>` (the folder is created) and returns the file names.

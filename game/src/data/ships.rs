@@ -304,7 +304,8 @@ pub fn load_class(root: &Path, name: &str, guns: &HashMap<String, GunDef>) -> Cl
     try_load_class(root, name, guns).unwrap_or_else(|e| panic!("{e}"))
 }
 
-fn try_load_class(root: &Path, name: &str, guns: &HashMap<String, GunDef>) -> Result<Class, String> {
+/// `load_class` that returns the error (it names the file and the field) instead of panicking; used by `--check-mod`.
+pub fn try_load_class(root: &Path, name: &str, guns: &HashMap<String, GunDef>) -> Result<Class, String> {
     let path = root.join(format!("ships/{name}/ship.json"));
     let mut j: ShipDoc = read_typed(&path)?;
     let glb = format!("ships/{}/model.glb", j.model.as_deref().unwrap_or(name));

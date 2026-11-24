@@ -16,8 +16,13 @@ use std::path::{Path, PathBuf};
 
 use serde_json::Value;
 
+mod check_mod;
+mod json;
+pub use check_mod::{check_mod, check_mod_with, unknown_keys};
+pub use json::to_json_string;
+
 pub use crate::modding::{ModEntry, ModReport};
-pub use crate::rules::check::{Level, Problem};
+pub use crate::rules::check::{Finding, Level, Problem, defined_names};
 
 /// The version of this engine (the crate version).
 pub const ENGINE_VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -159,44 +164,9 @@ mod tests {
         std::fs::remove_dir_all(dir).unwrap();
     }
 
-    /// Keys of `value` that the schema `node` does not list (following `$ref` into the root's `$defs`); empty when all are known.
-    fn unknown_keys(root: &Value, node: &Value, value: &Value, at: &str, out: &mut Vec<String>) {
-        if let Some(r) = node["$ref"].as_str() {
-            let target = root.pointer(r.trim_start_matches('#')).unwrap_or_else(|| panic!("dangling $ref {r}"));
-            return unknown_keys(root, target, value, at, out);
-        }
-        if let Some(variants) = node["anyOf"].as_array() {
-            // An optional type is `anyOf [T, null]`: the variant with the fewest unknown keys is the one meant.
-            let best = variants
-                .iter()
-                .filter(|v| v["type"] != "null")
-                .map(|v| {
-                    let mut o = vec![];
-                    unknown_keys(root, v, value, at, &mut o);
-                    o
-                })
-                .min_by_key(Vec::len)
-                .unwrap_or_default();
-            out.extend(best);
-            return;
-        }
-        if let (Some(obj), Some(props)) = (value.as_object(), node["properties"].as_object()) {
-            for (k, v) in obj {
-                match props.get(k) {
-                    Some(p) => unknown_keys(root, p, v, &format!("{at}.{k}"), out),
-                    None if node["additionalProperties"].is_object() => unknown_keys(root, &node["additionalProperties"], v, &format!("{at}.{k}"), out),
-                    None => out.push(format!("{at}.{k}")),
-                }
-            }
-        } else if let (Some(obj), Some(extra)) = (value.as_object(), node["additionalProperties"].as_object().map(|_| &node["additionalProperties"])) {
-            for (k, v) in obj {
-                unknown_keys(root, extra, v, &format!("{at}.{k}"), out);
-            }
-        } else if let (Some(items), Some(arr)) = (node.get("items"), value.as_array()) {
-            for (i, v) in arr.iter().enumerate() {
-                unknown_keys(root, items, v, &format!("{at}[{i}]"), out);
-            }
-        }
+    /// Paths of the keys of `value` that `schema` does not list.
+    fn unknown(schema: &Value, value: &Value) -> Vec<String> {
+        unknown_keys(schema, value).into_iter().map(|(path, _)| path).collect()
     }
 
     #[test]
@@ -237,9 +207,7 @@ mod tests {
         assert!(ship["properties"]["sections"]["additionalProperties"].is_object() || ship["properties"]["sections"].is_object());
         // A minimal extending file: nothing is demanded, both keys are described.
         let mini = json!({"extends": "Ship_X", "points": 100});
-        let mut unknown = vec![];
-        unknown_keys(ship, ship, &mini, "", &mut unknown);
-        assert!(unknown.is_empty(), "{unknown:?}");
+        assert!(unknown(ship, &mini).is_empty(), "{:?}", unknown(ship, &mini));
         assert_eq!(ship["properties"]["points"]["type"], "integer");
     }
 
@@ -266,14 +234,14 @@ mod tests {
         let modjson = json!({"$schema": "mod.schema.json", "id": "m", "name": "M", "version": "1", "description": "d", "category": "Ships", "missions": ["a"], "default": true,
             "format": 1, "game_version": "0.2.0", "requires": ["other"]});
         for ((name, schema), doc) in all.iter().zip([ship, gun, bullet, crew, modjson]) {
-            let mut unknown = vec![];
-            unknown_keys(schema, schema, &doc, "", &mut unknown);
+            let unknown = unknown(schema, &doc);
             assert!(unknown.is_empty(), "{name}: keys the schema does not know: {unknown:?}");
         }
         // The checker itself notices a typo.
-        let mut unknown = vec![];
-        unknown_keys(&all[0].1, &all[0].1, &json!({"sigth": 1, "tow": {"tower": [0, 0, 0], "tow": 1}}), "", &mut unknown);
-        assert_eq!(unknown, [".sigth", ".tow.tow"]);
+        assert_eq!(unknown(&all[0].1, &json!({"sigth": 1, "tow": {"tower": [0, 0, 0], "tow": 1}})), ["sigth", "tow.tow"]);
+        // ... and offers what it knows there, so a tool can suggest the nearest key
+        let typo = unknown_keys(&all[0].1, &json!({"sigth": 1}));
+        assert!(typo[0].1.iter().any(|k| k == "sight"), "{typo:?}");
     }
 
     #[test]

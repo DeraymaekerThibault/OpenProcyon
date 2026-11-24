@@ -1,0 +1,807 @@
+//! `--check-mod <dir>`: everything that can be said about a mod folder without starting a game, as a list of [`Finding`]s.
+//!
+//! The mod is laid over the imported assets (and the mods it `requires`, when installed) in a temporary overlay, exactly as the game
+//! does, and then looked at from three sides: what the loader refuses (skipped files, `mod.json`), what the author wrote that nothing
+//! reads (unknown keys, from the same schemas the editor gets, `authoring::schemas`), and what the files name that is not there
+//! (layers, hardpoints, guns, bullets, effects, sounds, scenery models). Missions go through the mission checker (`--check-mission`)
+//! with a few extra warnings. Without imported assets only what the mod's own files can show is checked.
+
+use std::collections::{BTreeSet, HashSet};
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicUsize, Ordering};
+
+use serde_json::Value;
+
+use crate::data::derive;
+use crate::modding::{self, Installed};
+use crate::rules::check::{Finding, Level, did_you_mean, nearest, unused_definitions};
+
+/// Checks the mod in `dir` against the imported assets in `base` (`None`: nothing imported, so only the mod's own files are looked
+/// at and one warning says what was skipped). The mods `dir` lists in `requires` are laid under it when they are installed. Writes
+/// nothing but a scratch folder under the system's temp folder, which it removes; starts no window. Findings come in the order the
+/// checks run: `mod.json`, files the loader skipped, keys, ships, weapons, missions.
+pub fn check_mod(dir: &Path, base: Option<&Path>) -> Vec<Finding> {
+    check_mod_with(dir, base, &modding::installed(crate::bundled_mods_dir().as_deref()))
+}
+
+/// `check_mod` with the installed mods given (the `requires` of the mod are looked up among them).
+pub fn check_mod_with(dir: &Path, base: Option<&Path>, installed: &[Installed]) -> Vec<Finding> {
+    // A folder with no `ships/` is not an import (an empty user folder): treat it as no assets.
+    let base = base.filter(|b| b.join("ships").is_dir());
+    let mut c = Checker { dir, root: PathBuf::new(), have_base: base.is_some(), out: vec![], unchecked: 0 };
+    if !dir.is_dir() {
+        c.error("", "", format!("{} is not a folder", dir.display()));
+        return c.out;
+    }
+    let meta = std::fs::read(dir.join("mod.json")).ok().and_then(|b| serde_json::from_slice::<Value>(&b).ok());
+    let deps = c.mod_json(meta.as_ref(), installed);
+    // The overlay: the base (or an empty folder), the required mods, the mod.
+    static NEXT: AtomicUsize = AtomicUsize::new(0);
+    let scratch = std::env::temp_dir().join(format!("procyon-check-mod-{}-{}", std::process::id(), NEXT.fetch_add(1, Ordering::Relaxed)));
+    let _ = std::fs::remove_dir_all(&scratch);
+    let (empty, root) = (scratch.join("base"), scratch.join("overlay"));
+    if std::fs::create_dir_all(&empty).is_err() {
+        c.error("", "", format!("cannot create a scratch folder in {}", std::env::temp_dir().display()));
+        return c.out;
+    }
+    let layers: Vec<PathBuf> = deps.iter().cloned().chain([dir.to_path_buf()]).collect();
+    match modding::overlay_into(base.unwrap_or(&empty), &layers, &root) {
+        Ok(report) => {
+            c.root = root;
+            if let Some(entry) = report.mods.last() {
+                for (file, why) in &entry.skipped {
+                    // Without the game's files a mod that extends a retail file cannot be merged: not the mod's fault.
+                    if !c.have_base && why.starts_with("extends unknown '") {
+                        c.unchecked += 1;
+                    } else {
+                        let why = c.tidy(why);
+                        c.error(file, "", why);
+                    }
+                }
+                for file in &entry.unused_textures {
+                    c.warn(file, "", "no model uses this texture override; check the name".into());
+                }
+            }
+            c.run();
+        }
+        Err(e) => c.error("", "", e),
+    }
+    let _ = std::fs::remove_dir_all(&scratch);
+    if !c.have_base {
+        let files = if c.unchecked > 0 { format!(", and {} file(s) that extend a retail file", c.unchecked) } else { String::new() };
+        c.out.push(Finding::in_file(
+            Level::Warning,
+            "",
+            "",
+            format!("no imported assets found: ships, models, weapons, effects and sounds the mod does not bring itself were not looked up{files}; import the game (make assets) for the full check"),
+        ));
+    }
+    c.out
+}
+
+struct Checker<'a> {
+    dir: &'a Path,
+    /// The overlay folder (base + mods); empty until built.
+    root: PathBuf,
+    have_base: bool,
+    out: Vec<Finding>,
+    /// Files that could not be merged without the game's own files.
+    unchecked: usize,
+}
+
+impl Checker<'_> {
+    fn error(&mut self, file: &str, path: &str, message: String) {
+        self.out.push(Finding::in_file(Level::Error, file, path, message));
+    }
+    fn warn(&mut self, file: &str, path: &str, message: String) {
+        self.out.push(Finding::in_file(Level::Warning, file, path, message));
+    }
+    /// A finding with a "did you mean" tail and the suggestion as data.
+    fn with_hint(&mut self, level: Level, file: &str, path: &str, message: String, suggestion: Option<&str>) {
+        let mut f = Finding::in_file(level, file, path, format!("{message}{}", did_you_mean(suggestion)));
+        f.suggestion = suggestion.map(String::from);
+        self.out.push(f);
+    }
+
+    /// `mod.json`: value types, `game_version` against this engine, `format`, `requires` and `missions`. Returns the folders of the
+    /// installed mods `requires` names (what they require first), to be laid under this one.
+    fn mod_json(&mut self, meta: Option<&Value>, installed: &[Installed]) -> Vec<PathBuf> {
+        let file = "mod.json";
+        if !self.dir.join(file).is_file() {
+            self.warn(file, "", "no mod.json: the mod's id is its folder name and the Mods screen has no name or description for it".into());
+            return vec![];
+        }
+        // A file that does not parse is reported with the files the overlay skipped.
+        let Some(meta) = meta.and_then(Value::as_object) else { return vec![] };
+        for key in ["id", "name", "version", "description", "category", "game_version"] {
+            if meta.get(key).is_some_and(|v| !v.is_string()) {
+                self.error(file, key, format!("{} is not a string; the game ignores it", meta[key]));
+            }
+        }
+        if meta.get("default").is_some_and(|v| !v.is_boolean()) {
+            self.error(file, "default", format!("{} is not true or false; the game ignores it", meta["default"]));
+        }
+        match meta.get("format") {
+            Some(v) if v.as_u64().is_none_or(|n| n > u64::from(u32::MAX)) => self.error(file, "format", format!("{v} is not a whole number; the game ignores it")),
+            Some(v) if v.as_u64().is_some_and(|n| n > u64::from(modding::MOD_FORMAT)) => {
+                self.warn(file, "format", format!("mod format {v}; this engine reads format {}, so some of it may be ignored", modding::MOD_FORMAT));
+            }
+            _ => {}
+        }
+        if let Some(text) = meta.get("game_version").and_then(Value::as_str) {
+            match (modding::parse_version(text), modding::parse_version(crate::authoring::ENGINE_VERSION)) {
+                (None, _) => self.error(file, "game_version", format!("{text:?} is not a version like \"0.2.0\"; the game ignores it")),
+                (Some(want), Some(have)) if want > have => {
+                    self.warn(file, "game_version", format!("the mod asks for OpenProcyon {text} or newer; this is {}, so it may not work", crate::authoring::ENGINE_VERSION));
+                }
+                _ => {}
+            }
+        }
+        let list = |key: &str| -> Option<Vec<String>> {
+            let items = meta.get(key)?.as_array()?;
+            let strings: Vec<String> = items.iter().filter_map(|x| x.as_str().map(String::from)).collect();
+            (strings.len() == items.len()).then_some(strings)
+        };
+        for key in ["missions", "requires"] {
+            if meta.get(key).is_some() && list(key).is_none() {
+                self.error(file, key, format!("{} is not a list of strings; the game ignores it", meta[key]));
+            }
+        }
+        for id in list("missions").unwrap_or_default() {
+            if !self.dir.join("maps").join(&id).join("mission.json").is_file() {
+                self.warn(file, "missions", format!("'{id}' has no maps/{id}/mission.json in this mod"));
+            }
+        }
+        // `requires`, and what those require, laid under this mod when installed (dependencies first).
+        let own_id = meta.get("id").and_then(Value::as_str).map(String::from).or_else(|| self.dir.file_name().map(|n| n.to_string_lossy().into_owned())).unwrap_or_default();
+        let mut deps: Vec<PathBuf> = vec![];
+        let mut seen: HashSet<String> = HashSet::from([own_id]);
+        let mut wanted: Vec<String> = list("requires").unwrap_or_default();
+        wanted.reverse();
+        let mut order: Vec<&Installed> = vec![];
+        while let Some(id) = wanted.pop() {
+            if !seen.insert(id.clone()) {
+                continue;
+            }
+            match installed.iter().find(|m| m.id == id) {
+                Some(m) => {
+                    order.push(m);
+                    wanted.extend(m.requires.iter().rev().cloned());
+                }
+                None => self.warn(file, "requires", format!("requires mod {id:?}, which is not installed; its files are not part of this check")),
+            }
+        }
+        // Whatever was reached last is the deepest dependency: lay those first.
+        deps.extend(order.iter().rev().map(|m| m.dir.clone()).filter(|d| std::fs::canonicalize(d).ok() != std::fs::canonicalize(self.dir).ok()));
+        deps
+    }
+
+    fn run(&mut self) {
+        let mut files = vec![];
+        modding::walk(self.dir, Path::new(""), &mut files);
+        files.sort();
+        let rel = |p: &PathBuf| p.to_string_lossy().replace('\\', "/");
+        let schemas = crate::authoring::schemas();
+        for f in &files {
+            let name = rel(f);
+            let Some(schema) = schema_of(&name).and_then(|s| schemas.iter().find(|(n, _)| *n == s)).map(|(_, s)| s) else { continue };
+            let Some(mut doc) = crate::data::try_json(&self.dir.join(f)).filter(Value::is_object) else { continue };
+            if !name.starts_with("ships/")
+                && let Some(o) = doc.as_object_mut()
+            {
+                // Merge keywords of any file extended over a sibling.
+                o.remove("extends");
+                o.remove("set");
+            }
+            for (path, known) in unknown_keys(schema, &doc) {
+                let leaf = path.rsplit(['.', '[']).next().unwrap_or(&path).to_string();
+                let best = nearest(&leaf, known.iter().map(String::as_str)).map(String::from);
+                self.with_hint(Level::Warning, &name, &path, format!("unknown key '{leaf}'; the game ignores it"), best.as_deref());
+            }
+        }
+        if self.have_base {
+            self.references(&files);
+        }
+        self.ships(&files);
+        self.missions();
+    }
+
+    /// Gun, bullet, effect and sound names the mod's own files use, against the merged tables and folders. Needs the base.
+    fn references(&mut self, files: &[PathBuf]) {
+        let sounds = sound_stems(&self.root);
+        let fx_exists = |n: &str| self.root.join(format!("fx/{n}.json")).is_file();
+        let mut findings = vec![];
+        let mut fx = |file: &str, path: String, name: Option<&str>, is_sound: bool| {
+            let Some(name) = name.filter(|n| !n.is_empty() && !n.eq_ignore_ascii_case("none")) else { return };
+            let found = if is_sound { sounds.contains(&name.to_lowercase()) } else { fx_exists(name) };
+            if !found {
+                let what = if is_sound { "sound (no sound/**/<name>.ogg)" } else { "effect (no fx/<name>.json)" };
+                findings.push(Finding::in_file(Level::Warning, file, path, format!("'{name}' is not a {what} in the game or the mods")));
+            }
+        };
+        for f in files {
+            let name = f.to_string_lossy().replace('\\', "/");
+            let Some(doc) = crate::data::try_json(&self.dir.join(f)).filter(Value::is_object) else { continue };
+            let s = |v: &Value| v.as_str().map(String::from);
+            if schema_of(&name) == Some("ship.schema.json") {
+                for k in ["explosion_fx", "repair_fx"] {
+                    fx(&name, k.into(), s(&doc[k]).as_deref(), false);
+                }
+                for (i, n) in doc["engine_snd"].as_array().into_iter().flatten().enumerate() {
+                    fx(&name, format!("engine_snd[{i}]"), n.as_str(), true);
+                }
+                for key in ["engines", "wakes"] {
+                    for (i, e) in doc[key].as_array().into_iter().flatten().enumerate() {
+                        fx(&name, format!("{key}[{i}].fx"), e["fx"].as_str(), false);
+                    }
+                }
+                for (label, sec) in doc["sections"].as_object().into_iter().flatten() {
+                    fx(&name, format!("sections.{label}.destruct.fx"), sec["destruct"]["fx"].as_str(), false);
+                    fx(&name, format!("sections.{label}.debris_fx"), sec["debris_fx"].as_str(), false);
+                }
+            } else if name == "data/weapons/guns.json" {
+                for (gun, g) in doc.as_object().into_iter().flatten().filter(|(_, g)| g.is_object()) {
+                    fx(&name, format!("{gun}.MuzzleFlashEffect"), g["MuzzleFlashEffect"].as_str(), false);
+                    fx(&name, format!("{gun}.SoundName"), g["SoundName"].as_str(), true);
+                }
+            } else if name == "data/weapons/bullets.json" {
+                for (bullet, b) in doc.as_object().into_iter().flatten().filter(|(_, b)| b.is_object()) {
+                    for k in ["hit_fx", "bullet_fx"] {
+                        fx(&name, format!("{bullet}.{k}"), b[k].as_str(), false);
+                    }
+                    for (material, list) in b["impact_snd"].as_object().into_iter().flatten() {
+                        for (i, n) in list.as_array().into_iter().flatten().enumerate() {
+                            fx(&name, format!("{bullet}.impact_snd.{material}[{i}]"), n.as_str(), true);
+                        }
+                    }
+                    fx(&name, format!("{bullet}.travel_snd[0]"), b["travel_snd"][0].as_str(), true);
+                    for (material, n) in b["ricochet_snd"].as_object().into_iter().flatten() {
+                        fx(&name, format!("{bullet}.ricochet_snd.{material}"), n.as_str(), true);
+                    }
+                }
+            }
+        }
+        self.out.extend(findings);
+        // Every gun entry the mod touches fires a bullet that exists.
+        let merged = |rel: &str| crate::data::try_json(&self.root.join(rel)).unwrap_or_default();
+        let bullets: Vec<String> = merged("data/weapons/bullets.json").as_object().map(|m| m.keys().cloned().collect()).unwrap_or_default();
+        let guns = merged("data/weapons/guns.json");
+        if let Some(mine) = crate::data::try_json(&self.dir.join("data/weapons/guns.json")).filter(Value::is_object) {
+            for gun in mine.as_object().into_iter().flatten().map(|(k, _)| k).filter(|k| *k != "$schema") {
+                if let Some(bullet) = guns[gun.as_str()]["BulletTypeName_Primary"].as_str().filter(|b| !bullets.iter().any(|x| x == b)) {
+                    let best = nearest(bullet, bullets.iter().map(String::as_str)).map(String::from);
+                    self.with_hint(
+                        Level::Error,
+                        "data/weapons/guns.json",
+                        &format!("{gun}.BulletTypeName_Primary"),
+                        format!("bullet '{bullet}' is not in data/weapons/bullets.json"),
+                        best.as_deref(),
+                    );
+                }
+            }
+        }
+    }
+
+    /// The ships the mod brings or changes: what their sections, mounts and engines name, against the model and the weapon tables.
+    fn ships(&mut self, files: &[PathBuf]) {
+        let ids: BTreeSet<String> = files
+            .iter()
+            .filter_map(|f| {
+                let parts: Vec<_> = f.components().map(|c| c.as_os_str().to_string_lossy().into_owned()).collect();
+                (parts.len() == 3 && parts[0] == "ships" && parts[2] == "ship.json").then(|| parts[1].clone())
+            })
+            .collect();
+        let loaded = self.have_base.then(|| crate::data::try_load_weapons(&self.root));
+        if let Some(Err(e)) = &loaded {
+            let weapons = ["guns", "bullets"].iter().any(|k| self.dir.join(format!("data/weapons/{k}.json")).is_file());
+            if weapons {
+                self.error("data/weapons", "", self.tidy(e));
+            }
+        }
+        for id in ids {
+            let file = format!("ships/{id}/ship.json");
+            let Some(ship) = crate::data::try_json(&self.root.join(&file)).filter(Value::is_object) else { continue };
+            let before = self.out.iter().filter(|f| f.level == Level::Error).count();
+            self.ship_names(&id, &file, &ship);
+            let errors_here = self.out.iter().filter(|f| f.level == Level::Error).count() > before;
+            // What the checks above did not see: whatever else the loader refuses (a wrong type, a bad `crew_nodes` name).
+            if let (false, Some(Ok((guns, _)))) = (errors_here, &loaded)
+                && let Err(e) = crate::data::try_load_class(&self.root, &id, guns)
+            {
+                let message = self.tidy(&e);
+                self.error(&file, "", format!("the game cannot load this ship: {message}"));
+            }
+        }
+    }
+
+    /// An error text of the loader with the folders taken out of its paths (the scratch overlay and the mod), and the
+    /// `(source <path>)` the loader adds to a path it has already named.
+    fn tidy(&self, text: &str) -> String {
+        let mut text = text.replace(&format!("{}/", self.root.display()), "").replace(&format!("{}/", self.dir.display()), "");
+        while let Some(i) = text.find(" (source ") {
+            let Some(len) = text[i..].find(')') else { break };
+            text.replace_range(i..=i + len, "");
+        }
+        text
+    }
+
+    fn ship_names(&mut self, id: &str, file: &str, ship: &Value) {
+        let model_id = ship["model"].as_str().unwrap_or(id);
+        let model_file = format!("ships/{model_id}/model.glb");
+        let facts = std::fs::read(self.root.join(&model_file)).ok().and_then(|b| derive::read(&b));
+        let geometry = ship["geometry"].as_str().unwrap_or(id);
+        // The layers a section may name: a `geometry.json` when there is one, else the model's meshes.
+        let layers: Option<Vec<String>> = crate::data::try_json(&self.root.join(format!("ships/{geometry}/geometry.json")))
+            .and_then(|g| g.as_object().map(|m| m.keys().cloned().collect()))
+            .or_else(|| facts.as_ref().map(|f| f.layers.iter().map(|l| l.name.clone()).collect()));
+        let explicit: Vec<(&String, &Value)> = ship["sections"].as_object().map(|m| m.iter().collect()).unwrap_or_default();
+        let section_layers: Vec<String> = if explicit.is_empty() {
+            facts.iter().flat_map(|f| f.layers.iter()).filter(|l| !l.name.contains("Damage_")).map(|l| l.name.clone()).collect()
+        } else {
+            explicit.iter().filter_map(|(_, s)| s["layer"].as_str().map(String::from)).collect()
+        };
+        if let Some(layers) = &layers {
+            for (label, s) in &explicit {
+                if let Some(layer) = s["layer"].as_str().filter(|l| !layers.contains(&l.to_string())) {
+                    let best = nearest(layer, layers.iter().map(String::as_str)).map(String::from);
+                    self.with_hint(Level::Error, file, &format!("sections.{label}.layer"), format!("layer '{layer}' is not a layer of the model {model_file}"), best.as_deref());
+                }
+            }
+        }
+        let known = |l: &str| section_layers.iter().any(|x| x == l);
+        for (label, s) in &explicit {
+            for (i, adj) in s["adjacent"].as_array().into_iter().flatten().filter_map(Value::as_str).enumerate() {
+                if !known(adj) {
+                    let best = nearest(adj, section_layers.iter().map(String::as_str)).map(String::from);
+                    self.with_hint(
+                        Level::Warning,
+                        file,
+                        &format!("sections.{label}.adjacent[{i}]"),
+                        format!("'{adj}' is the layer of no section; the game ignores it"),
+                        best.as_deref(),
+                    );
+                }
+            }
+        }
+        // `parent_layer` of mounts and engines names a section's layer; anything else leaves them attached to no section.
+        let mut parents = vec![];
+        for (label, g) in ship["guns"].as_object().into_iter().flatten() {
+            parents.push((format!("guns.{label}.parent_layer"), g["parent_layer"].as_str()));
+        }
+        for (i, e) in ship["engines"].as_array().into_iter().flatten().enumerate() {
+            parents.push((format!("engines[{i}].parent_layer"), e["parent_layer"].as_str()));
+        }
+        for (path, parent) in parents {
+            if let Some(l) = parent.filter(|l| !known(l)) {
+                let best = nearest(l, section_layers.iter().map(String::as_str)).map(String::from);
+                self.with_hint(Level::Warning, file, &path, format!("'{l}' is the layer of no section; the mount is attached to none"), best.as_deref());
+            }
+        }
+        // A damaged variant `<A>Damage_<B>` is shown for the section whose layer is `<A>_<B>`; one with no such section never shows.
+        for l in facts.iter().flat_map(|f| f.layers.iter()).filter(|l| l.name.contains("Damage_") && !l.name.contains('.')) {
+            let base = l.name.replacen("Damage_", "_", 1);
+            if !section_layers.iter().any(|s| s.eq_ignore_ascii_case(&base)) {
+                let best = nearest(&base, section_layers.iter().map(String::as_str)).map(String::from);
+                self.with_hint(
+                    Level::Warning,
+                    &model_file,
+                    &l.name,
+                    format!("'{}' is a damaged variant of '{base}', which is the layer of no section, so it is never shown", l.name),
+                    best.as_deref(),
+                );
+            }
+        }
+        // Mounts: the gun, and a hardpoint node for a mount that gives no place.
+        let guns: Option<Vec<String>> = self
+            .have_base
+            .then(|| crate::data::try_json(&self.root.join("data/weapons/guns.json")).and_then(|g| g.as_object().map(|m| m.keys().cloned().collect())).unwrap_or_default());
+        let nodes: Vec<&derive::Point> = facts.iter().flat_map(|f| f.points.iter()).filter(|p| p.kind == "GunPlacement").collect();
+        for (label, g) in ship["guns"].as_object().into_iter().flatten() {
+            if let (Some(guns), Some(gun)) = (&guns, g["gun"].as_str())
+                && !guns.iter().any(|x| x == gun)
+            {
+                let best = nearest(gun, guns.iter().map(String::as_str)).map(String::from);
+                self.with_hint(Level::Error, file, &format!("guns.{label}.gun"), format!("gun '{gun}' is not in data/weapons/guns.json"), best.as_deref());
+            }
+            if g["pos"].is_array() && g["rot"].is_array() {
+                continue;
+            }
+            if facts.is_none() && !self.have_base {
+                continue; // the model may be a retail one this check cannot read
+            }
+            match nodes.iter().find(|p| p.name.eq_ignore_ascii_case(label)) {
+                Some(node) if node.inferred => self.warn(
+                    file,
+                    &format!("guns.{label}"),
+                    format!("the node '{}' of {model_file} is taken as this mount's hardpoint only because its name contains 'mount', 'lancer' or 'turret'; give the node the extra `kind` = \"GunPlacement\" so it does not depend on its name", node.name),
+                ),
+                Some(_) => {}
+                None => {
+                    let like = nodes.iter().find(|p| {
+                        let (a, b) = (p.name.to_lowercase(), label.to_lowercase());
+                        a.contains(&b) || b.contains(&a)
+                    });
+                    let tail = like.map_or_else(String::new, |p| format!(" (the node '{}' only contains the name; the match is by the whole name, ignoring case)", p.name));
+                    self.error(file, &format!("guns.{label}"), format!("has no pos/rot and the model has no hardpoint node named '{label}'{tail}"));
+                }
+            }
+        }
+    }
+
+    /// Every `maps/<id>/` the mod brings, through the mission checker, with the checks only `--check-mod` adds.
+    fn missions(&mut self) {
+        let maps = self.dir.join("maps");
+        let mut ids: Vec<String> =
+            std::fs::read_dir(&maps).into_iter().flatten().flatten().filter(|e| e.path().is_dir()).filter_map(|e| e.file_name().into_string().ok()).collect();
+        ids.sort();
+        let sounds = self.have_base.then(|| sound_stems(&self.root));
+        let models = self.have_base.then(|| model_files(&self.root));
+        for id in ids {
+            let dir = self.root.join("maps").join(&id);
+            let Some(rules) = crate::rules::cli::rules_file(&dir) else { continue };
+            let rules_name = rules.file_name().map_or_else(String::new, |n| n.to_string_lossy().into_owned());
+            let have_sound = |f: &str| sounds.as_ref().is_some_and(|s| s.contains(&f.to_lowercase()));
+            let lookups: Option<(&Path, &dyn Fn(&str) -> bool)> = self.have_base.then_some((self.root.as_path(), &have_sound as &dyn Fn(&str) -> bool));
+            match crate::rules::cli::check_map_in(&dir, lookups) {
+                Ok(found) => self.out.extend(found.into_iter().map(|mut f| {
+                    f.file = format!("maps/{}", f.file);
+                    f
+                })),
+                Err(e) => self.error(&format!("maps/{id}/{rules_name}"), "", e),
+            }
+            let (Some(mission), map) = (crate::data::try_json(&rules), crate::data::try_json(&dir.join("map.json")).unwrap_or_default()) else { continue };
+            let mission_file = format!("maps/{id}/{rules_name}");
+            self.out.extend(unused_definitions(&mission).into_iter().map(|f| f.with_file(&mission_file)));
+            // Positions inside the playable square (`world_half`, default 1000).
+            let half = map["world_half"].as_f64().unwrap_or(1000.0);
+            let outside = |p: &Value| p.as_array().is_some_and(|p| p.iter().take(2).filter_map(Value::as_f64).any(|v| v.abs() > half));
+            let mut far = vec![];
+            for (i, s) in mission["ships"].as_array().into_iter().flatten().enumerate().filter(|(_, s)| outside(&s["pos"])) {
+                let who = s["name"].as_str().or_else(|| s["type"].as_str()).unwrap_or("ship");
+                far.push((mission_file.clone(), format!("ships[{i}].pos"), format!("{who} is at {} , outside world_half {half}", s["pos"])));
+            }
+            for key in ["objects", "mines"] {
+                for (i, o) in map[key].as_array().into_iter().flatten().enumerate().filter(|(_, o)| outside(&o["pos"])) {
+                    let who = o["type"].as_str().unwrap_or(key);
+                    far.push((format!("maps/{id}/map.json"), format!("{key}[{i}].pos"), format!("{who} is at {} , outside world_half {half}", o["pos"])));
+                }
+            }
+            for (file, path, message) in far {
+                self.warn(&file, &path, message);
+            }
+            // Scenery whose mesh is nowhere: it would be an invisible obstacle.
+            if let Some(models) = &models {
+                for (i, o) in map["objects"].as_array().into_iter().flatten().enumerate() {
+                    if let Some(scene) = o["scene"].as_str().filter(|s| !s.is_empty() && !models.contains(&format!("{s}.glb"))) {
+                        let best = nearest(scene, models.iter().filter_map(|m| m.strip_suffix(".glb"))).map(String::from);
+                        self.with_hint(
+                            Level::Warning,
+                            &format!("maps/{id}/map.json"),
+                            &format!("objects[{i}].scene"),
+                            format!("the scenery model '{scene}.glb' is not under models/ of the game or the mods"),
+                            best.as_deref(),
+                        );
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// The schema file (`authoring::schemas`) that describes the mod file at `rel`, if any.
+fn schema_of(rel: &str) -> Option<&'static str> {
+    match rel {
+        "mod.json" => Some("mod.schema.json"),
+        "data/weapons/guns.json" => Some("guns.schema.json"),
+        "data/weapons/bullets.json" => Some("bullets.schema.json"),
+        "data/crew_nodes.json" => Some("crew_nodes.schema.json"),
+        _ => {
+            let parts: Vec<&str> = rel.split('/').collect();
+            (parts.len() == 3 && parts[0] == "ships" && parts[2] == "ship.json").then_some("ship.schema.json")
+        }
+    }
+}
+
+/// Lower-case names of every `.ogg` under `sound/` and `maps/*/speech/` of `root`: what a sound is looked up by (`audio::sound`).
+fn sound_stems(root: &Path) -> HashSet<String> {
+    let mut files = vec![];
+    modding::walk(&root.join("sound"), Path::new(""), &mut files);
+    for m in std::fs::read_dir(root.join("maps")).into_iter().flatten().flatten() {
+        modding::walk(&m.path().join("speech"), Path::new(""), &mut files);
+    }
+    files.iter().filter(|p| p.extension().is_some_and(|e| e == "ogg")).filter_map(|p| Some(p.file_stem()?.to_str()?.to_lowercase())).collect()
+}
+
+/// File names of every model under `models/` of `root` (`data::model` finds a scenery mesh by its file name).
+fn model_files(root: &Path) -> HashSet<String> {
+    let mut files = vec![];
+    modding::walk(&root.join("models"), Path::new(""), &mut files);
+    files.iter().filter_map(|p| Some(p.file_name()?.to_str()?.to_string())).collect()
+}
+
+/// The keys of `value` that the JSON Schema `root` does not list, as `(path, keys the schema lists there)`, in document order. A path
+/// is `sections.Hull.layer` / `engines[0].fx`. Follows `$ref` into `$defs`; an optional type (`anyOf [T, null]`) is read as the variant
+/// the value fits best. Maps with `additionalProperties` accept any key.
+pub fn unknown_keys(root: &Value, value: &Value) -> Vec<(String, Vec<String>)> {
+    let mut out = vec![];
+    walk(root, root, value, "", &mut out);
+    out
+}
+
+fn walk(root: &Value, node: &Value, value: &Value, at: &str, out: &mut Vec<(String, Vec<String>)>) {
+    if let Some(r) = node["$ref"].as_str() {
+        if let Some(target) = root.pointer(r.trim_start_matches('#')) {
+            walk(root, target, value, at, out);
+        }
+        return;
+    }
+    if let Some(variants) = node["anyOf"].as_array() {
+        let best = variants
+            .iter()
+            .filter(|v| v["type"] != "null")
+            .map(|v| {
+                let mut o = vec![];
+                walk(root, v, value, at, &mut o);
+                o
+            })
+            .min_by_key(Vec::len)
+            .unwrap_or_default();
+        out.extend(best);
+        return;
+    }
+    let child = |key: &str| if at.is_empty() { key.to_string() } else { format!("{at}.{key}") };
+    match (value, node["properties"].as_object()) {
+        (Value::Object(obj), Some(props)) => {
+            for (k, v) in obj {
+                match props.get(k) {
+                    Some(p) => walk(root, p, v, &child(k), out),
+                    None if node["additionalProperties"].is_object() => walk(root, &node["additionalProperties"], v, &child(k), out),
+                    None => out.push((child(k), props.keys().filter(|k| *k != "$schema").cloned().collect())),
+                }
+            }
+        }
+        (Value::Object(obj), None) if node["additionalProperties"].is_object() => {
+            for (k, v) in obj {
+                walk(root, &node["additionalProperties"], v, &child(k), out);
+            }
+        }
+        (Value::Array(items), _) if node.get("items").is_some() => {
+            for (i, v) in items.iter().enumerate() {
+                walk(root, &node["items"], v, &format!("{at}[{i}]"), out);
+            }
+        }
+        _ => {}
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::data::derive::tests::glb;
+    use serde_json::json;
+
+    fn scratch(tag: &str) -> PathBuf {
+        static N: AtomicUsize = AtomicUsize::new(0);
+        let dir = std::env::temp_dir().join(format!("procyon-checkmod-{tag}-{}-{}", std::process::id(), N.fetch_add(1, Ordering::Relaxed)));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    fn put(root: &Path, rel: &str, text: impl AsRef<[u8]>) {
+        let path = root.join(rel);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, text).unwrap();
+    }
+
+    fn put_json(root: &Path, rel: &str, v: Value) {
+        put(root, rel, v.to_string());
+    }
+
+    /// The findings as `file: level path: message` lines (the file and path are the data a tool would use).
+    fn lines(found: &[Finding]) -> Vec<String> {
+        found.iter().map(|f| format!("{}: {:?} {}: {}", f.file, f.level, f.path, f.message)).collect()
+    }
+
+    fn has(found: &[Finding], level: Level, file: &str, path: &str, needle: &str) -> bool {
+        found.iter().any(|f| f.level == level && f.file == file && f.path == path && f.message.contains(needle))
+    }
+
+    fn gun() -> Value {
+        json!({"MuzzleSpeed": 1, "TimeBetweenBursts": 1, "BulletsPerBurst": 1, "DuringBurstReloadTime": 1, "EffectiveRange_Range": 1, "LongRange_Range": 1,
+            "MaximumRange_Range": 1, "EffectiveRange_AccuracyDeviation": 1, "LongRange_AccuracyDeviation": 1, "MaximumRange_AccuracyDeviation": 1, "BulletAffectedByGravity": false,
+            "BulletTypeName_Primary": "B", "visual": {"base": "a", "pivot": [0, 0, 0], "muzzles": [[0, 0, 0]]}, "HorizontalRotationSpeed": 1, "VerticalRotationSpeed": 1,
+            "VerticalMinAngle": 0, "VerticalMaxAngle": 1, "Mount Type": "Medium Mount"})
+    }
+
+    fn bullet() -> Value {
+        json!({"lifetime": 1, "impact_vol": 1, "impact_max": 1, "impact_snd": {"Wood": ["real"]}, "damage": {"Wood": [1, 2, 0, 0, 0]}, "hit_fx": "Real"})
+    }
+
+    /// A model with a hull, a damaged variant of a layer no section has, a node that is a gun mount by its name alone and one that
+    /// merely contains a mount's name.
+    fn small_model(damaged: bool) -> Vec<u8> {
+        let mut bin = vec![];
+        for c in [0.0f32, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 1.0] {
+            bin.extend(c.to_le_bytes());
+        }
+        let json = json!({
+            "asset": {"version": "2.0"}, "scene": 0, "scenes": [{"nodes": [0, 1, 2, 3]}],
+            "buffers": [{"byteLength": bin.len()}], "bufferViews": [{"buffer": 0, "byteLength": bin.len()}],
+            "accessors": [{"bufferView": 0, "componentType": 5126, "count": 3, "type": "VEC3"}],
+            "meshes": [{"primitives": [{"attributes": {"POSITION": 0}}]}],
+            "nodes": [{"name": "Hull", "mesh": 0}, {"name": if damaged { "HullDamage_Two" } else { "Plank" }, "mesh": 0}, {"name": "Turret_1", "translation": [0.0, 1.0, 0.0]}, {"name": "Mount_B_aft", "translation": [0.0, 1.0, 1.0]}]
+        });
+        glb(json, &bin)
+    }
+
+    #[test]
+    fn without_assets_the_mods_own_files_are_checked_and_what_needs_the_game_is_one_notice() {
+        let (dir, mod_dir) = (scratch("noassets"), scratch("noassets-mod"));
+        put_json(
+            &mod_dir,
+            "mod.json",
+            json!({"id": "m", "name": 5, "default": "yes", "game_version": "99.0.0", "format": 2, "requires": ["ghost"], "missions": ["m1", "nope"], "colour": "red"}),
+        );
+        // extends a retail ship (cannot be merged here), a ship with typos, a file that is not JSON
+        put_json(&mod_dir, "ships/Ship_X/ship.json", json!({"extends": "Ship_Retail", "points": 100}));
+        put_json(&mod_dir, "ships/Ship_Y/ship.json", json!({"sigth": 1, "sections": {"Hull": {"layr": "A"}}, "tow": {"tower": [0, 0, 0], "tow": 1}, "engines": [{"lable": "E"}]}));
+        put(&mod_dir, "ships/Ship_Z/ship.json", "not json");
+        put_json(&mod_dir, "data/weapons/guns.json", json!({"$schema": "x", "Gun_A": {"Muzzlespeed": 2, "MuzzleSpeed": 1}}));
+        put_json(&mod_dir, "data/weapons/bullets.json", json!({"B": {"liftime": 1}}));
+        put_json(&mod_dir, "data/crew_nodes.json", json!({"Town": [{"name": "Crew_Walk_A_0", "pos": [0, 0, 0], "pso": 1}]}));
+        let rule = |n: &str| json!({"name": n, "Run Once": true, "conditions": [{"Type": "World Initialize"}], "actions": [{"Type": "OP Wait", "Seconds": 1}]});
+        put_json(
+            &mod_dir,
+            "maps/m1/mission.json",
+            json!({"players": ["P"], "ships": [{"id": 1, "type": "Anything", "group": "P", "pos": [5000, 0, 0]}], "groups": {"Spare": [1]}, "rules": [rule("Twice"), rule("Twice")]}),
+        );
+        put_json(&mod_dir, "maps/m1/map.json", json!({"world_half": 100, "objects": [{"type": "Rock", "scene": "Rock", "pos": [0, -300, 0]}]}));
+        put_json(&mod_dir, "maps/m1/media.json", json!({}));
+        let found = check_mod_with(&mod_dir, None, &[]);
+        let all = lines(&found).join("\n");
+        for (level, file, path, needle) in [
+            (Level::Error, "mod.json", "name", "not a string"),
+            (Level::Error, "mod.json", "default", "not true or false"),
+            (Level::Warning, "mod.json", "game_version", "asks for OpenProcyon 99.0.0 or newer"),
+            (Level::Warning, "mod.json", "format", "mod format 2"),
+            (Level::Warning, "mod.json", "requires", "\"ghost\", which is not installed"),
+            (Level::Warning, "mod.json", "missions", "'nope' has no maps/nope/mission.json"),
+            (Level::Warning, "mod.json", "colour", "unknown key 'colour'"),
+            (Level::Warning, "ships/Ship_Y/ship.json", "sigth", "unknown key 'sigth'"),
+            (Level::Warning, "ships/Ship_Y/ship.json", "sections.Hull.layr", "unknown key 'layr'"),
+            (Level::Warning, "ships/Ship_Y/ship.json", "tow.tow", "unknown key 'tow'"),
+            (Level::Warning, "ships/Ship_Y/ship.json", "engines[0].lable", "unknown key 'lable'"),
+            (Level::Warning, "data/weapons/guns.json", "Gun_A.Muzzlespeed", "unknown key 'Muzzlespeed'"),
+            (Level::Warning, "data/weapons/bullets.json", "B.liftime", "unknown key 'liftime'"),
+            (Level::Warning, "data/crew_nodes.json", "Town[0].pso", "unknown key 'pso'"),
+            (Level::Error, "ships/Ship_Z/ship.json", "", "expected"),
+            (Level::Warning, "maps/m1/mission.json", "", "another rule has the same name"),
+            (Level::Warning, "maps/m1/mission.json", "groups.Spare", "group 'Spare' is defined but no rule uses it"),
+            (Level::Warning, "maps/m1/mission.json", "ships[0].pos", "outside world_half 100"),
+            (Level::Warning, "maps/m1/map.json", "objects[0].pos", "Rock is at"),
+        ] {
+            assert!(has(&found, level, file, path, needle), "missing {level:?} {file} {path} {needle:?} in\n{all}");
+        }
+        let hint = |path: &str| found.iter().find(|f| f.path == path).unwrap().suggestion.clone();
+        assert_eq!((hint("sigth").as_deref(), hint("sections.Hull.layr").as_deref(), hint("Gun_A.Muzzlespeed").as_deref()), (Some("sight"), Some("layer"), Some("MuzzleSpeed")));
+        assert!(!all.contains("/tmp") && !all.contains("(source"), "paths in messages are the mod's own: {all}");
+        // the retail-extending ship is not an error without the game's files; neither are ships, sounds and models
+        assert!(!all.contains("Ship_X"), "{all}");
+        assert!(!all.contains("does not exist"), "{all}");
+        let notices: Vec<_> = found.iter().filter(|f| f.message.contains("no imported assets")).collect();
+        assert_eq!(notices.len(), 1, "{all}");
+        assert!(notices[0].message.contains("1 file(s) that extend a retail file"), "{}", notices[0].message);
+        assert_eq!(found.last().unwrap().message, notices[0].message, "the notice comes last");
+        std::fs::remove_dir_all(dir).unwrap();
+        std::fs::remove_dir_all(mod_dir).unwrap();
+    }
+
+    #[test]
+    fn a_required_mod_that_is_installed_is_laid_under_the_mod() {
+        let (dep, mod_dir) = (scratch("dep"), scratch("dep-mod"));
+        put_json(&dep, "mod.json", json!({"id": "base-pack"}));
+        put_json(&dep, "ships/Ship_Base/ship.json", json!({"core_hp": 10, "points": 5}));
+        put_json(&mod_dir, "mod.json", json!({"id": "m", "requires": ["base-pack"]}));
+        put_json(&mod_dir, "ships/Ship_Child/ship.json", json!({"extends": "Ship_Base", "points": 100}));
+        let installed = [Installed { id: "base-pack".into(), dir: dep.clone(), enabled: false, ..Installed::default() }];
+        let found = check_mod_with(&mod_dir, None, &installed);
+        assert!(!found.iter().any(|f| f.level == Level::Error || f.file == "mod.json"), "{:?}", lines(&found));
+        let alone = check_mod_with(&mod_dir, None, &[]);
+        assert!(has(&alone, Level::Warning, "mod.json", "requires", "base-pack"), "{:?}", lines(&alone));
+        std::fs::remove_dir_all(dep).unwrap();
+        std::fs::remove_dir_all(mod_dir).unwrap();
+    }
+
+    #[test]
+    fn with_assets_names_are_checked_against_the_model_the_weapons_and_the_folders() {
+        let (base, mod_dir) = (scratch("assets"), scratch("assets-mod"));
+        put_json(&base, "data/weapons/guns.json", json!({"Gun": gun()}));
+        put_json(&base, "data/weapons/bullets.json", json!({"B": bullet()}));
+        put(&base, "sound/ship/real.ogg", "x");
+        put(&base, "fx/Real.json", "x");
+        put(&base, "ships/readme.txt", "x");
+        put(&base, "models/scenery/Island.glb", "x");
+        put(&mod_dir, "ships/Ship_M/model.glb", small_model(true));
+        put_json(
+            &mod_dir,
+            "ships/Ship_M/ship.json",
+            json!({
+                "explosion_fx": "Nofx", "engine_snd": ["real", "gone"],
+                "guns": {"Turret_1": {"gun": "Gun", "arc_deg": 60}, "Mount_B": {"gun": "Gunn", "arc_deg": 60}, "Free": {"gun": "Gun", "arc_deg": 1, "pos": [0, 0, 0], "rot": [0, 0, 0], "parent_layer": "Nowhere"}}
+            }),
+        );
+        put_json(
+            &mod_dir,
+            "ships/Ship_S/ship.json",
+            json!({"sections": {"Deck": {"layer": "Hulll", "material": "Wood", "hp": 1, "core_pct": 1, "vital_ship": true, "vital_speed": false, "vital_turn": false, "adjacent": ["Hull", "Ghost"]}}}),
+        );
+        put(&mod_dir, "ships/Ship_S/model.glb", small_model(false));
+        put(&mod_dir, "ships/Ship_Ok/model.glb", small_model(false));
+        put_json(&mod_dir, "ships/Ship_Ok/ship.json", json!({"core_hp": 10}));
+        put(&mod_dir, "ships/Ship_Bad/model.glb", small_model(false));
+        put_json(&mod_dir, "ships/Ship_Bad/ship.json", json!({"core_hp": "lots"}));
+        put_json(
+            &mod_dir,
+            "data/weapons/guns.json",
+            json!({"Gun_New": {"BulletTypeName_Primary": "Bb", "MuzzleFlashEffect": "Nope", "SoundName": "real", "MuzzleSpeed": 1, "TimeBetweenBursts": 1, "BulletsPerBurst": 1, "DuringBurstReloadTime": 1, "EffectiveRange_Range": 1, "LongRange_Range": 1,
+            "MaximumRange_Range": 1, "EffectiveRange_AccuracyDeviation": 1, "LongRange_AccuracyDeviation": 1, "MaximumRange_AccuracyDeviation": 1, "BulletAffectedByGravity": false,
+            "visual": {"pivot": [0, 0, 0], "muzzles": [[0, 0, 0]]}, "HorizontalRotationSpeed": 1, "VerticalRotationSpeed": 1, "VerticalMinAngle": 0, "VerticalMaxAngle": 1}}),
+        );
+        put_json(
+            &mod_dir,
+            "data/weapons/bullets.json",
+            json!({"B2": {"hit_fx": "Real", "impact_snd": {"Wood": ["real", "lost"]}, "lifetime": 1, "impact_vol": 1, "impact_max": 1, "damage": {"Wood": [1, 2, 0, 0, 0]}}}),
+        );
+        put_json(&mod_dir, "maps/m1/mission.json", json!({"players": ["P"], "ships": [{"id": 1, "type": "Ship_Ghost", "group": "P", "pos": [0, 0, 0]}], "rules": []}));
+        put_json(&mod_dir, "maps/m1/map.json", json!({"objects": [{"type": "Island", "scene": "Island", "pos": [0, 0, 0]}, {"type": "Isle", "scene": "Isel", "pos": [0, 0, 0]}]}));
+        put_json(&mod_dir, "maps/m1/media.json", json!({}));
+        let found = check_mod_with(&mod_dir, Some(&base), &[]);
+        let all = lines(&found).join("\n");
+        let m = "ships/Ship_M/ship.json";
+        for (level, file, path, needle) in [
+            (Level::Warning, m, "explosion_fx", "'Nofx' is not a effect"),
+            (Level::Warning, m, "engine_snd[1]", "'gone' is not a sound"),
+            (Level::Warning, m, "guns.Turret_1", "only because its name contains"),
+            (Level::Error, m, "guns.Mount_B", "no hardpoint node named 'Mount_B' (the node 'Mount_B_aft' only contains the name"),
+            (Level::Error, m, "guns.Mount_B.gun", "gun 'Gunn' is not in data/weapons/guns.json (did you mean 'Gun'?)"),
+            (Level::Warning, m, "guns.Free.parent_layer", "'Nowhere' is the layer of no section"),
+            (Level::Warning, "ships/Ship_M/model.glb", "HullDamage_Two", "is a damaged variant of 'Hull_Two'"),
+            (Level::Error, "ships/Ship_S/ship.json", "sections.Deck.layer", "layer 'Hulll' is not a layer of the model ships/Ship_S/model.glb"),
+            (Level::Warning, "ships/Ship_S/ship.json", "sections.Deck.adjacent[1]", "'Ghost' is the layer of no section"),
+            (Level::Error, "ships/Ship_Bad/ship.json", "", "the game cannot load this ship"),
+            (Level::Error, "data/weapons/guns.json", "Gun_New.BulletTypeName_Primary", "bullet 'Bb' is not in data/weapons/bullets.json"),
+            (Level::Warning, "data/weapons/guns.json", "Gun_New.MuzzleFlashEffect", "'Nope' is not a effect"),
+            (Level::Warning, "data/weapons/bullets.json", "B2.impact_snd.Wood[1]", "'lost' is not a sound"),
+            (Level::Error, "maps/m1/mission.json", "ships[0].type", "ship class 'Ship_Ghost' does not exist"),
+            (Level::Warning, "maps/m1/map.json", "objects[1].scene", "the scenery model 'Isel.glb' is not under models/"),
+        ] {
+            assert!(has(&found, level, file, path, needle), "missing {level:?} {file} {path} {needle:?} in\n{all}");
+        }
+        assert!(!all.contains("Ship_Ok"), "a ship that loads has no findings: {all}");
+        assert!(!all.contains("no imported assets"), "{all}");
+        assert!(!all.contains("'real'") && !all.contains("'Real'"), "names that exist are fine: {all}");
+        assert!(!all.contains("'Island.glb'"), "{all}");
+        let ship_m_errors = found.iter().filter(|f| f.level == Level::Error && f.file == m && f.message.contains("cannot load")).count();
+        assert_eq!(ship_m_errors, 0, "the loader is asked only about a ship the other checks found no error in");
+        std::fs::remove_dir_all(base).unwrap();
+        std::fs::remove_dir_all(mod_dir).unwrap();
+    }
+
+    #[test]
+    fn a_folder_that_is_not_there_is_one_error() {
+        let found = check_mod(Path::new("/nonexistent/procyon/mod"), None);
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].level, Level::Error);
+    }
+
+    #[test]
+    fn the_retail_style_mods_of_the_project_have_no_errors_without_assets() {
+        let mods = Path::new(env!("CARGO_MANIFEST_DIR")).join("../mods");
+        for entry in std::fs::read_dir(&mods).unwrap().flatten().filter(|e| e.path().is_dir()) {
+            let found = check_mod_with(&entry.path(), None, &[]);
+            let errors: Vec<_> = lines(&found).into_iter().zip(&found).filter(|(_, f)| f.level == Level::Error).map(|(l, _)| l).collect();
+            assert!(errors.is_empty(), "{}: {errors:#?}", entry.path().display());
+        }
+    }
+}

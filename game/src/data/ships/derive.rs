@@ -17,6 +17,8 @@ pub struct Layer {
 /// A hardpoint in game axes; `yaw` is the heading about the up axis, 0 forward and positive to port (the retail `rot_raw[0]`).
 pub struct Point {
     pub kind: String,
+    /// `kind` was guessed from the node's name (it has no `kind` extra): a node named `Mount` is a gun mount only by that guess.
+    pub inferred: bool,
     pub name: String,
     pub pos: [f64; 3],
     pub yaw: f64,
@@ -72,9 +74,10 @@ fn walk(doc: &Value, bin: &[u8], i: usize, parent: Mat4, out: &mut Facts, depth:
             }
         }
     } else if let Some(kind) = point_kind(n, &name) {
+        let inferred = n["extras"]["kind"].as_str().is_none();
         let (_, rotation, translation) = world.to_scale_rotation_translation();
         let yaw = n["extras"]["rot_raw"][0].as_f64().unwrap_or_else(|| rotation.to_euler(EulerRot::YXZ).0 as f64);
-        out.points.push(Point { kind, name, pos: to_game(translation), yaw });
+        out.points.push(Point { kind, inferred, name, pos: to_game(translation), yaw });
     }
     for c in n["children"].as_array().into_iter().flatten().filter_map(Value::as_u64) {
         walk(doc, bin, c as usize, world, out, depth + 1);
@@ -82,7 +85,7 @@ fn walk(doc: &Value, bin: &[u8], i: usize, parent: Mat4, out: &mut Facts, depth:
 }
 
 /// What a non-mesh node is: its `extras.kind`, else a guess from its name. Nodes that are neither stay unused.
-fn point_kind(n: &Value, name: &str) -> Option<String> {
+pub fn point_kind(n: &Value, name: &str) -> Option<String> {
     if let Some(k) = n["extras"]["kind"].as_str() {
         return Some(k.to_string());
     }
