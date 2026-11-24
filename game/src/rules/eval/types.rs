@@ -431,3 +431,16 @@ pub struct ScriptEnd {
     pub winner_message: Option<String>,
     pub loser_message: Option<String>,
 }
+
+/// What 'Player Killed A Object' counts: the schema's `World Object Type` choice. Anything but "Asteroid" reads as a ship, as the
+/// condition always did (`--check-mission` rejects other spellings).
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub(in crate::rules) enum KillKind {
+    Asteroid,
+    Ship,
+}
+impl KillKind {
+    pub(in crate::rules) fn parse(s: &str) -> KillKind {
+        if s == "Asteroid" { KillKind::Asteroid } else { KillKind::Ship }
+    }
+}
