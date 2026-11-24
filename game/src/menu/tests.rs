@@ -89,6 +89,17 @@ fn skirmish_list_counts_playable_players_like_the_original() {
 }
 
 #[test]
+fn skirmish_row_reads_the_flag_name_assembly_and_playable_slots_of_a_map_leniently() {
+    let map = serde_json::json!({"skirmish": true, "name": "Duel", "assemble": true, "players": [{"playable": true}, {"playable": false}, {}, {"playable": "yes"}, 7, {"playable": true}]});
+    assert_eq!(skirmish_entry("duel".into(), &map), Some(("duel".into(), "Duel".into(), true, 2)));
+    assert_eq!(skirmish_entry("bare".into(), &serde_json::json!({"skirmish": true})), Some(("bare".into(), String::new(), false, 0)));
+    assert_eq!(skirmish_entry("odd".into(), &serde_json::json!({"skirmish": true, "name": 5, "assemble": "x", "players": {}})), Some(("odd".into(), String::new(), false, 0)));
+    assert_eq!(skirmish_entry("no".into(), &serde_json::json!({"name": "x"})), None, "not flagged");
+    assert_eq!(skirmish_entry("no".into(), &serde_json::json!({"skirmish": "true"})), None, "the flag is a JSON boolean");
+    assert_eq!(skirmish_entry("no".into(), &serde_json::json!([1])), None);
+}
+
+#[test]
 #[allow(deprecated)] // Interaction, see pointer.rs
 fn menu_widgets_play_rollover_once_and_their_own_select_sound() {
     let mut app = App::new();

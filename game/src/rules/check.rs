@@ -754,7 +754,7 @@ pub fn unused_definitions(mission: &Value) -> Vec<Finding> {
 /// Warnings for ships the mission places, and scenery and mines `map.json` places, outside the playable square (`world_half`,
 /// default 1000, on x and y). A finding about `map.json` has `file` "map.json"; one about the mission leaves `file` empty.
 pub fn outside_world(mission: &Value, map: &Value) -> Vec<Finding> {
-    let half = map["world_half"].as_f64().unwrap_or(1000.0);
+    let half = crate::data::MapDoc::from_value(map).half();
     let outside = |p: &Value| p.as_array().is_some_and(|p| p.iter().take(2).filter_map(Value::as_f64).any(|v| v.abs() > half));
     let mut out = vec![];
     for (i, s) in mission["ships"].as_array().into_iter().flatten().enumerate().filter(|(_, s)| outside(&s["pos"])) {
