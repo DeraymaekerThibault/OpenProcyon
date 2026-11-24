@@ -3,6 +3,7 @@
 
 pub mod alliance;
 pub mod audio;
+pub mod battle;
 pub mod bindings;
 pub mod blackhole;
 pub mod boarding;
@@ -67,7 +68,6 @@ pub use view::{Orbit, Sky, Slot, camera, hud, input, sky, toggle_debug};
 use bevy::input::mouse::{AccumulatedMouseMotion, AccumulatedMouseScroll};
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
-use collision::sail;
 pub use combat::{GunStates, Health, Library, Target, Transient};
 use std::f32::consts::{PI, TAU};
 use std::path::PathBuf;
@@ -318,12 +318,7 @@ pub fn run(view: fn(&mut App), setup_view: fn(&mut App)) {
             }
             false => default(),
         })
-        .insert_resource(Outcome::Playing)
-        .init_resource::<scenario::EndMessage>()
-        .init_resource::<scenario::EndLine>()
-        .init_resource::<scenario::MapLighting>()
-        .add_systems(Update, scenario::apply_lighting.run_if(resource_changed::<scenario::MapLighting>))
-        .insert_resource(bindings::Bindings::load())
+        .add_plugins((scenario::plugin, bindings::plugin))
         .insert_resource({
             let c: Vec<f32> = arg("--cam").map(|v| v.split(',').filter_map(|x| x.parse().ok()).collect()).unwrap_or_default();
             if c.len() == 3 {
@@ -342,55 +337,9 @@ pub fn run(view: fn(&mut App), setup_view: fn(&mut App)) {
                 Orbit { yaw: 0.6, pitch: 0.5, dist: view::RETAIL_START_DIST, focus: None }
             }
         })
-        .init_resource::<collision::Shapes>()
-        .add_message::<collision::Ram>()
-        .init_resource::<ship::Fleets>()
-        .init_resource::<ship::CaptainTargets>()
-        .init_resource::<course::Plot>()
         .add_systems(Startup, setup)
         .add_plugins((smoke::plugin, battle_schedule, interpolate::plugin, loading::plugin))
-        .add_systems(
-            FixedUpdate,
-            (
-                ship::reconcile_fleets.in_set(BattleSet::Commands),
-                ai.in_set(BattleSet::Ai),
-                ship::fleet_follow.in_set(BattleSet::Fleet),
-                (briefing::halt_arrival, blackhole::pull, sail, out_of_map).chain().in_set(BattleSet::Simulate),
-                outcome.in_set(BattleSet::Outcome),
-            )
-                .run_if(in_state(menu::Screen::Battle))
-                .run_if(menu::overlay_closed),
-        )
-        // The script frame count comes before Update, so the scripts and pictures there each see every frame number once (#590);
-        // `loading::wait` runs before it, so the frame a battle finishes loading counts (else a script step repeats: R restarts again).
-        .add_systems(PreUpdate, screenshot)
-        .add_systems(OnEnter(menu::Screen::Battle), enter_battle)
-        .add_systems(OnExit(menu::Screen::Battle), scenario::reset_fleets)
-        .add_systems(
-            Update,
-            (
-                (
-                    (scripted_steps, restart, debug_kill, scripted_kills).chain(),
-                    briefing::update,
-                    view::fleet_keys,
-                    input,
-                    toggle_debug,
-                    camera,
-                    sky,
-                    wake::update,
-                    blackhole::update,
-                    course::update,
-                    hud,
-                    leave_battle,
-                )
-                    .chain()
-                    .run_if(in_state(menu::Screen::Battle))
-                    .run_if(menu::overlay_closed),
-                view::hd_sky,
-                view::screenshot_key,
-                view::focus_projectile.run_if(in_state(menu::Screen::Battle)),
-            ),
-        )
+        .add_plugins((battle::plugin, course::plugin, view::plugin))
         .run();
     // A system that stopped the run with an error code (`exit::app_exit`) sets the process's status.
     if let AppExit::Error(_) = result {
@@ -448,7 +397,7 @@ pub fn below_floor(p: Vec3) -> bool {
 }
 
 /// After the movement of a tick: moving objects that ended below the floor are queued for removal. Shells test their own step.
-fn out_of_map(mut commands: Commands, movers: Query<(Entity, &Transform), (With<combat::Asteroid>, Without<Removed>)>) {
+pub(crate) fn out_of_map(mut commands: Commands, movers: Query<(Entity, &Transform), (With<combat::Asteroid>, Without<Removed>)>) {
     for (e, tf) in &movers {
         if below_floor(tf.translation) {
             queue_removal(&mut commands, e);
@@ -665,7 +614,7 @@ fn run_is_over(frame: u32, last_shot: u32, saved: usize, wanted: usize, scripted
 
 static SHOTS_SAVED: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 
-fn screenshot(mut commands: Commands, mut cfg: ResMut<Config>, loading: Option<Res<loading::Loading>>, mut exit: MessageWriter<AppExit>) {
+pub(crate) fn screenshot(mut commands: Commands, mut cfg: ResMut<Config>, loading: Option<Res<loading::Loading>>, mut exit: MessageWriter<AppExit>) {
     let Some(path) = cfg.shot.clone() else { return };
     // scripts and pictures count frames of the battle: the count waits while it loads
     if loading.is_some() {

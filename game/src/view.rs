@@ -680,6 +680,11 @@ pub fn object_hit<'a>(
         .min_by(|a, b| a.1.total_cmp(&b.1))
 }
 
+/// Presentation-independent view systems that run outside the battle's ordered chain.
+pub fn plugin(app: &mut App) {
+    app.add_systems(Update, (hd_sky, screenshot_key, focus_projectile.run_if(in_state(menu::Screen::Battle))));
+}
+
 #[cfg(test)]
 mod camera_tests {
     use super::*;
