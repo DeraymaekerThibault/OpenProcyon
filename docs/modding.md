@@ -164,7 +164,7 @@ or map files to schemas once in `.vscode/settings.json`:
 | a picture | `./openprocyon --mod x --map red_rover --ship Ship_Id --shot out.png --shot-frame 300 [--dist D --yaw Y --pitch P]` writes a 1280x720 PNG and exits; a list `--shot-frame 100,300` writes `out_100.png`, `out_300.png`. In a checkout `tools/shot.sh local/x.png` does the same through cargo and checks the picture is not black (`--script damage`, `fxtest`, `victory`, ... stage a situation; the names are listed in `game/src/smoke/mod.rs`) |
 | what the merged files look like | open them in `local/overlay/` (above) |
 | the engine version | `--version` prints `OpenProcyon <version>` and exits, with no window or assets (compare with a mod's `game_version`) |
-| the whole mod | `--check-mod <folder> [--json]` lays the mod (and the mods its `mod.json` `requires`, when installed) over the imported assets in a scratch folder and reports without opening a window. **Errors**: a file the loader skipped (not JSON, `extends` an unknown file, a bad `set` pointer, a texture that is no PNG) with the loader's own message; `mod.json` keys of the wrong type or a `game_version` that is no version; a section whose `layer` is not in the model; a mount with no `pos`/`rot` and no hardpoint node of its name; a `gun` that is not in `guns.json`; a gun's `BulletTypeName_Primary` that is not in `bullets.json`; a ship the game cannot load for any other reason (the loader's message); `data/weapons` tables the game cannot load; a mission with errors (as `--check-mission`, including ship `type`s, sounds and the backdrop). **Warnings**: a key no schema knows (`ship.json` and its nested objects, `guns.json`, `bullets.json`, `crew_nodes`, `mod.json`; with the nearest known key), `game_version` newer than this engine, `format` newer than 1, a `requires` mod that is not installed, a `missions` id with no folder; an `adjacent` or `parent_layer` that is no section's layer; a damaged-variant layer (`<A>Damage_<B>`) no swappable section's layer matches (it is never shown); a hardpoint node that counts as a gun mount only because its name contains `mount`, `lancer` or `turret` (give the node a `kind`); an effect (`fx/<name>.json`) or sound that does not exist; a texture override no model uses; in missions: a group, path, volume or objective point nothing uses, a repeated rule name, a ship, scenery object or mine outside `world_half`, scenery whose `scene` model is not under `models/`. Without imported assets only what the mod's own files show is checked and one warning line says what was skipped. Plain output is `<file>: <level>: <path>: <message>` per finding, then `<mod>: N errors, M warnings`; `--json` prints `{"mod", "engine", "errors", "warnings", "findings": [...]}` with the fields of `authoring::Finding` (`level`, `file`, `path`, `rule`, `rule_index`, `rule_name`, `list`, `item`, `nested`, `at`, `field`, `message`, `suggestion`; indices count from 0). Exit 1 when there are errors, else 0 (2: no folder given). `authoring::check_mod(dir, base)` is the same as a library call |
+| the whole mod | `--check-mod <folder> [--json]` lays the mod (and the mods its `mod.json` `requires`, when installed) over the imported assets in a scratch folder and reports without opening a window. **Errors**: a file the loader skipped (not JSON, `extends` an unknown file, a bad `set` pointer, a keyed-list `merge` mistake, a texture that is no PNG) with the loader's own message; `mod.json` keys of the wrong type or a `game_version` that is no version; a section whose `layer` is not in the model; a mount with no `pos`/`rot` and no hardpoint node of its name; a `gun` that is not in `guns.json`; a gun's `BulletTypeName_Primary` that is not in `bullets.json`; a ship the game cannot load for any other reason (the loader's message); `data/weapons` tables the game cannot load; a mission with errors (as `--check-mission`, including ship `type`s, sounds and the backdrop). **Warnings**: a key no schema knows (`ship.json` and its nested objects, `guns.json`, `bullets.json`, `crew_nodes`, `mod.json`; with the nearest known key), `game_version` newer than this engine, `format` newer than 1, a `requires` mod that is not installed, a `missions` id with no folder; an `adjacent` or `parent_layer` that is no section's layer; a damaged-variant layer (`<A>Damage_<B>`) no swappable section's layer matches (it is never shown); a hardpoint node that counts as a gun mount only because its name contains `mount`, `lancer` or `turret` (give the node a `kind`); an effect (`fx/<name>.json`) or sound that does not exist; a texture override no model uses; in missions: a group, path, volume or objective point nothing uses, a repeated rule name, a keyed `$remove` of an entry the list has not, a ship, scenery object or mine outside `world_half`, scenery whose `scene` model is not under `models/`. Without imported assets only what the mod's own files show is checked and one warning line says what was skipped. Plain output is `<file>: <level>: <path>: <message>` per finding, then `<mod>: N errors, M warnings`; `--json` prints `{"mod", "engine", "errors", "warnings", "findings": [...]}` with the fields of `authoring::Finding` (`level`, `file`, `path`, `rule`, `rule_index`, `rule_name`, `list`, `item`, `nested`, `at`, `field`, `message`, `suggestion`; indices count from 0). Exit 1 when there are errors, else 0 (2: no folder given). `authoring::check_mod(dir, base)` is the same as a library call |
 | mission mistakes | `--check-mission <map id> --mod <dir>`, `--rule-trace`, `--why "<rule>"`, `--fire-rule`, the developer console (`~`); `--dump-rule-schema` needs no assets (all in "Authoring missions" and `docs/missions.md`) |
 | numbers | `PROCYON_TRACE=<file.csv>` writes every ship's position, velocity, heading and section hit points (and, in `<file>.shells.csv`, every shell) once per simulation step: compare a gun's range or a ship's speed with what you meant. `PROCYON_PROFILE=1` logs frame times, for the cost of a look (`docs/development.md`) |
 | logs | the console shows everything; the same text is written to `<user data dir>/logs/openprocyon.log` (the run before is `openprocyon.previous.log`), starting with the version and your arguments and ending with any panic. The overlay's `mod <name> <version> <description>` line and the retail-texture warning are plain console output and may not be in the log file |
@@ -203,8 +203,8 @@ stops the game at launch (`mod <folder>: extends unknown '<parent>'`).
 |---|---|
 | any file with a base path (`hud/sprites/MainBar_PanicButton/Navy/NoCursor.png`, `ships/Ship_X/model.glb`, `fonts/Sans.otf`, `sound/<kind>/*.ogg`) | replaces the base file: texture packs, upscaled art, new fonts, sounds. A replaced retail `model.glb` keeps that ship's retail `geometry.json` (hit meshes) and sections, so a ship that looks different but hits the same |
 | `textures/<retail texture name>.png` | replaces that retail texture in every `ships/` and `models/` model of the overlay that uses it, with no model shipped (see "Replacing a retail texture by name") |
-| `ships/<Id>/ship.json` containing `"extends": "Ship_Navy_Cutter"` | deep-merged over that ship: object keys override one by one, arrays and scalars replace; a new ship is a few lines (see `mods/silver-skirmish`) |
-| an `extends` file may also carry `"set": {"/engines/0/fx": "X"}` (JSON pointers, applied after the merge) to change one value inside an array, which a merge cannot do; a pointer that does not exist stops the game at launch (`mod <folder>: <file> sets '<pointer>', which does not exist`). `mods/faction-colors` uses it to point a ship's four engines at recoloured effect copies |
+| `ships/<Id>/ship.json` containing `"extends": "Ship_Navy_Cutter"` | deep-merged over that ship: object keys override one by one, arrays and scalars replace (except the keyed lists of a map or mission, below); a new ship is a few lines (see `mods/silver-skirmish`) |
+| an `extends` file may also carry `"set": {"/engines/0/fx": "X"}` (JSON pointers, applied after the merge, keyed lists included) to change one value inside an array, which a merge cannot do; a pointer that does not exist stops the game at launch (`mod <folder>: <file> sets '<pointer>', which does not exist`). `mods/faction-colors` uses it to point a ship's four engines at recoloured effect copies |
 | `data/collision.json` | merged key by key: a new scenery type's collision (an entry per `type` a map's `objects` name, layout in `docs/data-format.md`), so a mod's own island or rock blocks ships and shells. Without an entry the model is drawn but nothing collides with it |
 | `data/docks.json` | merged key by key: `{"<scenery type>": {"points": [{"label", "pos", "yaw"}], "tender": true}}` (layout in `docs/data-format.md`), so a mod's own base or island gets dock points; scenery no rule owns is dockable by the player's side like a retail island |
 | `data/crew_nodes.json` | merged key by key: `{"<scenery type>": [{"name": "Crew_Walk_A_0", "pos": [x, y, z], "rot": [..]}]}`, the crew places of map scenery (a town's lanes, posts and work places) with no model change; same entries and rules as a ship's `crew_nodes` ("A ship from a model"). A type's list is an array, so a later mod's list for a type replaces an earlier one. Drawn only by a render profile's `deckhands` block |
@@ -227,6 +227,45 @@ Limits (provisional):
 - Computer captains fit only the guns retail computers were seen to fit (carronades, Gattling, plasma, light/medium cannons, star mortar) unless a mod ships `data/ai/weapons.json` (`{"Gun_Name": true|false}`, merged the same way) to restrict or extend what they may pick.
 - A mod may ship sounds of its own under `sound/`, found by name ("Sounds and music" below).
 - The full layout of every file is in `docs/data-format.md`.
+
+### Changing one entry of a list
+
+A list of a map or mission whose entries have a stable key is not replaced by an `extends` file but merged by that key, so a mod can
+move one island, add a ship or drop a rule without copying the whole list (retail data cannot be shipped). The keyed lists are:
+`maps/<id>/map.json` `objects`, `ships` and `mines` by `id`, `nebulae` and `players` by `name`; `maps/<id>/mission.json` `ships` by
+`id`, `rules` by `name`, `points` by `Name`; a skirmish `script.json` `rules` by `name`. Every other list (a rule's `actions`, a ship's
+`engines`, any list of another file) replaces whole, as before. This is a change from earlier versions, where these lists were
+replaced whole; there is nothing to migrate.
+
+- An entry whose key the base list has is deep-merged into that entry: objects combine key by key, anything else (lists inside it
+  included) replaces. Entries you do not mention keep their place and order.
+- An entry with a new key is appended, in the order you wrote it.
+- `{"id": 7, "$remove": true}` removes the entry (PROVISIONAL spelling, the maintainer confirms it). Removing a key the list has not is a
+  warning, not an error.
+- `set` runs after this, so its pointers count the list as merged.
+- `"merge": {"/objects": false}` makes a keyed list replace whole after all; `"merge": {"/crew_nodes": "name"}` keys any other list
+  of an `extends` file (PROVISIONAL; also lists of other files). `merge` is dropped from the result like `set`.
+
+Why a sibling `merge` key and a `$remove` entry: they follow the `extends` / `set` style (one reserved key next to the data, one
+reserved marker inside an entry) and need no second file or special array syntax.
+
+Worked example on a made-up map `maps/lagoon/map.json`, whose base has objects `{"id": 1, "type": "Rock", "pos": [0,0,0]}`,
+`{"id": 2, "type": "Reef", ...}` and `{"id": 3, "type": "Buoy", ...}`:
+
+```json
+{
+  "extends": "lagoon",
+  "objects": [
+    {"id": 2, "pos": [6, 6, 0]},
+    {"id": 3, "$remove": true},
+    {"id": 9, "type": "Wreck", "pos": [20, 4, 0]}
+  ]
+}
+```
+
+Result: object 1 unchanged, object 2 moved (its `type` kept), object 3 gone, object 9 added at the end. Errors, which skip the file
+(`--check-mod` reports them with the file and the pointer, `merges '/objects': ...`): an entry without its key, two base entries with
+the same key (the list cannot be merged: use `"merge": {"/objects": false}`), a key field that no entry has, a value that is not a list.
 
 ## Engine extensions (not retail)
 
