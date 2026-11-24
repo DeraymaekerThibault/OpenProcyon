@@ -144,7 +144,7 @@ impl Action {
 }
 
 /// Pages of the retail in-game menu (Esc): the menu itself and the Load / Save lists (InGameMenu_Default / _Load_Campaign.tst).
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum Page {
     Menu,
     Load,
@@ -157,16 +157,47 @@ pub enum Page {
     Summary,
 }
 /// The in-game menu is an overlay on the running battle (not a `Screen`), so the battle stays loaded; it pauses the simulation.
-#[derive(Resource, Default)]
-pub struct InGame {
-    page: Option<Page>,
-    paused_by_us: bool,
+/// A sub-state of `Screen::Battle`: it exists only there and starts closed. A change set this frame takes effect next frame.
+#[derive(SubStates, Clone, Copy, PartialEq, Eq, Hash, Debug, Default)]
+#[source(Screen = Screen::Battle)]
+pub enum Overlay {
+    #[default]
+    Closed,
+    Open(Page),
 }
-impl InGame {
-    pub fn page(&self) -> Option<Page> {
-        self.page
+impl Overlay {
+    pub fn page(self) -> Option<Page> {
+        match self {
+            Overlay::Closed => None,
+            Overlay::Open(p) => Some(p),
+        }
+    }
+    /// The page Esc leads to from `page` (None: closed): open -> Menu, Menu -> closed, Controls / Audio / Display -> Options, others -> Menu.
+    pub fn after_esc(page: Option<Page>) -> Overlay {
+        match page {
+            None => Overlay::Open(Page::Menu),
+            Some(Page::Menu) => Overlay::Closed,
+            Some(Page::Controls | Page::Audio | Page::Display) => Overlay::Open(Page::Options),
+            Some(_) => Overlay::Open(Page::Menu),
+        }
     }
 }
+/// Reads the open page of the in-game menu: `None` when closed or outside a battle.
+#[derive(bevy::ecs::system::SystemParam)]
+pub struct InGame<'w> {
+    state: Option<Res<'w, State<Overlay>>>,
+}
+impl InGame<'_> {
+    pub fn changed(&self) -> bool {
+        self.state.as_ref().is_some_and(|s| s.is_changed())
+    }
+    pub fn page(&self) -> Option<Page> {
+        self.state.as_ref().and_then(|s| s.get().page())
+    }
+}
+/// Whether the in-game menu paused the simulation (so closing it resumes; a battle paused by the console or the player stays paused).
+#[derive(Resource, Default)]
+pub struct PausedByMenu(bool);
 /// What the retail screen files' button elements (`menu/<screen>.json`, by their `impl` name) do in this engine.
 #[derive(Clone)]
 pub enum RetailButton {
@@ -247,12 +278,12 @@ fn enabled_if(on: bool, action: Action) -> RetailButton {
 }
 
 /// Run condition: no in-game menu is open (battle input systems use it so the menu does not click through).
-pub fn overlay_closed(ig: Res<InGame>) -> bool {
-    ig.page.is_none()
+pub fn overlay_closed(ig: InGame) -> bool {
+    ig.page().is_none()
 }
 /// The front end, or the in-game menu over a battle.
-pub fn menu_active(state: Res<State<Screen>>, ig: Res<InGame>) -> bool {
-    *state.get() != Screen::Battle || ig.page.is_some()
+pub fn menu_active(state: Res<State<Screen>>, ig: InGame) -> bool {
+    *state.get() != Screen::Battle || ig.page().is_some()
 }
 
 /// Control Options screen: first visible row and the row waiting for a key press.
@@ -364,7 +395,8 @@ pub fn plugin(app: &mut App) {
         .add_systems(OnEnter(Screen::Main), start_music)
         .add_systems(Update, follow_music_volume)
         .insert_resource(SaveUi { list: crate::campaign::list_saves(), ..default() })
-        .init_resource::<InGame>()
+        .add_sub_state::<Overlay>()
+        .init_resource::<PausedByMenu>()
         .init_resource::<ScrollTo>()
         .init_resource::<CtrlUi>()
         .insert_resource(Settings::load())
@@ -442,7 +474,7 @@ pub fn strings() -> &'static Value {
 #[derive(SystemParam)]
 pub struct MenuModel<'w> {
     pub sk: Res<'w, Skirmish>,
-    pub ig: Res<'w, InGame>,
+    pub ig: InGame<'w>,
     pub saves: Res<'w, SaveUi>,
     pub binds: Res<'w, Bindings>,
     pub ctrl: Res<'w, CtrlUi>,
@@ -574,7 +606,7 @@ impl MenuModel<'_> {
     /// Whether anything `key` reads was touched this frame; when not, the key (a large formatted string) cannot have changed.
     pub fn changed(&self) -> bool {
         self.sk.is_changed()
-            || self.ig.is_changed()
+            || self.ig.changed()
             || self.saves.is_changed()
             || self.binds.is_changed()
             || self.ctrl.is_changed()
@@ -598,7 +630,7 @@ impl MenuModel<'_> {
             window.height() as u32,
             format!(
                 "{:?}|{:?}|{}|{:?}|{}|{}|{}|{:?}|{:?}|{:?}|{}|{}|{}",
-                self.ig.page,
+                self.ig.page(),
                 ui.selected,
                 ui.name,
                 ui.status,
@@ -611,7 +643,7 @@ impl MenuModel<'_> {
                 sk.flag_picker,
                 sk.map_scroll,
                 sk.slot_scroll
-            ) + &if self.ig.page == Some(Page::Summary) { self.stats.table() } else { String::new() },
+            ) + &if self.ig.page() == Some(Page::Summary) { self.stats.table() } else { String::new() },
         )
     }
 }
@@ -671,7 +703,7 @@ fn esc_menu(
     mission: Option<Res<crate::campaign::Mission>>,
     keys: Res<ButtonInput<KeyCode>>,
     cfg: Res<crate::Config>,
-    mut ig: ResMut<InGame>,
+    (ig, mut paused, mut next): (InGame, ResMut<PausedByMenu>, ResMut<NextState<Overlay>>),
     mut ui: ResMut<SaveUi>,
     mut vtime: ResMut<Time<Virtual>>,
     mut commands: Commands,
@@ -691,17 +723,19 @@ fn esc_menu(
     });
     if let Some(Some(page)) = scripted {
         ui.open();
-        (ig.paused_by_us, ig.page) = (!vtime.is_paused(), Some(page));
+        (paused.0, *next) = (!vtime.is_paused(), NextState::Pending(Overlay::Open(page)));
         vtime.pause();
     } else if keys.just_pressed(KeyCode::Escape) {
-        match ig.page {
-            None => (ig.paused_by_us, ig.page) = (!vtime.is_paused(), Some(Page::Menu)),
-            Some(Page::Menu) => close_overlay(&mut commands, &roots, &mut ig, &mut vtime),
-            Some(Page::Controls | Page::Audio | Page::Display) => ig.page = Some(Page::Options),
-            Some(_) => ig.page = Some(Page::Menu),
-        }
-        if ig.page.is_some() {
-            vtime.pause();
+        let target = Overlay::after_esc(ig.page());
+        match target {
+            Overlay::Closed => close_overlay(&mut commands, &roots, &mut paused, &mut next, &mut vtime),
+            Overlay::Open(_) => {
+                if ig.page().is_none() {
+                    paused.0 = !vtime.is_paused();
+                }
+                next.set(target);
+                vtime.pause();
+            }
         }
     }
 }
@@ -711,7 +745,7 @@ fn esc_menu(
 fn summary_on_end(
     mission: Option<Res<crate::campaign::Mission>>,
     out: Res<crate::scenario::Outcome>,
-    mut ig: ResMut<InGame>,
+    (mut paused, mut next): (ResMut<PausedByMenu>, ResMut<NextState<Overlay>>),
     mut vtime: ResMut<Time<Virtual>>,
     mut waited: Local<f32>,
 ) {
@@ -722,19 +756,19 @@ fn summary_on_end(
     let before = *waited;
     *waited += vtime.delta_secs();
     if before < crate::scenario::END_LINE_SECS && *waited >= crate::scenario::END_LINE_SECS {
-        (ig.paused_by_us, ig.page) = (!vtime.is_paused(), Some(Page::Summary));
+        (paused.0, *next) = (!vtime.is_paused(), NextState::Pending(Overlay::Open(Page::Summary)));
         vtime.pause();
     }
 }
 
-fn close_overlay(commands: &mut Commands, roots: &Query<Entity, With<MenuRoot>>, ig: &mut InGame, vtime: &mut Time<Virtual>) {
+fn close_overlay(commands: &mut Commands, roots: &Query<Entity, With<MenuRoot>>, paused: &mut PausedByMenu, next: &mut NextState<Overlay>, vtime: &mut Time<Virtual>) {
     for e in roots {
         commands.entity(e).despawn();
     }
-    if ig.paused_by_us {
+    if std::mem::take(&mut paused.0) {
         vtime.unpause();
     }
-    *ig = InGame::default();
+    next.set(Overlay::Closed);
 }
 
 /// While a Control Options row waits for a key: the next bindable key press rebinds it (Esc cancels, and is not seen by the in-game menu).
