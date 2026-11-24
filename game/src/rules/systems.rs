@@ -43,6 +43,8 @@ struct Extra<'w, 's> {
         (Entity, &'static mut MissionBase, &'static Transform, Option<(&'static crate::combat::ArmedBase, &'static Health)>),
         (Without<Ship>, Without<crate::environment::SpaceAnimal>),
     >,
+    /// Not retail: the mines a custom mission's map places (`mines`), which its rules hand to players and address by group.
+    mines: apply::Mines<'w, 's>,
     dock: MessageWriter<'w, DockMsg>,
     /// Non-empty while the player's ship is running a dock sequence.
     docking_player: Query<'w, 's, (), (With<PlayerShip>, With<crate::docking::Docker>)>,
@@ -65,6 +67,8 @@ struct Extra<'w, 's> {
     meteors: MessageWriter<'w, crate::nebula::MeteorRoute>,
     storm_shift: Res<'w, crate::nebula::StormShift>,
     campaign_points: ResMut<'w, crate::campaign::CampaignPoints>,
+    /// Not retail: what a won custom mission hands on to the next one (`OP Set Campaign Counter`).
+    campaign_values: Option<ResMut<'w, crate::campaign::CampaignValues>>,
     sensors: Res<'w, crate::environment::Sensors>,
     voices: Query<'w, 's, Entity, With<crate::briefing::Voice>>,
     fxlib: Option<Res<'w, crate::fx::FxLib>>,
@@ -94,6 +98,7 @@ pub fn plugin(app: &mut App) {
     use crate::menu::Screen;
     app.add_plugins(dev_console::plugin)
         .insert_resource(crate::campaign::CampaignPoints::load())
+        .init_resource::<crate::campaign::CampaignValues>()
         .init_resource::<RuleInput>()
         .add_systems(
             FixedUpdate,
@@ -133,6 +138,10 @@ pub struct RuleShip {
     pub primary: Has<PlayerShip>,
     /// Its interpolation: rules see the simulation pose (`RuleShip::sim_pos`), not the drawn one.
     pub interp: Option<&'static crate::interpolate::Interp>,
+    /// Fully cloaked ships answer `OP Group Is Cloaked`.
+    pub cloak: Option<&'static crate::cloak::Cloak>,
+    /// Not retail: the crew was ordered off by `OP Abandon Ship` (lifeboats.rs).
+    pub abandoned: Has<crate::lifeboats::Abandoned>,
 }
 
 /// The simulation position of a ship whose drawn pose is `tf` (interpolated between ticks when it has an `Interp`).
@@ -143,7 +152,7 @@ pub fn sim_pos(tf: &Transform, interp: Option<&crate::interpolate::Interp>) -> V
 fn units(ships: &Query<RuleShip>, lib: &Library) -> Vec<Unit> {
     ships
         .iter()
-        .map(|RuleShipReadOnlyItem { entity: e, ship, transform: tf, health: h, mission: m, primary, interp, .. }| {
+        .map(|RuleShipReadOnlyItem { entity: e, ship, transform: tf, health: h, mission: m, primary, interp, cloak, .. }| {
             let class = &lib.classes[ship.class];
             let secs =
                 if h.sections.is_empty() { 0.0 } else { h.sections.iter().zip(&class.sections).map(|(x, c)| 1.0 - x / c.hp.max(1.0)).sum::<f32>() / h.sections.len() as f32 };
@@ -156,6 +165,9 @@ fn units(ships: &Query<RuleShip>, lib: &Library) -> Vec<Unit> {
                 damage: (1.0 - h.core / class.core_hp).max(secs).clamp(0.0, 1.0),
                 flag: m.flag.clone(),
                 attack: m.attack.clone(),
+                heading: ship.heading,
+                speed: Some(ship.speed.abs()),
+                cloaked: cloak.is_some_and(|c| c.state == crate::cloak::State::Full),
                 ..Unit::new(e, m.id, sim_pos(tf, interp))
             }
         })
@@ -195,6 +207,9 @@ fn update(
     world.extend(animals.iter().map(|(e, a, tf, _)| a.unit(e, tf)));
     world.extend(extra.bases.iter_mut().map(|(e, b, tf, armed)| b.unit(e, tf, armed.map_or(0.0, |(a, h)| crate::combat::base_mission_damage(&lib.classes[a.class], h)))));
     world.extend(rocks.iter().map(|(e, tf, a)| a.unit(e, tf)));
+    // Not retail: a mission's mines answer to an explicit group (their world-object ids) only, never to their owner's name: a faction
+    // whose ships are all gone is destroyed although its mines rest, and owner-wide orders do not reach them.
+    world.extend(extra.mines.iter().map(|(e, tf, m, _)| Unit { owner: GroupName::default(), ..m.unit(e, tf) }));
     mission.script.tag(&mut world);
     let owner_of = |e: Entity| world.iter().find(|u| u.e == e).map(|u| u.owner.to_string());
     for h in hits.read() {
@@ -235,6 +250,11 @@ fn update(
         ));
     }
     apply_fx(fxs, mission, &mut commands, &mut ships, &mut animals, &mut extra, &mut orbit, &lib);
+    if let Some(values) = mission.script.campaign_commit()
+        && let Some(handed_on) = extra.campaign_values.as_mut()
+    {
+        handed_on.commit(&mission.id, values);
+    }
     // Mission 1's refit task: a hint while the weapons tender is in range (docking itself is docking.rs; D is a keyboard shortcut).
     // `world` is last frame-start's snapshot: good enough for a hint and the dev autopilot.
     mission.script.hint.clear();
@@ -284,7 +304,7 @@ fn apply_fx(
         difficulty: extra.difficulty.as_deref().copied().unwrap_or_default().0,
         orbit: Some(orbit),
         sides: None,
-        mines: None,
+        mines: Some(&mut extra.mines),
     };
     apply::apply(fxs, &mut env, commands, ships, animals);
 }

@@ -522,6 +522,12 @@ pub fn spawn(commands: &mut Commands, assets: &AssetServer, data: &Value, whales
 #[derive(Component)]
 pub struct Current {
     path: Vec<Vec3>,
+    /// Not retail: the mission rule `OP Etherium Current` names a current by its path, sets its strength (a multiple of `CURRENT_FORCE`) and
+    /// its lane (`radius`, half the width), and switches it off. A retail current has no name, strength 1, `CURRENT_RADIUS` and is on.
+    name: String,
+    strength: f32,
+    radius: f32,
+    on: bool,
 }
 pub const CURRENT_FORCE: f32 = 25000.0;
 pub const CURRENT_RADIUS: f32 = 60.0;
@@ -529,9 +535,30 @@ impl Current {
     /// Flows from the first authored point toward the last: in Mission 4 Nelson's fleet leaves "to the frontier" along the current
     /// on 'Nelson exit route', which runs the same way as 'Mucullough path'.
     pub fn new(path: Vec<Vec3>) -> Self {
-        Current { path }
+        Current { path, name: String::new(), strength: 1.0, radius: CURRENT_RADIUS, on: true }
+    }
+    /// Not retail: the current the mission rule `OP Etherium Current` finds again by the name of its path.
+    pub fn named(mut self, name: &str) -> Self {
+        self.name = name.into();
+        self
+    }
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+    /// Not retail: `strength` multiplies the force, `width` is the lane's full width (twice the radius) and `on` switches the push and the
+    /// ribbon; `None` leaves that setting as it is.
+    pub fn set(&mut self, strength: Option<f32>, width: Option<f32>, on: Option<bool>) {
+        self.strength = strength.map_or(self.strength, |s| s.max(0.0));
+        self.radius = width.map_or(self.radius, |w| (w / 2.0).max(0.0));
+        self.on = on.unwrap_or(self.on);
+    }
+    pub fn is_on(&self) -> bool {
+        self.on
     }
     pub fn force(&self, p: Vec3) -> Vec3 {
+        if !self.on {
+            return Vec3::ZERO;
+        }
         let flat = |v: Vec3| Vec2::new(v.x, v.z);
         let q = flat(p);
         self.path
@@ -541,10 +568,10 @@ impl Current {
                 let ab = b - a;
                 let t = ((q - a).dot(ab) / ab.length_squared().max(1e-6)).clamp(0.0, 1.0);
                 let d = q.distance(a + ab * t);
-                (d < CURRENT_RADIUS).then_some((d, ab.normalize_or_zero()))
+                (d < self.radius).then_some((d, ab.normalize_or_zero()))
             })
             .min_by(|a, b| a.0.total_cmp(&b.0))
-            .map_or(Vec3::ZERO, |(_, dir)| Vec3::new(dir.x, 0.0, dir.y) * CURRENT_FORCE)
+            .map_or(Vec3::ZERO, |(_, dir)| Vec3::new(dir.x, 0.0, dir.y) * (CURRENT_FORCE * self.strength))
     }
 }
 
@@ -552,7 +579,13 @@ impl Current {
 pub struct CurrentRibbon(pub f32);
 
 /// RiverPrimitive consumes a whole point path and width, not a particle emitter.
+#[cfg(test)]
 fn current_mesh(path: &[Vec3]) -> Mesh {
+    current_mesh_of(path, CURRENT_RADIUS)
+}
+
+/// `current_mesh` for a lane of the given radius (`OP Etherium Current` sets one).
+fn current_mesh_of(path: &[Vec3], radius: f32) -> Mesh {
     use bevy::asset::RenderAssetUsages;
     use bevy::mesh::{Indices, PrimitiveTopology};
     let mut positions = Vec::new();
@@ -563,10 +596,10 @@ fn current_mesh(path: &[Vec3]) -> Mesh {
         let before = path[i.saturating_sub(1)];
         let after = path[(i + 1).min(path.len() - 1)];
         let direction = (after - before).with_y(0.0).normalize_or(Vec3::NEG_Z);
-        let side = Vec3::new(-direction.z, 0.0, direction.x) * CURRENT_RADIUS;
+        let side = Vec3::new(-direction.z, 0.0, direction.x) * radius;
         distance += p.distance(before);
         positions.extend([(*p - side).to_array(), (*p + side).to_array()]);
-        uv.extend([[0.0, distance / (CURRENT_RADIUS * 4.0)], [1.0, distance / (CURRENT_RADIUS * 4.0)]]);
+        uv.extend([[0.0, distance / (radius * 4.0)], [1.0, distance / (radius * 4.0)]]);
         if i > 0 {
             let k = (2 * i) as u32;
             indices.extend([k - 2, k, k - 1, k - 1, k, k + 1]);
@@ -586,12 +619,17 @@ fn current_fx(
     assets: Res<AssetServer>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<crate::fx::EffectMaterial>>,
-    added: Query<(Entity, &Current), Added<Current>>,
+    changed: Query<(Entity, &Current), Changed<Current>>,
+    // Not retail: a current the mission rules changed (`OP Etherium Current`) gets its ribbons built again, hidden when it is off.
+    ribbons: Query<(Entity, &ChildOf), With<CurrentRibbon>>,
 ) {
     use bevy::image::{ImageAddressMode, ImageLoaderSettings, ImageSampler, ImageSamplerDescriptor};
-    for (e, c) in &added {
+    for (e, c) in &changed {
         if c.path.len() < 2 {
             continue;
+        }
+        for (ribbon, _) in ribbons.iter().filter(|(_, parent)| parent.parent() == e) {
+            commands.entity(ribbon).despawn();
         }
         let texture = assets
             .load_builder()
@@ -599,7 +637,7 @@ fn current_fx(
                 s.sampler = ImageSampler::Descriptor(ImageSamplerDescriptor { address_mode_v: ImageAddressMode::Repeat, ..ImageSamplerDescriptor::linear() });
             })
             .load("fx/tex/current.png");
-        let mesh = meshes.add(current_mesh(&c.path));
+        let mesh = meshes.add(current_mesh_of(&c.path, c.radius));
         for (layer, speed) in [0.15, 0.25].into_iter().enumerate() {
             commands.spawn((
                 Mesh3d(mesh.clone()),
@@ -610,7 +648,7 @@ fn current_fx(
                 ChildOf(e),
             ));
         }
-        commands.entity(e).insert((Transform::default(), Visibility::default()));
+        commands.entity(e).insert((Transform::default(), if c.on { Visibility::Inherited } else { Visibility::Hidden }));
     }
 }
 

@@ -113,13 +113,14 @@ pub(super) fn burn(
     mut rng: ResMut<SimRng>,
     difficulty: Res<crate::scenario::Difficulty>,
     (mut sfx, mut hits, mut scars): (MessageWriter<Sfx>, MessageWriter<Hit>, MessageWriter<crate::decals::Scar>),
-    mut shooters: Query<(Entity, &Transform, &Ship, &mut GunStates)>,
+    // Not retail: an abandoned hull (`OP Abandon Ship`) stops its beams like a sunk one (`fire` no longer runs their cycle).
+    mut shooters: Query<(Entity, &Transform, &Ship, &mut GunStates, Has<crate::lifeboats::Abandoned>)>,
     mut ships: ShipTargets,
 ) {
     let dt = time.delta_secs();
-    for (me, tf, ship, mut states) in crate::scenario::in_spawn_order(&spawn_order, shooters.iter_mut(), |x| x.0) {
+    for (me, tf, ship, mut states, abandoned) in crate::scenario::in_spawn_order(&spawn_order, shooters.iter_mut(), |x| x.0) {
         let class = &lib.classes[ship.class];
-        let sunk = ships.get(me).is_ok_and(|s| s.3.destroyed);
+        let sunk = abandoned || ships.get(me).is_ok_and(|s| s.3.destroyed);
         for (mount, state) in class.mounts.iter().zip(states.0.iter_mut()) {
             let gun = &lib.guns[&state.gun];
             let Some(def) = &gun.beam else { continue };

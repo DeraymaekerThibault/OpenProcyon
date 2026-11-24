@@ -130,6 +130,9 @@ impl Looks {
     }
 }
 
+/// The theme file's place in the asset root (the shipped one is overlaid there, a mod replaces it).
+const THEME_FILE: &str = "data/hud/theme.json";
+
 /// The shipped `content/data/hud/theme.json`, compiled in: the one place the default numbers live.
 const SHIPPED: &str = include_str!("../../content/data/hud/theme.json");
 
@@ -244,13 +247,42 @@ impl Theme {
     /// The theme of the loaded assets (`data/hud/theme.json`, overlaid by mods), read once per process; the defaults without the file.
     pub fn current() -> &'static Theme {
         static T: std::sync::OnceLock<Theme> = std::sync::OnceLock::new();
-        T.get_or_init(|| crate::data::try_json(&crate::assets_dir().join("data/hud/theme.json")).map(|v| Theme::from_json(&v)).unwrap_or_default())
+        T.get_or_init(|| Self::from_files(&crate::assets_dir().join(THEME_FILE), Some(&crate::base_assets().join(THEME_FILE))))
+    }
+
+    /// The theme in `path`, over the shipped defaults. A file that is present but not JSON (or not an object) is reported with its
+    /// file and mod and the base file's theme is used instead, else the shipped one; a wrong value inside is skipped key by key,
+    /// as `from_json_over` always did (a mod's theme names only what it changes).
+    fn from_files(path: &std::path::Path, base: Option<&std::path::Path>) -> Theme {
+        match crate::data::load_or_base::<serde_json::Map<String, Value>>(path, base, "the shipped theme is used") {
+            Some(map) => Theme::from_json(&Value::Object(map)),
+            None => Theme::default(),
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_bad_theme_file_is_reported_and_the_shipped_theme_stays() {
+        let dir = std::env::temp_dir().join(format!("procyon-theme-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let shipped = Theme::default();
+        assert_eq!(Theme::from_files(&dir.join("absent.json"), None), shipped, "no file: the defaults");
+        for (name, text) in [("syntax", "rim_width: "), ("array", "[1, 2]"), ("number", "4")] {
+            std::fs::write(dir.join(format!("{name}.json")), text).unwrap();
+            assert_eq!(Theme::from_files(&dir.join(format!("{name}.json")), None), shipped, "{name}");
+        }
+        std::fs::write(dir.join("base.json"), r#"{"rim_width": 7}"#).unwrap();
+        let from_base = Theme::from_files(&dir.join("syntax.json"), Some(&dir.join("base.json")));
+        assert_eq!(from_base.rim_width, 7.0, "the base file stands in for the broken one");
+        std::fs::write(dir.join("good.json"), r#"{"rim_width": 5, "unknown_key": 1}"#).unwrap();
+        assert_eq!(Theme::from_files(&dir.join("good.json"), None).rim_width, 5.0);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
 
     #[test]
     fn the_defaults_come_from_the_shipped_file() {

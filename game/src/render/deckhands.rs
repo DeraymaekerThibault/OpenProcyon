@@ -376,7 +376,7 @@ fn resolve_clips(clips: &[ClipDef]) -> Result<Vec<usize>, String> {
 
 /// The header, the pose texels and the meshes, read and checked: None (with a warning) leaves the block off.
 fn read_kit(root: &std::path::Path) -> Option<(Header, Vec<u8>, Vec<u8>)> {
-    let json = crate::data::try_json(&root.join(DATA))?;
+    let json: Value = crate::data::load_or_base(&root.join(DATA), None, "deck crews are left off")?;
     let fail = |why: String| {
         warn!("render profile: {DATA}: {why}; deck crews left off");
         None
@@ -1251,6 +1251,22 @@ fn want_lod(current: usize, distance: f32, at: f32, levels: usize) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_bad_kit_header_leaves_deck_crews_off_without_panicking() {
+        let root = std::env::temp_dir().join(format!("procyon-kit-bad-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let head = root.join(DATA);
+        std::fs::create_dir_all(head.parent().unwrap()).unwrap();
+        std::fs::write(head.with_extension("bin"), []).unwrap();
+        // not JSON, JSON of another shape, a version-1 header, and a clip list longer than the shader has room for
+        let many = format!(r#"{{"version": {FORMAT}, "clips": [{}]}}"#, vec![r#"{"name": "x"}"#; MAX_CLIPS + 1].join(","));
+        for text in ["clips", r#"["verts"]"#, r#"{"version": 1, "verts": 0, "frames": 0, "part": [], "clips": []}"#, many.as_str()] {
+            std::fs::write(&head, text).unwrap();
+            assert!(read_kit(&root).is_none(), "{text}");
+        }
+        std::fs::remove_dir_all(root).unwrap();
+    }
 
     fn node(name: &str, x: f32, z: f32) -> (String, Transform) {
         (name.into(), Transform::from_xyz(x, 0.0, z))
