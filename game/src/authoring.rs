@@ -6,6 +6,8 @@
 //! - [`ENGINE_VERSION`]: the version of this engine, for "made with" stamps and compatibility checks.
 //! - [`overlay_into`]: the merged asset tree of a base plus mods, built into a folder the tool chooses. The game's shared
 //!   `local/overlay` is never used, so several tools and game instances can run side by side (#136).
+//! - [`read_merged`] / [`read_map`]: a JSON file of such a root (or of the base folder), read like the game reads it, as a
+//!   [`DataError`] that names the file and the mod that provided it.
 //! - [`rule_schema`]: the mission rule vocabulary as JSON, the same document `--dump-rule-schema` writes.
 //! - [`schemas`]: JSON Schemas of `ship.json`, `guns.json`, `bullets.json`, `data/crew_nodes.json` and `mod.json` (`--dump-schemas <dir>`).
 //! - [`check_mission`] / [`known_names`]: the mission checker behind `--check-mission`, on JSON values in memory.
@@ -21,6 +23,7 @@ mod json;
 pub use check_mod::{check_mod, check_mod_with, unknown_keys};
 pub use json::to_json_string;
 
+pub use crate::data::DataError;
 pub use crate::modding::{ModEntry, ModReport};
 pub use crate::rules::check::{Finding, Level, Problem, defined_names};
 
@@ -40,6 +43,24 @@ pub fn base_assets() -> Option<PathBuf> {
 /// use `base` itself as the root.
 pub fn overlay_into(base: &Path, mods: &[PathBuf], out: &Path) -> Result<ModReport, String> {
     crate::modding::overlay_into(base, mods, out)
+}
+
+/// Reads the JSON file `rel` (`data/weapons/guns.json`, `ships/<id>/ship.json`, with `/` separators) of `root`: a folder
+/// [`overlay_into`] built, or the base assets themselves. The game's shared overlay is never touched (unlike `data::map_json`, which
+/// goes through `assets_dir()`). Errors are the loader's: the file, the mod that provided it (its own file, not the overlay copy) and
+/// serde's line and column. A `rel` that leaves `root` (absolute or with `..`) is refused.
+pub fn read_merged(root: &Path, rel: &str) -> Result<Value, DataError> {
+    let path = root.join(rel);
+    if Path::new(rel).components().any(|c| !matches!(c, std::path::Component::Normal(_))) {
+        let error = std::io::Error::new(std::io::ErrorKind::InvalidInput, "the path must stay inside the asset folder");
+        return Err(DataError::Read { path, source_mod: None, error });
+    }
+    crate::data::load_as(&path, None)
+}
+
+/// `maps/<id>/map.json` of `root`, as [`read_merged`] reads it.
+pub fn read_map(root: &Path, id: &str) -> Result<Value, DataError> {
+    read_merged(root, &format!("maps/{id}/map.json"))
 }
 
 /// The mission rule schema (every condition and action `Type`, its fields and meaning) as the JSON `--dump-rule-schema` writes.
@@ -139,6 +160,41 @@ mod tests {
         std::fs::write(theirs.join("notes.txt"), "mine").unwrap();
         assert!(overlay_into(&base, &[dir.join("mod")], &theirs).is_err());
         assert!(theirs.join("notes.txt").is_file());
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn read_merged_reads_the_tools_overlay_and_names_the_mods_own_file() {
+        let dir = scratch("read-merged");
+        let (base, m, out) = (dir.join("assets"), dir.join("mymod"), dir.join("mine"));
+        std::fs::create_dir_all(base.join("maps/red")).unwrap();
+        std::fs::create_dir_all(base.join("ships/S")).unwrap();
+        std::fs::create_dir_all(m.join("ships/S")).unwrap();
+        std::fs::write(base.join("maps/red/map.json"), r#"{"name": "Red"}"#).unwrap();
+        std::fs::write(base.join("ships/S/ship.json"), r#"{"core_hp": 100, "race": "navy"}"#).unwrap();
+        std::fs::write(m.join("ships/S/ship.json"), r#"{"extends": "S", "core_hp": 5}"#).unwrap();
+        overlay_into(&base, std::slice::from_ref(&m), &out).unwrap();
+        assert_eq!(read_map(&out, "red").unwrap()["name"], "Red", "base files are visible in the overlay");
+        let ship = read_merged(&out, "ships/S/ship.json").unwrap();
+        assert_eq!((ship["core_hp"].as_i64(), ship["race"].as_str()), (Some(5), Some("navy")), "the merged file");
+        assert_eq!(read_merged(&base, "maps/red/map.json").unwrap()["name"], "Red", "a base folder reads too");
+        // a missing file and a file that is not JSON are errors naming the file
+        let error = read_map(&out, "nowhere").unwrap_err();
+        assert!(matches!(error, DataError::Read { .. }) && error.to_string().contains("maps/nowhere/map.json"), "{error}");
+        std::fs::create_dir_all(out.join("data")).unwrap();
+        std::fs::write(out.join("data/bad2.json"), "not json").unwrap();
+        let error = read_merged(&out, "data/bad2.json").unwrap_err();
+        assert!(matches!(error, DataError::Parse { .. }) && error.to_string().contains("column"), "{error}");
+        // a merged copy names the mod's own file as its source, and the mod
+        std::fs::write(m.join("ships/S/ship.json"), r#"{"extends": "S", "core_hp": 5}"#).unwrap();
+        overlay_into(&base, std::slice::from_ref(&m), &out).unwrap();
+        let context = crate::data::asset_context(&out.join("ships/S/ship.json"));
+        assert!(context.contains(&format!("(source {}", std::fs::canonicalize(m.join("ships/S/ship.json")).unwrap().display())), "{context}");
+        assert_eq!(crate::data::mod_of(&out.join("ships/S/ship.json")).as_deref(), Some("mymod"));
+        // nothing outside the root, and the game's shared overlay was not built
+        assert!(read_merged(&out, "../assets/maps/red/map.json").is_err());
+        assert!(read_merged(&out, "/etc/hostname").is_err());
+        assert!(!base.join("../local").exists());
         std::fs::remove_dir_all(dir).unwrap();
     }
 
