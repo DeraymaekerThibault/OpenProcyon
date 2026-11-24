@@ -324,5 +324,16 @@ pub fn restart(
     spawn_scenario(&mut commands, &assets, &lib, &fxl, &shapes, &asteroids, &cfg);
 }
 
+/// The battle lifecycle: outcome and map-lighting state, entering and leaving a battle.
+pub fn plugin(app: &mut App) {
+    app.insert_resource(Outcome::Playing)
+        .init_resource::<EndMessage>()
+        .init_resource::<EndLine>()
+        .init_resource::<MapLighting>()
+        .add_systems(Update, apply_lighting.run_if(resource_changed::<MapLighting>))
+        .add_systems(OnEnter(menu::Screen::Battle), enter_battle)
+        .add_systems(OnExit(menu::Screen::Battle), reset_fleets);
+}
+
 #[cfg(test)]
 mod tests;

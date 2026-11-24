@@ -156,7 +156,7 @@ fn moving_ship() -> (App, Entity) {
     let ship = Ship { heading: 0.0, speed: 2.0, order: EngineOrder::Full, goal: Some(0.5), ..Ship::new(0, Side::Player) };
     let mut app = clock();
     app.insert_resource(Library { classes: vec![class], guns: default(), bullets: default(), names: default(), clips: default() })
-        .add_systems(FixedUpdate, sail.in_set(BattleSet::Simulate));
+        .add_systems(FixedUpdate, collision::sail.in_set(BattleSet::Simulate));
     let e = app.world_mut().spawn((ship, Health { sections: vec![], core: 100.0, destroyed: false }, Transform::default(), collision::Drift::default(), PlayerShip)).id();
     (app, e)
 }
