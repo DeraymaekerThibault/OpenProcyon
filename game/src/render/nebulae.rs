@@ -90,6 +90,10 @@ pub struct Rule {
     pub swirl: f32,
     pub filaments: f32,
     pub flicker: f32,
+    /// Replacing rules only: how much gas the heart of the cloud always holds, whatever the noise says there (added to the noise
+    /// at the centre, fading to nothing at the rim; 0 = the noise alone, which leaves the same hole in every cloud). The dust keeps
+    /// out of that heart too.
+    pub fill: f32,
 }
 
 pub fn parse(v: &Value) -> Option<Nebulae> {
@@ -124,6 +128,7 @@ pub fn parse(v: &Value) -> Option<Nebulae> {
                             swirl: num(&r["swirl"], 0.0).clamp(-1.0, 1.0),
                             filaments: num(&r["filaments"], 0.0).clamp(0.0, 8.0),
                             flicker: num(&r["flicker"], 0.0).clamp(0.0, 8.0),
+                            fill: num(&r["fill"], 0.0).clamp(0.0, 0.5),
                         })
                     })
                     .collect()
@@ -216,9 +221,10 @@ pub struct VolumeUniform {
     pub sun_color: Vec4,
     /// xyz: one end of the last bolt, w: how much of its light is left
     pub flash: Vec4,
-    /// xyz: its other end
+    /// xyz: its other end, w: fill (gas the heart of the cloud always holds)
     pub flash_to: Vec4,
-    /// x: unused (the clock is the frame data's), y: a bolt's reach (world units), z: a bolt's brightness, w: the mission's fadeout factor
+    /// x: this cloud's place in the noise (0..1, so two clouds are not the same cloud; the clock is the frame data's), y: a bolt's
+    /// reach (world units), z: a bolt's brightness, w: the mission's fadeout factor
     pub params: Vec4,
     /// x: swirl, y: filaments, z: flicker, w: hue variation
     pub storm: Vec4,
@@ -277,6 +283,12 @@ impl Default for SunLight {
     }
 }
 
+/// Where in the baked noise a cloud placed at `origin` looks (0..1): fixed for the cloud's life, so a storm that travels takes
+/// its gas along, and different for clouds placed apart, so they are not copies of each other.
+fn noise_place(origin: Vec3) -> f32 {
+    (origin.x * 0.0131 + origin.y * 0.0173 + origin.z * 0.0197).rem_euclid(1.0)
+}
+
 impl Rule {
     fn volume(&self, cloud: &Cloud, centre: Vec3, bolt: &Bolt, sun: SunLight) -> VolumeUniform {
         let radius = cloud.radius();
@@ -292,8 +304,8 @@ impl Rule {
             sun: sun.toward.normalize_or(Vec3::Y).extend(self.sun),
             sun_color: colour.extend(self.inside),
             flash: bolt.from.extend(bolt.light(reach)),
-            flash_to: bolt.to.extend(0.0),
-            params: Vec4::new(0.0, reach, self.flash, cloud.fade()),
+            flash_to: bolt.to.extend(self.fill),
+            params: Vec4::new(noise_place(cloud.origin()), reach, self.flash, cloud.fade()),
             storm: Vec4::new(self.swirl, self.filaments, self.flicker, self.variation),
             alt: self.color_alt.extend(self.core_glow),
         }

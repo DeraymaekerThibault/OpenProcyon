@@ -486,6 +486,10 @@ impl Cloud {
     pub fn radius(&self) -> f32 {
         self.radius
     }
+    /// Where the map placed the cloud (it may have travelled since). Read-only, for the render profile.
+    pub fn origin(&self) -> Vec3 {
+        self.origin
+    }
 
     /// An empty cloud of this effect and radius, for tests of code that reads one.
     #[cfg(test)]
