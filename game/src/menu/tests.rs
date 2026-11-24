@@ -771,7 +771,6 @@ fn dialog_and_panel_flags_change_the_menu_key() {
     world.insert_resource(Library::load(assets_dir()));
     world.insert_resource(State::new(Screen::Lobby));
     world.insert_resource(ModList::from(vec![]));
-    world.init_resource::<InGame>();
     world.init_resource::<SaveUi>();
     world.init_resource::<Bindings>();
     world.init_resource::<CtrlUi>();
@@ -890,4 +889,66 @@ fn in_game_menu_buttons_depend_on_the_page_and_the_outcome() {
     assert!(matches!(with(Some(Page::Summary), Outcome::Victory, "Open Next Arrow Button"), Some(RetailButton::Run(Action::QuitToMenu))));
     assert!(matches!(with(Some(Page::Save), Outcome::Playing, "Load or Save Campaign Button"), Some(RetailButton::Run(Action::DoSave))));
     assert!(matches!(with(Some(Page::Load), Outcome::Playing, "Load or Save Campaign Button"), Some(RetailButton::Run(Action::DoLoad))));
+}
+
+/// Walks the in-game menu's sub-state through a battle: it exists only in `Screen::Battle`, starts closed, follows Esc
+/// (`Overlay::after_esc`), gates the systems that run on a closed or open overlay, and goes away with the battle.
+#[test]
+fn the_in_game_menu_overlay_walks_its_transitions() {
+    #[derive(Resource, Default)]
+    struct Ran {
+        closed: u32,
+        active: u32,
+    }
+    let mut app = App::new();
+    app.add_plugins((MinimalPlugins, bevy::state::app::StatesPlugin))
+        .init_state::<Screen>()
+        .add_sub_state::<Overlay>()
+        .init_resource::<Ran>()
+        .add_systems(Update, ((|mut r: ResMut<Ran>| r.closed += 1).run_if(overlay_closed), (|mut r: ResMut<Ran>| r.active += 1).run_if(menu_active)));
+    let overlay = |app: &App| app.world().get_resource::<State<Overlay>>().map(|s| *s.get());
+    let step = |app: &mut App, to: Option<Overlay>| {
+        if let Some(to) = to {
+            app.world_mut().resource_mut::<NextState<Overlay>>().set(to);
+        }
+        app.update();
+        app.update(); // a change set in one frame lands in the next
+    };
+    app.update();
+    assert_eq!(overlay(&app), None, "no overlay in the front end");
+    app.world_mut().resource_mut::<NextState<Screen>>().set(Screen::Battle);
+    app.update();
+    assert_eq!(overlay(&app), Some(Overlay::Closed), "a battle starts with the menu closed");
+    let ran = |app: &App| (app.world().resource::<Ran>().closed, app.world().resource::<Ran>().active);
+    let before = ran(&app);
+    app.update();
+    assert_eq!(ran(&app), (before.0 + 1, before.1), "closed: battle systems run, menu systems do not");
+
+    // Esc walks Menu -> Options -> Controls, then back out step by step, and closes from the menu page.
+    let to = Overlay::after_esc(None);
+    assert_eq!(to, Overlay::Open(Page::Menu));
+    step(&mut app, Some(to));
+    assert_eq!(overlay(&app), Some(Overlay::Open(Page::Menu)));
+    let before = ran(&app);
+    app.update();
+    assert_eq!(ran(&app), (before.0, before.1 + 1), "open: menu systems run, battle systems do not");
+    step(&mut app, Some(Overlay::Open(Page::Controls)));
+    assert_eq!(overlay(&app), Some(Overlay::Open(Page::Controls)));
+    assert_eq!(Overlay::after_esc(Some(Page::Controls)), Overlay::Open(Page::Options));
+    assert_eq!(Overlay::after_esc(Some(Page::Audio)), Overlay::Open(Page::Options));
+    assert_eq!(Overlay::after_esc(Some(Page::Display)), Overlay::Open(Page::Options));
+    assert_eq!(Overlay::after_esc(Some(Page::Options)), Overlay::Open(Page::Menu));
+    assert_eq!(Overlay::after_esc(Some(Page::Save)), Overlay::Open(Page::Menu));
+    assert_eq!(Overlay::after_esc(Some(Page::Summary)), Overlay::Open(Page::Menu));
+    step(&mut app, Some(Overlay::after_esc(Some(Page::Menu))));
+    assert_eq!(overlay(&app), Some(Overlay::Closed), "Esc on the menu page closes it");
+
+    // Leaving the battle with the menu open removes the overlay; a new battle starts closed.
+    step(&mut app, Some(Overlay::Open(Page::Save)));
+    app.world_mut().resource_mut::<NextState<Screen>>().set(Screen::Main);
+    step(&mut app, None);
+    assert_eq!(overlay(&app), None);
+    app.world_mut().resource_mut::<NextState<Screen>>().set(Screen::Battle);
+    step(&mut app, None);
+    assert_eq!(overlay(&app), Some(Overlay::Closed));
 }
