@@ -15,6 +15,14 @@ pub struct Lookups<'a> {
     pub picture: Option<&'a dyn Fn(&str) -> bool>,
 }
 
+/// The music track name that means "stop the music" (`Play Music Track`); the player plays no file for it.
+pub const NO_MUSIC: &str = "None";
+
+/// Ship classes named `<class>_Wrecked` are scenery the spawner places by their TWT group, not ship classes with a `ship.json`.
+pub fn is_wrecked_hull(class: &str) -> bool {
+    class.ends_with("_Wrecked")
+}
+
 fn problem(rule: &str, at: String, field: &str, message: String) -> Problem {
     Problem { level: Level::Error, rule: rule.into(), at, field: field.into(), message }
 }
@@ -24,7 +32,7 @@ pub fn check_references(mission: &Value, map: &Value, media: &Value, look: &Look
     let mut out = vec![];
     if let Some(ship) = look.ship {
         for (i, s) in mission["ships"].as_array().into_iter().flatten().enumerate() {
-            if let Some(class) = s["type"].as_str().filter(|c| !ship(c)) {
+            if let Some(class) = s["type"].as_str().filter(|c| !is_wrecked_hull(c) && !ship(c)) {
                 let name = s["name"].as_str().filter(|n| !n.is_empty()).map_or(String::new(), |n| format!(" '{n}'"));
                 out.push(problem("(mission)", format!("ship #{}{name}", i + 1), "type", format!("ship class '{class}' does not exist (no ships/{class}/ship.json)")));
             }
@@ -38,7 +46,8 @@ pub fn check_references(mission: &Value, map: &Value, media: &Value, look: &Look
                 let at = format!("action #{} '{ty}'", j + 1);
                 match ty {
                     "Play Music Track" | "Play Special Effect" => {
-                        if let Some(file) = a["File Name"].as_str().filter(|f| !f.is_empty() && !sound(f)) {
+                        let silence = ty == "Play Music Track";
+                        if let Some(file) = a["File Name"].as_str().filter(|f| !f.is_empty() && !(silence && *f == NO_MUSIC) && !sound(f)) {
                             out.push(problem(&rule, at, "File Name", format!("the sound '{file}.ogg' is not in any sound folder of the game or the mods")));
                         }
                     }
@@ -102,6 +111,22 @@ mod tests {
         assert!(has(&["rule \"Talk\"", "action #1 'Play speech event'", "Speech Event Name", "lost_line.ogg"]), "{lines:?}");
         assert!(has(&["backdrop.png"]), "{lines:?}");
         assert_eq!(lines.len(), 4, "the existing ship and sound and the text-only speech are fine: {lines:?}");
+    }
+
+    #[test]
+    fn none_music_and_wrecked_hulls_are_not_missing_files() {
+        let mission = json!({
+            "ships": [{"type": "Galleon_Wrecked", "name": "W"}, {"type": "Ship_Ghost", "name": "G"}],
+            "rules": [{"name": "M", "actions": [
+                {"Type": "Play Music Track", "File Name": "None"},
+                {"Type": "Play Music Track", "File Name": "lost_track"},
+                {"Type": "Play Special Effect", "File Name": "None"},
+            ]}]
+        });
+        let lines = run(&mission, &json!({}), &Value::Null);
+        assert_eq!(lines.len(), 3, "{lines:?}");
+        assert!(lines.iter().any(|l| l.contains("Ship_Ghost")) && lines.iter().any(|l| l.contains("lost_track")), "{lines:?}");
+        assert!(lines.iter().any(|l| l.contains("Play Special Effect")), "only music may be None: {lines:?}");
     }
 
     #[test]
