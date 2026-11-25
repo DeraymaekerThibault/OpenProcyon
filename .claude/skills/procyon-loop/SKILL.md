@@ -10,7 +10,7 @@ Run from the checkout (or worktree) root. Details: `AGENTS.md`, `docs/developmen
 | Ask | Command | What it does |
 |---|---|---|
 | "check this" (while iterating) | `tools/check.sh --quick` | Seconds: ruff + hygiene always; rustfmt + clippy if Rust changed, Python tests if Python changed. Trust only the last `GATE OK` line; logs in `local/check/`. |
-| "check before commit" | `tools/check.sh` | Default tier: ruff, hygiene, Python tests, rustfmt, clippy, Rust tests (asset tests when assets are imported). |
+| "check before push" | `tools/check.sh` | Default tier: ruff, hygiene, Python tests, rustfmt, clippy, Rust tests (asset tests when assets are imported). |
 | before push or PR | `tools/check.sh --full` | Default + `fast` build, startup smoke, battle check. Once per push, not per edit. |
 | "test X" (one Rust test) | `cargo test --manifest-path game/Cargo.toml --lib <module::path>` | Runs the tests under that path only. Add `-- --ignored` for asset tests (needs an import). |
 | "test X" (Python) | `python3 -m unittest tests.test_<name>` or `make test-python` | One test module / all fast parser and exporter tests. |

@@ -58,7 +58,7 @@ captains do) settles the guesses still marked `PROVISIONAL`, and missions 2-13 n
 
 Read [CONTRIBUTING.md](CONTRIBUTING.md) and [AGENTS.md](AGENTS.md) first: it is the guide for human contributors and AI coding assistants alike, and its hard rules
 (no game content, no decompiled code or executable addresses, behaviour described in your own words) are not negotiable.
-`tools/check.sh` must pass before every commit. Architecture and module ownership: [docs/development.md](docs/development.md).
+`tools/check.sh` must pass before every push. Architecture and module ownership: [docs/development.md](docs/development.md).
 
 ## Modding
 
