@@ -1,7 +1,7 @@
 import json
 import unittest
 
-from tools.battle_check import SCENARIOS, evaluate, outcome, same_run
+from tools.battle_check import SCENARIOS, evaluate, outcome, replay_args, same_run
 
 
 def report(
@@ -279,3 +279,10 @@ class Invariants(unittest.TestCase):
     def test_more_maps_and_mixed_fleets_are_scenarios(self):
         names = {s.name for s in SCENARIOS}
         self.assertTrue({"red_rover", "mixed_fleets"} <= names)
+
+    def test_a_lobby_scenario_replays_from_the_log_alone(self):
+        self.assertEqual(
+            replay_args(["--lobby", "map=x;slots=human", "--seed", "2"]),
+            ["--seed", "2"],
+        )
+        self.assertEqual(replay_args(["--map", "red_rover"]), ["--map", "red_rover"])

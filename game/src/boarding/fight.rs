@@ -10,7 +10,7 @@ pub struct Boarders<'w, 's> {
     fighters: Query<'w, 's, (Entity, &'static Boarding)>,
     grapples: Query<'w, 's, (Entity, &'static Grapple)>,
     ships: Query<'w, 's, (&'static Ship, &'static Health, Option<&'static crate::combat::GunStates>)>,
-    player: Query<'w, 's, Entity, With<PlayerShip>>,
+    player: Query<'w, 's, Entity, With<crate::commands::Commander>>,
     abandoned: Query<'w, 's, (), With<crate::lifeboats::Abandoned>>,
     lib: Res<'w, Library>,
     mission: Option<Res<'w, Mission>>,
@@ -195,11 +195,17 @@ pub(super) fn fights(
     mut settled: MessageWriter<Settled>,
     mut fighters: Query<(Entity, &mut Boarding)>,
     grapples: Query<(Entity, &Grapple)>,
-    player: Query<Entity, With<PlayerShip>>,
+    player: Query<Entity, With<crate::commands::Commander>>,
     mut things: Query<(&Transform, Option<&Ship>, Option<&Drift>, &mut Boardable, Option<&Health>, Option<&MissionShip>, Option<&MissionBase>, Option<&crate::combat::BaseSide>)>,
+    spawn_order: Query<&crate::scenario::SpawnIndex>,
 ) {
     let (dt, me) = (time.delta_secs(), player.single().ok());
-    for (b, mut f) in &mut fighters {
+    // In the boarders' spawn order: every fight draws from the shared `SimRng` (its casualty coin, the crew's lines), and two fights at
+    // once must draw in the same order on every run, not in query order (#369).
+    let order = crate::scenario::in_spawn_order(&spawn_order, fighters.iter().map(|(e, _)| e), |e| *e);
+    let mut walk = fighters.iter_many_mut(&order);
+    while let Some(item) = walk.fetch_next() {
+        let Ok((b, mut f)) = item else { continue };
         let t = f.target;
         let Ok([mut bi, mut ti]) = things.get_many_mut([b, t]) else {
             end_fight(&mut commands, b, &f.fx);

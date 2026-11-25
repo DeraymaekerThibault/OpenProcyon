@@ -29,6 +29,8 @@ pub fn fleet_world() -> (World, [Entity; 6]) {
     w.insert_resource(Target::default());
     w.insert_resource(Orbit { yaw: 0.0, pitch: 0.0, dist: 60.0, focus: None });
     w.insert_resource(Fleets { local: "Player".into(), ..default() });
+    // Fleet keys send P as an order (`commands::Kind::Promote`).
+    w.init_resource::<crate::commands::Outbox>();
     reconcile_fleets(&mut w);
     (w, ids)
 }
@@ -776,4 +778,51 @@ fn an_attack_order_ends_hold_fire_on_that_ship() {
     p.attack(Entity::from_bits(7 | 1 << 32));
     assert!(!p.hold_fire);
     assert_eq!(p.target, Some(Entity::from_bits(7 | 1 << 32)));
+}
+
+/// The Fleet Commands buttons and P as commands (`commands::Kind`) do what the direct calls did.
+#[test]
+fn fleet_orders_as_commands_do_what_the_buttons_did() {
+    use crate::commands::{Kind, apply};
+    let pilots = |w: &World, ids: &[Entity; 6]| ids.iter().map(|e| w.get::<FleetPilot>(*e).cloned()).collect::<Vec<_>>();
+    // `fleet_world` without imported assets: one synthetic hull for all six ships.
+    let world = || {
+        let mut w = World::new();
+        let class = crate::fixed_tests::synthetic_class();
+        let ids: [Entity; 6] = std::array::from_fn(|i| {
+            let side = if i == 5 { Side::Enemy } else { Side::Player };
+            let owner = ["Player", "Player", "Player", "Player", "Ally", "Enemy"][i];
+            w.spawn((Ship { heading: 0.0, ..Ship::new(0, side) }, Health::new(&class), Transform::from_xyz(i as f32 * 50.0, 0.0, 0.0), FleetMember(owner.into(), i))).id()
+        });
+        w.entity_mut(ids[0]).insert(PlayerShip);
+        w.insert_resource(Library { classes: vec![class], guns: default(), bullets: default(), names: default(), clips: default() });
+        w.insert_resource(Target::default());
+        w.insert_resource(Orbit { yaw: 0.0, pitch: 0.0, dist: 60.0, focus: None });
+        w.insert_resource(Fleets { local: "Player".into(), ..default() });
+        reconcile_fleets(&mut w);
+        (w, ids)
+    };
+    let (mut direct, ids) = world();
+    let (mut sent, again) = world();
+    assert_eq!(ids, again);
+    for w in [&mut direct, &mut sent] {
+        w.resource_mut::<Target>().0 = Some(ids[5]);
+    }
+    set_formation(&mut direct, "Player", Some(Formation::Column), true);
+    apply(&mut sent, crate::commands::PlayerId(0), &Kind::Formation { formation: Formation::Column, hold: true });
+    assert!(pilots(&sent, &ids) == pilots(&direct, &ids));
+    assert_eq!(sent.resource::<Fleets>().groups["Player"].formation, Formation::Column);
+    fleet_help(&mut direct, "Player", true);
+    apply(&mut sent, crate::commands::PlayerId(0), &Kind::FleetAttack);
+    assert!(pilots(&sent, &ids) == pilots(&direct, &ids));
+    assert!(ids[1..4].iter().all(|e| sent.get::<FleetPilot>(*e).unwrap().target == Some(ids[5])));
+    fleet_help(&mut direct, "Player", false);
+    apply(&mut sent, crate::commands::PlayerId(0), &Kind::CeaseFire);
+    assert!(pilots(&sent, &ids) == pilots(&direct, &ids));
+    assert!(sent.resource::<Fleets>().groups["Player"].cease_fire);
+    assert!(promote(&mut direct, ids[2], false));
+    apply(&mut sent, crate::commands::PlayerId(0), &Kind::Promote { ship: ids[2] });
+    assert!(pilots(&sent, &ids) == pilots(&direct, &ids));
+    assert_eq!(sent.resource::<Fleets>().primary(), Some(ids[2]));
+    assert!(sent.get::<PlayerShip>(ids[2]).is_some() && sent.get::<PlayerShip>(ids[0]).is_none());
 }

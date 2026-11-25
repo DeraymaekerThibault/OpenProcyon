@@ -351,7 +351,7 @@ pub(super) fn fire(
         &mut GunStates,
         &Health,
         Option<&crate::campaign::MissionShip>,
-        Has<PlayerShip>,
+        Has<crate::commands::Commander>,
         Option<&crate::ship::FleetPilot>,
         Option<&crate::cloak::Cloak>,
         Option<&crate::crew_arms::CrewPosts>,
@@ -360,7 +360,7 @@ pub(super) fn fire(
         // Not retail: an abandoned hull (`OP Abandon Ship`) cannot fire.
         Has<crate::lifeboats::Abandoned>,
     )>,
-    others: Query<(Entity, &Transform, &Ship, &Health, Has<PlayerShip>, Option<&crate::campaign::MissionShip>, Option<&crate::cloak::Cloak>)>,
+    others: Query<(Entity, &Transform, &Ship, &Health, Has<crate::commands::Commander>, Option<&crate::campaign::MissionShip>, Option<&crate::cloak::Cloak>)>,
     mut parts: Query<&mut Transform, (With<GunPart>, Without<Ship>)>,
     (globals, threats, points, sensors, captains, mut mine_laying, mut ground, scenery, mut rock_watch): (
         Query<&GlobalTransform, With<GunPart>>,

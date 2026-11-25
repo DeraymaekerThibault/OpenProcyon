@@ -112,11 +112,11 @@ fn spawn_map_objects(
     let docks = crate::docking::load_docks();
     let island_sounds = data::try_json(&crate::assets_dir().join("data/island_sounds.json")).unwrap_or_default();
     let mesh_effects = data::try_json(&crate::assets_dir().join("data/mesh_effects.json")).unwrap_or_default();
-    for o in map["objects"].as_array().into_iter().flatten() {
+    for (i, o) in map["objects"].as_array().into_iter().flatten().enumerate() {
         let ty = o["type"].as_str().unwrap_or_default();
         let glb = format!("{}.glb", o["scene"].as_str().unwrap_or_default());
         let tf = scenery_transform(o, game_rotation(&o["rot"]), &docks);
-        let e = commands.spawn((Scenario, crate::data::scene(assets, &glb), tf)).id();
+        let e = commands.spawn((Scenario, crate::data::scene(assets, &glb), tf, super::SceneryIndex(i as u32))).id();
         commands.entity(e).insert((crate::clips::SceneLoop(o["scene"].as_str().unwrap_or_default().into()), data::crew_nodes::SceneryType(ty.into())));
         if let Some(clip) = crate::environment::Clip::scenery(assets, &glb) {
             commands.entity(e).insert(clip);

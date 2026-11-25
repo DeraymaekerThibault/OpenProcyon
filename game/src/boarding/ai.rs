@@ -20,7 +20,10 @@ pub(super) fn ai_boarding(
     mut sfx: MessageWriter<Sfx>,
     boarders: Boarders,
     mut msg: MessageWriter<BoardMsg>,
-    ships: Query<(Entity, &Ship, &Transform, &Health, Option<&crate::combat::GunStates>, &Boardable, Option<&MissionShip>, Option<&crate::ship::FleetPilot>), Without<PlayerShip>>,
+    ships: Query<
+        (Entity, &Ship, &Transform, &Health, Option<&crate::combat::GunStates>, &Boardable, Option<&MissionShip>, Option<&crate::ship::FleetPilot>),
+        Without<crate::commands::Commander>,
+    >,
     bases: Query<Entity, With<MissionBase>>,
     targets: Query<(&Transform, &Ship)>,
     all_ships: Query<(Entity, &Transform, &Ship)>,

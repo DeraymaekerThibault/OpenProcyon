@@ -6,18 +6,23 @@
 //! the end of its frame instead ([`apply_paused`]), as the order dial and the target marker answered at once before.
 //!
 //! Recording (`PROCYON_COMMANDS=<file>`, like `PROCYON_TRACE`) writes JSON lines: a header (format, game version, seed, scenario
-//! arguments, mod folders), the battle's frames (each frame's game-time advance in nanoseconds and how many ticks ran in it, run-length
-//! packed), and the commands stamped with the tick (or, while paused, the frame) they were applied on. Ids only (`NetId`: object kind
-//! and `SpawnIndex`), never names or strings from the game files.
+//! arguments, mod folders and, for a battle launched from the skirmish lobby, the lobby's whole setup: `menu::SkirmishSetup`), written
+//! once the battle has loaded, then the battle's frames (each frame's game-time advance in nanoseconds and how many ticks ran in it,
+//! run-length packed), and the commands stamped with the tick (or, while paused, the frame) they were applied on. Ids only (`NetId`:
+//! object kind and `SpawnIndex`), never names or strings from the game files.
 //!
 //! `--replay <file>` plays a recording back from a normal session, not only a `--fixed-step` one: once the battle has loaded it feeds
 //! the recorded frame advances to Bevy's clock (`TimeUpdateStrategy::ManualDuration`) and runs exactly the recorded ticks in each
 //! frame, so the frame-driven rules (`FrameRules`) and the ticks see the same clock as when the log was made, and the recorded
 //! commands go in on their ticks while live input is dropped. The scenario arguments, seed and mods must match the recording (the
-//! game says which to pass when they do not). Only the first battle of a run is recorded; a restart ends the recording.
+//! game says which to pass when they do not). A recording that holds a skirmish setup launches it through the lobby's Launch path by
+//! itself (`--replay <file>` alone, however the lobby was set up); campaign missions started from the menus are still refused. Only
+//! the first battle of a run is recorded; a restart ends the recording.
 //!
-//! Routed so far: engine orders and target picks. The other orders still change the battle directly and are not in a recording yet
-//! (later PRs, one group each). PROVISIONAL: the file format (version 1).
+//! Routed so far: engine orders, target picks, move, course and cancel orders, the right-click menu's Stop, Hold, Cloak, Dock,
+//! Tow, Board and Grapple, Backspace's dock and grapple cancels, the Fleet Commands (formations, attack, cease fire), P,
+//! panic fire and indirect (lob) shots. The other orders still change the battle directly and are not in a recording yet
+//! (later PRs, one group each). PROVISIONAL: the file format (version 2; version 1, without the skirmish setup, still reads).
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::io::{BufRead, Write};
@@ -26,11 +31,20 @@ use std::time::Duration;
 use crate::{BATTLE_TICK, EngineOrder, Ship};
 
 /// Version of the command-log format. Bump on any change a reader of the old format would misread.
-pub const FORMAT: u32 = 1;
+pub const FORMAT: u32 = 2;
+/// The oldest format this game still reads.
+const OLDEST_FORMAT: u32 = 1;
 
 /// The player who gave an order: a lobby slot. Single-player has one, 0.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PlayerId(pub u8);
+
+/// The simulation's mark of a human's command ship: the ship that player commands directly (its engines, its own target, panic fire,
+/// indirect shots), where an order to any other ship of the fleet is a captain's order. `PlayerShip` stays the local player's
+/// ship, for the view. Single-player has one human, player 0, so `Commander(PlayerId(0))` follows `PlayerShip` (its hooks, `ship.rs`).
+/// PROVISIONAL until lock-step gives each human's command ship its own.
+#[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Commander(pub PlayerId);
 
 /// An engine order: a step up or down the dial (the speed keys) or straight to one setting (the dial, its tabs).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -48,6 +62,50 @@ pub enum Kind {
     /// The ship's target: on the command ship the player's own target and the spot clicked on it (target-local), which also ends panic
     /// fire; on a fleet captain an attack order. `None` clears the command ship's target (C); a captain ignores it.
     Target { ship: Entity, target: Option<Entity>, spot: Option<Vec3> },
+    /// A click on open water (basic movement): the command ship sails there (`append`, Shift held: one more waypoint; light-green
+    /// Full if it was stopped), a captain is ordered there. Either way a dock routine in progress and a hold end.
+    Move { ship: Entity, to: Vec3, append: bool },
+    /// Advanced movement: the plotted course becomes the command ship's (light-green Full if it was stopped). `release`: the click
+    /// that closed the course also ends a dock routine and a hold, as a move does; Enter does not.
+    Course { ship: Entity, points: Vec<Vec3>, release: bool },
+    /// Backspace with no course being plotted: the ship's waypoints and grapple order go, and with them the armed bank and its shot
+    /// (command ship), or the captain's destination, target and hold, and its engines.
+    Cancel { ship: Entity },
+    /// The right-click menu's Stop: the ship's course, heading goal and engines end (`Ship::stand_still`), a captain's destination
+    /// and target too (the formation hold and hold fire stay), and so does a dock routine in progress.
+    Stop { ship: Entity },
+    /// The menu's Hold (`on`) and its release: a held ship stands still where it is and keeps firing (`ship::HoldPosition`).
+    Hold { ship: Entity, on: bool },
+    /// The menu's Cloak Start / Stop, for a ship that can cloak (`cloak::Cloak`).
+    Cloak { ship: Entity, on: bool },
+    /// Dock with `dockee` (a left click on it, or the menu's Dock). `release`: the menu's Dock also ends a hold; the click does not.
+    /// PROVISIONAL: kept as the engine did it; whether the original's left-click dock also ends a hold is not observed.
+    Dock { ship: Entity, dockee: Entity, release: bool },
+    /// The menu's Tow Start (`Some`, which ends a hold) and Tow Stop (`None`). Tows are made in campaign missions only.
+    Tow { ship: Entity, towee: Option<Entity> },
+    /// The menu's Board Start (`Some`, which ends a hold) and Board Stop (`None`).
+    Board { ship: Entity, target: Option<Entity> },
+    /// The menu's Grapple Start (`Some`) and Grapple Stop (`None`).
+    Grapple { ship: Entity, target: Option<Entity> },
+    /// Backspace also ends the ship's dock routine in progress and its tow approach (`docking::DockMsg::CancelShip`), even while a
+    /// course is being plotted.
+    CancelDock { ship: Entity },
+    /// Backspace also drops the command ship's grapple order, even while a course is being plotted.
+    DropGrapple { ship: Entity },
+    /// A Fleet Commands formation button: the fleet takes `formation`; `hold` (the button was not the active formation) has the
+    /// captains hold it, otherwise they leave it (`ship::set_formation`).
+    Formation { formation: crate::ship::Formation, hold: bool },
+    /// Fleet Commands Attack: the captains attack the command ship's target (`ship::fleet_help`).
+    FleetAttack,
+    /// Fleet Commands Cease Fire: the fleet's hold fire toggles.
+    CeaseFire,
+    /// P (Change Primary, skirmish only): `ship` becomes the fleet's command ship (`ship::promote`).
+    Promote { ship: Entity },
+    /// Panic fire (X, or the panic button): every gun of the command ship picks its own nearest enemy until the player retargets.
+    PanicFire { ship: Entity },
+    /// The command ship's indirect shot: `Some((bank, point))` is the ground point a click gave the armed bank; `None` drops a shot
+    /// not fired yet (a click on a gun-bank icon). Which bank is armed is the player's own input state, not an order.
+    Lob { ship: Entity, shot: Option<(usize, Vec3)> },
 }
 
 /// One player order.
@@ -89,8 +147,36 @@ pub struct Clock {
 
 /// Applies one command. Validation stays what the UI already checks (#369 design: single-player behaviour does not change); a command
 /// whose ship is gone does nothing.
-pub fn apply(world: &mut World, kind: &Kind) {
+pub fn apply(world: &mut World, player: PlayerId, kind: &Kind) {
     match *kind {
+        Kind::Move { .. } | Kind::Course { .. } | Kind::Cancel { .. } => apply_movement(world, player, kind),
+        Kind::Stop { .. } | Kind::Hold { .. } | Kind::Cloak { .. } => apply_menu(world, kind),
+        Kind::Dock { .. } | Kind::Tow { .. } | Kind::Board { .. } | Kind::Grapple { .. } | Kind::CancelDock { .. } | Kind::DropGrapple { .. } => apply_links(world, kind),
+        Kind::Formation { formation, hold } => {
+            let owner = local_fleet(world);
+            crate::ship::set_formation(world, &owner, Some(formation), hold);
+        }
+        Kind::FleetAttack | Kind::CeaseFire => {
+            let owner = local_fleet(world);
+            crate::ship::fleet_help(world, &owner, *kind == Kind::FleetAttack);
+        }
+        Kind::Promote { ship } => {
+            crate::ship::promote(world, ship, false);
+        }
+        Kind::PanicFire { ship } => {
+            if direct(world, ship, player)
+                && let Some(mut t) = world.get_resource_mut::<crate::combat::Target>()
+            {
+                t.2.panic = true;
+            }
+        }
+        Kind::Lob { ship, shot } => {
+            if direct(world, ship, player)
+                && let Some(mut t) = world.get_resource_mut::<crate::combat::Target>()
+            {
+                t.2.shot = shot;
+            }
+        }
         Kind::Engine { ship, engine } => {
             if let Some(mut s) = world.get_mut::<Ship>(ship) {
                 s.throttle = None;
@@ -102,9 +188,7 @@ pub fn apply(world: &mut World, kind: &Kind) {
             }
         }
         Kind::Target { ship, target, spot } => {
-            // Direct control is the fleet's command ship (`Fleets::direct`, what the click handler decided on before).
-            let direct = world.get_resource::<crate::ship::Fleets>().is_some_and(|f| f.primary() == Some(ship));
-            if direct {
+            if direct(world, ship, player) {
                 if let Some(mut t) = world.get_resource_mut::<crate::combat::Target>() {
                     t.0 = target;
                     t.1 = spot;
@@ -116,6 +200,178 @@ pub fn apply(world: &mut World, kind: &Kind) {
                 p.attack(target);
             }
         }
+    }
+}
+
+/// The fleet a fleet order commands: the local player's (single-player; #369 phase 2 makes it the command's player's).
+fn local_fleet(world: &World) -> crate::names::Owner {
+    world.get_resource::<crate::ship::Fleets>().map(|f| f.local.clone()).unwrap_or_default()
+}
+
+/// Direct control: `ship` is the command ship of the player who gave the order (`Commander`); an order to any other ship is a
+/// captain's order (`Fleets::direct`, what the input handlers decided on, for the local player).
+fn direct(world: &World, ship: Entity, player: PlayerId) -> bool {
+    world.get::<Commander>(ship).is_some_and(|c| c.0 == player)
+}
+
+/// A move ends a dock routine in progress and gives control back (original behaviour), and ends a hold (`ship::release_hold`).
+fn release(world: &mut World, ship: Entity) {
+    dock_msg(world, crate::docking::DockMsg::CancelShip(ship));
+    release_hold(world, ship);
+}
+
+/// A move, dock, tow or board order ends a hold (`ship::release_hold`).
+fn release_hold(world: &mut World, ship: Entity) {
+    if let Ok(mut e) = world.get_entity_mut(ship) {
+        e.remove::<crate::ship::HoldPosition>();
+    }
+}
+
+/// Docking and towing act on their messages (`docking::handle_messages`, later in the same tick).
+fn dock_msg(world: &mut World, msg: crate::docking::DockMsg) {
+    if let Some(mut msgs) = world.get_resource_mut::<Messages<crate::docking::DockMsg>>() {
+        msgs.write(msg);
+    }
+}
+
+/// Boarding and grappling act on their messages (`boarding::fight::handle_messages`, later in the same tick).
+fn board_msg(world: &mut World, msg: crate::boarding::BoardMsg) {
+    if let Some(mut msgs) = world.get_resource_mut::<Messages<crate::boarding::BoardMsg>>() {
+        msgs.write(msg);
+    }
+}
+
+/// A stopped ship given a course sails at light-green Full, as in the original.
+fn sail_on(ship: &mut Ship) {
+    if ship.order == EngineOrder::Stop || ship.throttle == Some(0.0) {
+        ship.throttle = None;
+        ship.order = EngineOrder::Full;
+    }
+}
+
+/// Move, course and cancel orders.
+fn apply_movement(world: &mut World, player: PlayerId, kind: &Kind) {
+    match kind {
+        &Kind::Move { ship, to, append } => {
+            release(world, ship);
+            if direct(world, ship, player) {
+                if let Some(mut s) = world.get_mut::<Ship>(ship) {
+                    if !append {
+                        s.waypoints.clear();
+                    }
+                    s.waypoints.push(to);
+                    sail_on(&mut s);
+                }
+            } else if let Some(mut p) = world.get_mut::<crate::ship::FleetPilot>(ship) {
+                p.move_to(to);
+            }
+        }
+        Kind::Course { ship, points, release: ends } => {
+            if *ends {
+                release(world, *ship);
+            }
+            if let Some(mut s) = world.get_mut::<Ship>(*ship) {
+                s.waypoints.clone_from(points);
+                sail_on(&mut s);
+            }
+        }
+        &Kind::Cancel { ship } => {
+            let direct = direct(world, ship, player);
+            if let Ok(mut e) = world.get_entity_mut(ship) {
+                e.remove::<crate::boarding::GrappleOrder>();
+            }
+            if let Some(mut s) = world.get_mut::<Ship>(ship) {
+                s.waypoints.clear();
+                if !direct {
+                    s.order = EngineOrder::Stop;
+                }
+            }
+            if direct {
+                if let Some(mut t) = world.get_resource_mut::<crate::combat::Target>() {
+                    t.2.armed = None;
+                    t.2.shot = None;
+                }
+            } else if let Some(mut p) = world.get_mut::<crate::ship::FleetPilot>(ship) {
+                p.destination = None;
+                p.target = None;
+                p.hold = false;
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Stop, hold and cloak orders (the right-click menu).
+fn apply_menu(world: &mut World, kind: &Kind) {
+    match *kind {
+        Kind::Stop { ship } => {
+            if let Some(mut s) = world.get_mut::<Ship>(ship) {
+                s.stand_still();
+            }
+            if let Some(mut p) = world.get_mut::<crate::ship::FleetPilot>(ship) {
+                p.cancel_actions();
+            }
+            dock_msg(world, crate::docking::DockMsg::CancelShip(ship));
+        }
+        Kind::Hold { ship, on: true } => {
+            let Ok(mut e) = world.get_entity_mut(ship) else { return };
+            e.insert(crate::ship::HoldPosition);
+            if let Some(mut s) = e.get_mut::<Ship>() {
+                s.stand_still();
+            }
+            if let Some(mut p) = e.get_mut::<crate::ship::FleetPilot>() {
+                p.hold_position();
+            }
+        }
+        Kind::Hold { ship, on: false } => {
+            if let Ok(mut e) = world.get_entity_mut(ship) {
+                e.remove::<crate::ship::HoldPosition>();
+            }
+        }
+        Kind::Cloak { ship, on } => {
+            let side = world.get::<Ship>(ship).map(|s| s.side);
+            if let (Some(mut c), Some(side)) = (world.get_mut::<crate::cloak::Cloak>(ship), side) {
+                if on {
+                    c.start(side);
+                } else {
+                    c.stop();
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Dock, tow, board and grapple orders, and Backspace's dock and grapple cancels.
+fn apply_links(world: &mut World, kind: &Kind) {
+    use crate::boarding::BoardMsg;
+    use crate::docking::DockMsg;
+    match *kind {
+        Kind::Dock { ship, dockee, release } => {
+            if release {
+                release_hold(world, ship);
+            }
+            dock_msg(world, DockMsg::Dock { docker: Some(ship), dockee });
+        }
+        Kind::Tow { ship, towee: Some(towee) } => {
+            release_hold(world, ship);
+            dock_msg(world, DockMsg::TowStart { tower: Some(ship), towee });
+        }
+        Kind::Tow { ship, towee: None } => dock_msg(world, DockMsg::TowBreak { tower: Some(ship) }),
+        Kind::Board { ship, target: Some(target) } => {
+            release_hold(world, ship);
+            board_msg(world, BoardMsg::Board { boarder: Some(ship), target });
+        }
+        Kind::Board { ship, target: None } => board_msg(world, BoardMsg::Unboard { boarder: Some(ship) }),
+        Kind::Grapple { ship, target: Some(target) } => board_msg(world, BoardMsg::Grapple { grappler: Some(ship), target }),
+        Kind::Grapple { ship, target: None } => board_msg(world, BoardMsg::Ungrapple { grappler: Some(ship) }),
+        Kind::CancelDock { ship } => dock_msg(world, DockMsg::CancelShip(ship)),
+        Kind::DropGrapple { ship } => {
+            if let Ok(mut e) = world.get_entity_mut(ship) {
+                e.remove::<crate::boarding::GrappleOrder>();
+            }
+        }
+        _ => {}
     }
 }
 
@@ -131,6 +387,7 @@ fn frame_start(world: &mut World) {
         world.resource_mut::<Outbox>().0.clear();
         return;
     }
+    let starts = !clock.active;
     if clock.active {
         clock.frame += 1;
     } else {
@@ -138,6 +395,9 @@ fn frame_start(world: &mut World) {
     }
     clock.frame_ticks = 0;
     let (frame, first) = (clock.frame, clock.battle == 0);
+    if starts && first {
+        write_header(world);
+    }
     let Some(replay) = world.get_resource::<Replay>().filter(|r| first && !r.finished) else { return };
     if let Some(&(advance, ticks)) = replay.frames.get(frame as usize) {
         // Exactly `ticks` ticks run this frame: with the overstep at max(0, ticks x tick - advance), the loop fits floor(max(ticks x
@@ -160,7 +420,7 @@ pub fn apply_tick(world: &mut World) {
         let todo = replayed(world, At::Tick(tick)).unwrap_or(sent);
         for c in todo {
             record(world, At::Tick(tick), &c);
-            apply(world, &c.kind);
+            apply(world, c.player, &c.kind);
         }
         let mut clock = world.resource_mut::<Clock>();
         clock.tick += 1;
@@ -168,7 +428,7 @@ pub fn apply_tick(world: &mut World) {
     } else {
         // Not counted (a world without the frame clock: unit tests): applied as they come.
         for c in sent {
-            apply(world, &c.kind);
+            apply(world, c.player, &c.kind);
         }
     }
 }
@@ -187,13 +447,14 @@ fn apply_paused(world: &mut World) {
     };
     for c in todo {
         record(world, At::Frame(frame), &c);
-        apply(world, &c.kind);
+        apply(world, c.player, &c.kind);
     }
 }
 
 // ---- The file -------------------------------------------------------------------------------------------------------------
 
-/// A replicated object: its kind and its creation number within the kind (`scenario::SpawnIndex`, from 0 at battle start).
+/// A replicated object: its kind and its creation number within the kind (`scenario::SpawnIndex`, from 0 at battle start), or for
+/// map scenery without one (bases without guns, islands) its place in the map's object list (`scenario::SceneryIndex`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct NetId {
     pub kind: NetKind,
@@ -205,27 +466,40 @@ pub enum NetKind {
     Ship,
     ArmedBase,
     Asteroid,
+    /// A space animal (whale, dragon).
+    Animal,
+    /// Map scenery that is none of the above: a base without guns, an island.
+    Scenery,
 }
 
 impl NetId {
-    /// `e`'s id, None for an object without a creation number (space animals and bases without guns, for now).
+    /// `e`'s id, None for an object a player cannot name (an effect, a shell).
     pub fn of(world: &World, e: Entity) -> Option<Self> {
-        let index = world.get::<crate::scenario::SpawnIndex>(e)?.0;
-        let kind = if world.get::<Ship>(e).is_some() {
-            NetKind::Ship
-        } else if world.get::<crate::combat::ArmedBase>(e).is_some() {
-            NetKind::ArmedBase
-        } else if world.get::<crate::combat::Asteroid>(e).is_some() {
-            NetKind::Asteroid
-        } else {
-            return None;
-        };
-        Some(Self { kind, index })
+        let numbered = world.get::<crate::scenario::SpawnIndex>(e).and_then(|i| {
+            let kind = if world.get::<Ship>(e).is_some() {
+                NetKind::Ship
+            } else if world.get::<crate::combat::ArmedBase>(e).is_some() {
+                NetKind::ArmedBase
+            } else if world.get::<crate::combat::Asteroid>(e).is_some() {
+                NetKind::Asteroid
+            } else if world.get::<crate::environment::SpaceAnimal>(e).is_some() {
+                NetKind::Animal
+            } else {
+                return None;
+            };
+            Some(Self { kind, index: i.0 })
+        });
+        numbered.or_else(|| world.get::<crate::scenario::SceneryIndex>(e).map(|i| Self { kind: NetKind::Scenery, index: i.0 }))
     }
     /// The entity with this id now.
     pub fn find(self, world: &mut World) -> Option<Entity> {
-        let mut q = world.query::<(Entity, &crate::scenario::SpawnIndex)>();
-        let found: Vec<Entity> = q.iter(world).filter(|(_, i)| i.0 == self.index).map(|(e, _)| e).collect();
+        let found: Vec<Entity> = if self.kind == NetKind::Scenery {
+            let mut q = world.query::<(Entity, &crate::scenario::SceneryIndex)>();
+            q.iter(world).filter(|(_, i)| i.0 == self.index).map(|(e, _)| e).collect()
+        } else {
+            let mut q = world.query::<(Entity, &crate::scenario::SpawnIndex)>();
+            q.iter(world).filter(|(_, i)| i.0 == self.index).map(|(e, _)| e).collect()
+        };
         found.into_iter().find(|e| NetId::of(world, *e) == Some(self))
     }
 }
@@ -244,8 +518,79 @@ pub enum At {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Saved {
-    Engine { ship: NetId, engine: SavedEngine },
-    Target { ship: NetId, target: Option<NetId>, spot: Option<[f32; 3]> },
+    Engine {
+        ship: NetId,
+        engine: SavedEngine,
+    },
+    Target {
+        ship: NetId,
+        target: Option<NetId>,
+        spot: Option<[f32; 3]>,
+    },
+    Move {
+        ship: NetId,
+        to: [f32; 3],
+        append: bool,
+    },
+    Course {
+        ship: NetId,
+        points: Vec<[f32; 3]>,
+        release: bool,
+    },
+    Cancel {
+        ship: NetId,
+    },
+    Stop {
+        ship: NetId,
+    },
+    Hold {
+        ship: NetId,
+        on: bool,
+    },
+    Cloak {
+        ship: NetId,
+        on: bool,
+    },
+    Dock {
+        ship: NetId,
+        dockee: NetId,
+        release: bool,
+    },
+    Tow {
+        ship: NetId,
+        towee: Option<NetId>,
+    },
+    Board {
+        ship: NetId,
+        target: Option<NetId>,
+    },
+    Grapple {
+        ship: NetId,
+        target: Option<NetId>,
+    },
+    CancelDock {
+        ship: NetId,
+    },
+    DropGrapple {
+        ship: NetId,
+    },
+    Formation {
+        formation: crate::ship::Formation,
+        hold: bool,
+    },
+    FleetAttack,
+    CeaseFire,
+    Promote {
+        ship: NetId,
+    },
+    PanicFire {
+        ship: NetId,
+    },
+    /// Bank and ground point (game axes).
+    Lob {
+        ship: NetId,
+        shot: Option<(usize, [f32; 3])>,
+    },
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -263,10 +608,37 @@ struct Header {
     seed: u64,
     args: Vec<String>,
     mods: Vec<String>,
-    /// The battle was set up in the menus, not by `--map`, `--lobby` or `--mission`: the arguments do not hold it, so it cannot be
-    /// replayed yet (recording the lobby's setup is a follow-up).
+    /// The battle was set up in the menus and no skirmish setup holds it (a campaign mission): neither it nor the arguments say what
+    /// the battle was, so it cannot be replayed yet.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     from_menu: bool,
+    /// The skirmish lobby's setup at Launch (format 2). The arguments then leave out `--lobby`: the setup replaces it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    skirmish: Option<crate::menu::SkirmishSetup>,
+}
+
+impl Header {
+    /// This run's header once its battle has loaded; `skirmish` is what the lobby launched, if the lobby launched it.
+    fn new(seed: u64, args: &[String], skirmish: Option<crate::menu::SkirmishSetup>) -> Self {
+        let mut args = scenario_args(args);
+        if skirmish.is_some()
+            && let Some(i) = args.iter().position(|a| a == "--lobby")
+        {
+            args.drain(i..(i + 2).min(args.len()));
+        }
+        let from_menu = skirmish.is_none() && !sets_up_battle(&args);
+        Header { format: FORMAT, version: env!("CARGO_PKG_VERSION").into(), seed, args, mods: mod_names(), from_menu, skirmish }
+    }
+}
+
+/// The skirmish setup the `--replay` recording holds, if any: the run then opens the lobby and launches it. A file that cannot be
+/// read gives none here; the replay itself says why (`plugin`).
+pub fn recorded_setup(args: &[String]) -> Option<crate::menu::SkirmishSetup> {
+    let path = args.iter().position(|a| a == "--replay").and_then(|i| args.get(i + 1))?;
+    let mut first = String::new();
+    // A header is one short line: a damaged file cannot make this read without end.
+    std::io::BufReader::new(std::io::Read::take(std::fs::File::open(path).ok()?, 1 << 20)).read_line(&mut first).ok()?;
+    serde_json::from_str::<Header>(&first).ok()?.skirmish
 }
 
 /// Whether these scenario arguments set up a battle by themselves.
@@ -315,6 +687,24 @@ impl Saved {
                 },
             },
             Kind::Target { ship, target, spot } => Saved::Target { ship: id(ship)?, target: target.map(id).transpose()?, spot: spot.map(game_axes) },
+            Kind::Move { ship, to, append } => Saved::Move { ship: id(ship)?, to: game_axes(to), append },
+            Kind::Course { ship, ref points, release } => Saved::Course { ship: id(ship)?, points: points.iter().copied().map(game_axes).collect(), release },
+            Kind::Cancel { ship } => Saved::Cancel { ship: id(ship)? },
+            Kind::Stop { ship } => Saved::Stop { ship: id(ship)? },
+            Kind::Hold { ship, on } => Saved::Hold { ship: id(ship)?, on },
+            Kind::Cloak { ship, on } => Saved::Cloak { ship: id(ship)?, on },
+            Kind::Dock { ship, dockee, release } => Saved::Dock { ship: id(ship)?, dockee: id(dockee)?, release },
+            Kind::Tow { ship, towee } => Saved::Tow { ship: id(ship)?, towee: towee.map(id).transpose()? },
+            Kind::Board { ship, target } => Saved::Board { ship: id(ship)?, target: target.map(id).transpose()? },
+            Kind::Grapple { ship, target } => Saved::Grapple { ship: id(ship)?, target: target.map(id).transpose()? },
+            Kind::CancelDock { ship } => Saved::CancelDock { ship: id(ship)? },
+            Kind::DropGrapple { ship } => Saved::DropGrapple { ship: id(ship)? },
+            Kind::Formation { formation, hold } => Saved::Formation { formation, hold },
+            Kind::FleetAttack => Saved::FleetAttack,
+            Kind::CeaseFire => Saved::CeaseFire,
+            Kind::Promote { ship } => Saved::Promote { ship: id(ship)? },
+            Kind::PanicFire { ship } => Saved::PanicFire { ship: id(ship)? },
+            Kind::Lob { ship, shot } => Saved::Lob { ship: id(ship)?, shot: shot.map(|(bank, at)| (bank, game_axes(at))) },
         })
     }
     /// The command for this world; None when an object it names is gone.
@@ -328,14 +718,34 @@ impl Saved {
                     SavedEngine::To(i) => Engine::To(EngineOrder::from_index(i as usize)?),
                 },
             },
-            Saved::Target { ship, target, spot } => {
-                let target = match target {
-                    Some(t) => Some(t.find(world)?),
-                    None => None,
-                };
-                Kind::Target { ship: ship.find(world)?, target, spot: spot.map(bevy_axes) }
-            }
+            Saved::Target { ship, target, spot } => Kind::Target { ship: ship.find(world)?, target: find(world, target)?, spot: spot.map(bevy_axes) },
+            Saved::Move { ship, to, append } => Kind::Move { ship: ship.find(world)?, to: bevy_axes(to), append },
+            Saved::Course { ship, ref points, release } => Kind::Course { ship: ship.find(world)?, points: points.iter().copied().map(bevy_axes).collect(), release },
+            Saved::Cancel { ship } => Kind::Cancel { ship: ship.find(world)? },
+            Saved::Stop { ship } => Kind::Stop { ship: ship.find(world)? },
+            Saved::Hold { ship, on } => Kind::Hold { ship: ship.find(world)?, on },
+            Saved::Cloak { ship, on } => Kind::Cloak { ship: ship.find(world)?, on },
+            Saved::Dock { ship, dockee, release } => Kind::Dock { ship: ship.find(world)?, dockee: dockee.find(world)?, release },
+            Saved::Tow { ship, towee } => Kind::Tow { ship: ship.find(world)?, towee: find(world, towee)? },
+            Saved::Board { ship, target } => Kind::Board { ship: ship.find(world)?, target: find(world, target)? },
+            Saved::Grapple { ship, target } => Kind::Grapple { ship: ship.find(world)?, target: find(world, target)? },
+            Saved::CancelDock { ship } => Kind::CancelDock { ship: ship.find(world)? },
+            Saved::DropGrapple { ship } => Kind::DropGrapple { ship: ship.find(world)? },
+            Saved::Formation { formation, hold } => Kind::Formation { formation, hold },
+            Saved::FleetAttack => Kind::FleetAttack,
+            Saved::CeaseFire => Kind::CeaseFire,
+            Saved::Promote { ship } => Kind::Promote { ship: ship.find(world)? },
+            Saved::PanicFire { ship } => Kind::PanicFire { ship: ship.find(world)? },
+            Saved::Lob { ship, shot } => Kind::Lob { ship: ship.find(world)?, shot: shot.map(|(bank, at)| (bank, bevy_axes(at))) },
         })
+    }
+}
+
+/// An optional object of a command: Some(None) when the command names none, None when the one it names is gone.
+fn find(world: &mut World, id: Option<NetId>) -> Option<Option<Entity>> {
+    match id {
+        Some(id) => id.find(world).map(Some),
+        None => Some(None),
     }
 }
 
@@ -385,6 +795,8 @@ fn mod_names() -> Vec<String> {
 #[derive(Resource)]
 struct Recorder {
     out: std::io::BufWriter<std::fs::File>,
+    /// The run's seed and arguments until the header goes out, once the first battle has loaded (`write_header`).
+    pending: Option<(u64, Vec<String>)>,
     /// Frames not written yet, run-length packed.
     frames: Vec<Vec<u64>>,
     warned: bool,
@@ -422,6 +834,23 @@ impl Drop for Recorder {
     fn drop(&mut self) {
         self.flush();
     }
+}
+
+/// The recording's first line, once its battle has loaded: by then the lobby (if it launched the battle) holds the setup.
+fn write_header(world: &mut World) {
+    let Some((seed, args)) = world.get_resource_mut::<Recorder>().and_then(|mut r| r.pending.take()) else { return };
+    let skirmish = match (world.get_resource::<crate::menu::Skirmish>(), world.get_resource::<crate::combat::Library>()) {
+        (Some(sk), Some(lib)) if sk.map.is_some() => crate::menu::SkirmishSetup::capture(sk, lib),
+        _ => None,
+    };
+    let header = Header::new(seed, &args, skirmish);
+    if header.from_menu {
+        warn!("PROCYON_COMMANDS: this battle was set up in the menus without a skirmish setup (a campaign mission): --replay will refuse it");
+    }
+    let mut rec = world.resource_mut::<Recorder>();
+    let _ = serde_json::to_writer(&mut rec.out, &header);
+    let _ = rec.out.write_all(b"\n");
+    let _ = rec.out.flush();
 }
 
 fn record(world: &mut World, at: At, c: &PlayerCommand) {
@@ -466,16 +895,17 @@ fn replayed(world: &mut World, at: At) -> Option<Vec<PlayerCommand>> {
     if world.resource::<Clock>().battle != 0 {
         return None;
     }
-    let saved: Vec<Saved> = world.get_resource::<Replay>().filter(|r| !r.finished)?.commands.iter().filter(|(a, _)| *a == at).map(|(_, s)| s.clone()).collect();
+    let saved: Vec<(PlayerId, Saved)> =
+        world.get_resource::<Replay>().filter(|r| !r.finished)?.commands.iter().filter(|(a, ..)| *a == at).map(|(_, p, s)| (*p, s.clone())).collect();
     Some(
         saved
             .iter()
-            .filter_map(|s| {
+            .filter_map(|(player, s)| {
                 let kind = s.load(world);
                 if kind.is_none() {
                     warn!("--replay: a command at {at:?} names an object this battle does not have: {s:?}");
                 }
-                kind.map(|kind| PlayerCommand { player: PlayerId(0), kind })
+                kind.map(|kind| PlayerCommand { player: *player, kind })
             })
             .collect(),
     )
@@ -486,7 +916,8 @@ fn replayed(world: &mut World, at: At) -> Option<Vec<PlayerCommand>> {
 pub struct Replay {
     /// Each battle frame's game-time advance and tick count.
     frames: Vec<(Duration, u32)>,
-    commands: Vec<(At, Saved)>,
+    /// When, by whom, what.
+    commands: Vec<(At, PlayerId, Saved)>,
     finished: bool,
 }
 
@@ -498,8 +929,8 @@ impl Replay {
             Some((_, Ok(l))) => serde_json::from_str(&l).map_err(|e| format!("line 1 is not a command-log header: {e}"))?,
             _ => return Err("empty file".into()),
         };
-        if header.format != FORMAT {
-            return Err(format!("format {} (this game reads {FORMAT})", header.format));
+        if !(OLDEST_FORMAT..=FORMAT).contains(&header.format) {
+            return Err(format!("format {} (this game reads {OLDEST_FORMAT} to {FORMAT})", header.format));
         }
         let mut replay = Replay { frames: vec![], commands: vec![], finished: false };
         let mut unrecorded = 0;
@@ -520,7 +951,7 @@ impl Replay {
                         replay.frames.extend(std::iter::repeat_n((Duration::from_nanos(ns), ticks), repeat));
                     }
                 }
-                Line::Command { at, order, .. } => replay.commands.push((at, order)),
+                Line::Command { at, player, order } => replay.commands.push((at, player, order)),
                 Line::Unrecorded { .. } => unrecorded += 1,
             }
         }
@@ -573,7 +1004,10 @@ fn finish(replay: &mut Replay, strategy: &mut bevy::time::TimeUpdateStrategy, wh
 /// Why a recording cannot replay with this launch, if it cannot: the scenario arguments, seed or mods differ.
 fn mismatch(header: &Header, args: &[String], seed: u64, mods: &[String]) -> Option<String> {
     if header.from_menu {
-        return Some("it was recorded from a battle set up in the menus; only battles started with --map, --lobby or --mission replay so far".into());
+        return Some("it was recorded from a campaign mission started in the menus; only skirmishes and battles started with --map or --mission replay so far".into());
+    }
+    if header.skirmish.is_some() && args.iter().any(|a| a == "--lobby") {
+        return Some("it holds its own skirmish setup: leave out --lobby".into());
     }
     let mine = scenario_args(args);
     if header.args != mine {
@@ -618,17 +1052,7 @@ pub fn plugin(app: &mut App) {
     }
     if let Ok(path) = std::env::var("PROCYON_COMMANDS") {
         let file = std::fs::File::create(&path).unwrap_or_else(|e| panic!("PROCYON_COMMANDS: cannot write {path}: {e}"));
-        let mut rec = Recorder { out: std::io::BufWriter::new(file), frames: vec![], warned: false };
-        let scenario = scenario_args(&args);
-        let from_menu = !sets_up_battle(&scenario);
-        if from_menu {
-            warn!("PROCYON_COMMANDS: the battle will be set up in the menus, which a recording does not hold yet: --replay will refuse it");
-        }
-        let header = Header { format: FORMAT, version: env!("CARGO_PKG_VERSION").into(), seed, args: scenario, mods: mod_names(), from_menu };
-        let _ = serde_json::to_writer(&mut rec.out, &header);
-        let _ = rec.out.write_all(b"\n");
-        let _ = rec.out.flush();
-        app.insert_resource(rec);
+        app.insert_resource(Recorder { out: std::io::BufWriter::new(file), pending: Some((seed, args)), frames: vec![], warned: false });
     }
 }
 

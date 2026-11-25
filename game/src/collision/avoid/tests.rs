@@ -13,13 +13,17 @@ fn wall(z: f32, x: f32, half: f32) -> Obstacle {
 }
 fn island(o: &Obstacle) -> Other<'_> {
     let (centre, radius) = o.sphere();
-    Other { key: Key::Rock(0), centre, radius, priority: 0.0, lifeboat: false, shape: Shape::Fixed { obstacle: o, island: true } }
+    Other { key: key(0), centre, radius, priority: 0.0, lifeboat: false, shape: Shape::Fixed { obstacle: o, island: true } }
 }
 fn ship(at: Vec3, heading: f32, speed: f32, priority: f32) -> Other<'static> {
     let velocity = Vec3::new(-heading.sin(), 0.0, -heading.cos()) * speed;
-    Other { key: Key::Rock(1), centre: at, radius: 15.0, priority, lifeboat: false, shape: Shape::Ship { bounds: BOUNDS, heading, velocity } }
+    Other { key: key(1), centre: at, radius: 15.0, priority, lifeboat: false, shape: Shape::Ship { bounds: BOUNDS, heading, velocity } }
 }
-const SELF: Key = Key::Rock(99);
+/// Keys for the test obstacles and the ship itself.
+fn key(n: u32) -> Key {
+    Key::Entity(Entity::from_raw_u32(n).unwrap())
+}
+const SELF: u32 = 99;
 const FAR: Vec3 = Vec3::new(0.0, 0.0, -2000.0);
 
 #[test]
@@ -27,7 +31,7 @@ fn land_on_the_line_caps_speed_by_the_distance_to_contact_and_sets_a_detour() {
     let cap = |coast: f32| {
         let w = wall(coast, 0.0, 40.0);
         let mut a = Avoid::new(0.0);
-        a.think(&me(6.6), FAR, &[island(&w)], SELF);
+        a.think(&me(6.6), FAR, &[island(&w)], key(SELF));
         (a.cap, a.detour)
     };
     let (far, detour) = cap(70.0);
@@ -43,7 +47,7 @@ fn land_beside_the_line_is_passed_at_full_speed() {
     // Retail Frigate passed an island 27 units off its line at full speed.
     let w = wall(60.0, 27.0 + 3.0 + 40.0, 40.0);
     let mut a = Avoid::new(0.0);
-    a.think(&me(6.6), FAR, &[island(&w)], SELF);
+    a.think(&me(6.6), FAR, &[island(&w)], key(SELF));
     assert_eq!((a.cap, a.detour), (1.0, None));
 }
 
@@ -52,7 +56,7 @@ fn the_detour_is_the_smallest_clear_turn_and_goes_round_the_short_side() {
     // A wall reaching far to the left of the line and only a little to the right: the turn goes right (negative x).
     let w = wall(60.0, -30.0, 40.0);
     let mut a = Avoid::new(0.0);
-    a.think(&me(6.6), FAR, &[island(&w)], SELF);
+    a.think(&me(6.6), FAR, &[island(&w)], key(SELF));
     let d = a.detour.expect("detour");
     assert!(d.x > 0.0, "round the short end of the wall, got {d}");
     assert!(d.length() >= 60.0 - 1e-3, "at least 4 radii ahead");
@@ -67,12 +71,12 @@ fn after_three_seconds_on_the_same_ship_the_lower_priority_ship_stops_for_four()
     let other_slow = ship(Vec3::new(0.0, 0.0, -50.0), PI, 0.0, 2.0);
     let other_fast = ship(Vec3::new(0.0, 0.0, -50.0), PI, 0.0, 6.6);
     for _ in 0..6 {
-        fast.think(&me(6.6), FAR, std::slice::from_ref(&other_slow), SELF);
-        slow.think(&Me { priority: 3.0, ..me(3.0) }, FAR, std::slice::from_ref(&other_fast), SELF);
+        fast.think(&me(6.6), FAR, std::slice::from_ref(&other_slow), key(SELF));
+        slow.think(&Me { priority: 3.0, ..me(3.0) }, FAR, std::slice::from_ref(&other_fast), key(SELF));
     }
     assert!(fast.cap > 0.0 && slow.cap > 0.0, "five repeats are not yet a reason to stop");
-    fast.think(&me(6.6), FAR, std::slice::from_ref(&other_slow), SELF);
-    slow.think(&Me { priority: 3.0, ..me(3.0) }, FAR, std::slice::from_ref(&other_fast), SELF);
+    fast.think(&me(6.6), FAR, std::slice::from_ref(&other_slow), key(SELF));
+    slow.think(&Me { priority: 3.0, ..me(3.0) }, FAR, std::slice::from_ref(&other_fast), key(SELF));
     assert!(fast.cap > 0.0, "the faster ship has right of way");
     assert_eq!(slow.cap, 0.0, "the slower ship stops");
     let thinks = (0..20).filter(|_| slow.due(THINK)).count();
@@ -84,13 +88,13 @@ fn a_computer_ship_gives_way_to_the_humans_moving_ship_but_never_stops_for_land(
     let human = ship(Vec3::new(0.0, 0.0, -50.0), PI, 0.0, 1.0 + HUMAN_PRIORITY);
     let mut a = Avoid::new(0.0);
     for _ in 0..7 {
-        a.think(&me(6.6), FAR, std::slice::from_ref(&human), SELF);
+        a.think(&me(6.6), FAR, std::slice::from_ref(&human), key(SELF));
     }
     assert_eq!(a.cap, 0.0, "stops for the human's ship");
     let w = wall(40.0, 0.0, 400.0);
     let mut b = Avoid::new(0.0);
     for _ in 0..12 {
-        b.think(&me(6.6), FAR, &[island(&w)], SELF);
+        b.think(&me(6.6), FAR, &[island(&w)], key(SELF));
     }
     assert!(b.cap > 0.0, "a moving ship outranks land");
 }
@@ -101,17 +105,17 @@ fn a_ship_wedged_against_land_turns_in_place_after_eleven_thinks_toward_the_smal
     let w = wall(14.0, 0.0, 400.0);
     let mut a = Avoid::new(0.0);
     for _ in 0..11 {
-        a.think(&me(0.5), FAR, &[island(&w)], SELF);
+        a.think(&me(0.5), FAR, &[island(&w)], key(SELF));
     }
     assert_eq!(a.stuck, None, "not before the twelfth think on the same obstacle");
-    a.think(&me(0.5), FAR, &[island(&w)], SELF);
+    a.think(&me(0.5), FAR, &[island(&w)], key(SELF));
     assert_eq!(a.stuck, Some(-1.0), "both sides clear at the same turn: the minus side, as the original");
     let free = Me { heading: -PI / 2.0, ..me(0.5) };
-    a.think(&free, FAR, &[island(&w)], SELF);
+    a.think(&free, FAR, &[island(&w)], key(SELF));
     assert_eq!(a.stuck, None, "released once the bow is clear");
     let mut fast = Avoid::new(0.0);
     for _ in 0..20 {
-        fast.think(&me(6.6), FAR, &[island(&w)], SELF);
+        fast.think(&me(6.6), FAR, &[island(&w)], key(SELF));
     }
     assert_eq!(fast.stuck, None, "a ship still under way is never stuck");
 }
@@ -130,4 +134,18 @@ fn a_computer_captain_shoots_the_nearest_rock_within_ten_seconds_of_course() {
     assert_eq!(pick(5.0, &[&near], 10.0), None, "beyond the captain's scan range");
     assert_eq!(pick(0.0, &[&near], 1e3), None, "at rest only a rock already overlapped counts");
     assert_eq!(pick(0.0, &[&wall(0.0, 0.0, 10.0)], 1e3), Some(0));
+}
+
+/// The same-obstacle count follows the obstacle, not its place in the list: a rock that moves in the list between thinks (another
+/// rock destroyed before it, say) is still the same rock (#369; rocks were keyed by their query index).
+#[test]
+fn the_same_rock_counts_as_the_same_wherever_it_is_listed() {
+    let (near, beside) = (wall(40.0, 0.0, 40.0), wall(60.0, 400.0, 10.0));
+    fn rock(o: &Obstacle, n: u32) -> Other<'_> {
+        Other { key: key(n), ..island(o) }
+    }
+    let mut a = Avoid::new(0.0);
+    a.think(&me(6.6), FAR, &[rock(&near, 5), rock(&beside, 6)], key(SELF));
+    a.think(&me(6.6), FAR, &[rock(&beside, 6), rock(&near, 5)], key(SELF));
+    assert_eq!((a.last, a.same), (Some(key(5)), 1), "met twice in a row");
 }

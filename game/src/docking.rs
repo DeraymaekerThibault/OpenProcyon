@@ -138,7 +138,7 @@ pub fn dockable_for(docks: &Value, entity: &str) -> Option<Dockable> {
     (!points.is_empty()).then(|| Dockable { numbers, layers, ..Dockable::new(points, enabled) })
 }
 
-#[derive(Message)]
+#[derive(Message, Debug)]
 pub enum DockMsg {
     /// `docker: None` is the player's ship.
     Dock {
@@ -253,7 +253,9 @@ pub fn plugin(app: &mut App) {
     // Where the original runs each part: the player's orders only record an order (step 3); the link keeper holds a docked ship to its
     // dock (7.1); the dock's glide is part of the ship's movement (7.2); the routine's decisions and the AI's repair and tow decisions
     // run after collision (8); the repair heal is an upkeep armed by the dock decision.
+    // Backspace's dock cancel is an order (`commands::Kind::CancelDock`).
     app.add_message::<DockMsg>()
+        .init_resource::<crate::commands::Outbox>()
         .add_systems(FixedUpdate, handle_messages.in_set(crate::BattleSet::Commands).run_if(in_state(crate::menu::Screen::Battle)).run_if(crate::menu::overlay_closed))
         .add_systems(FixedUpdate, docked_hold.in_set(crate::BattleSet::Forces).run_if(in_state(crate::menu::Screen::Battle)).run_if(crate::menu::overlay_closed))
         .add_systems(
@@ -322,18 +324,18 @@ fn play_cranes(
     }
 }
 
-fn cancel_input(keys: Res<ButtonInput<KeyCode>>, fleets: Res<crate::ship::Fleets>, player: Query<Entity, With<PlayerShip>>, mut msgs: MessageWriter<DockMsg>) {
+fn cancel_input(keys: Res<ButtonInput<KeyCode>>, fleets: Res<crate::ship::Fleets>, player: Query<Entity, With<PlayerShip>>, mut orders: crate::commands::Orders) {
     if keys.just_pressed(KeyCode::Backspace)
         && let Some(e) = fleets.selected.or_else(|| player.single().ok())
     {
-        msgs.write(DockMsg::CancelShip(e));
+        orders.send(crate::commands::Kind::CancelDock { ship: e });
     }
 }
 
 fn handle_messages(
     mut msgs: MessageReader<DockMsg>,
     mut commands: Commands,
-    player: Query<Entity, With<PlayerShip>>,
+    player: Query<Entity, With<crate::commands::Commander>>,
     pos: Query<&Transform, With<Ship>>,
     mut dockables: Query<&mut Dockable>,
     dockers: Query<&Docker>,
@@ -776,7 +778,7 @@ fn routine(
     mut commands: Commands,
     mut sfx: MessageWriter<Sfx>,
     mut mission: Option<ResMut<Mission>>,
-    mut dockers: Query<(Entity, &Transform, &mut Ship, &Health, &mut Docker, Has<PlayerShip>, Option<&DockTime>)>,
+    mut dockers: Query<(Entity, &Transform, &mut Ship, &Health, &mut Docker, Has<crate::commands::Commander>, Option<&DockTime>)>,
     mut dockees: Query<(&Transform, &mut Dockable, Option<&Ship>, Option<&Health>), Without<Docker>>,
 ) {
     let dt = time.delta_secs();
@@ -905,7 +907,7 @@ fn ai_repair_dock(
     mission: Option<Res<Mission>>,
     mut msg: MessageWriter<DockMsg>,
     sensors: Option<Res<crate::environment::Sensors>>,
-    ships: Query<(Entity, &Ship, &Health, &Transform, Option<&crate::campaign::MissionShip>, Option<&Docker>), Without<PlayerShip>>,
+    ships: Query<(Entity, &Ship, &Health, &Transform, Option<&crate::campaign::MissionShip>, Option<&Docker>), Without<crate::commands::Commander>>,
     docks: Query<(Entity, &Transform, &Dockable, Option<&Ship>, Option<&crate::campaign::MissionShip>, Option<&MissionBase>)>,
 ) {
     let script = mission.as_deref().map(|m| &m.script);
@@ -953,7 +955,6 @@ pub struct Dockees<'w, 's> {
     lib: Res<'w, Library>,
     sensors: Res<'w, crate::environment::Sensors>,
     mission: Option<Res<'w, Mission>>,
-    msg: MessageWriter<'w, DockMsg>,
     menu: Res<'w, crate::options_menu::OptionsMenu>,
 }
 /// A base is hostile by mission rules, or in a skirmish (no mission rules) when its side is not the player's.
@@ -1012,12 +1013,6 @@ impl Dockees<'_, '_> {
     pub fn menu_swallows_click(&self) -> bool {
         self.menu.swallow.load(std::sync::atomic::Ordering::Relaxed)
     }
-    pub fn cancel_as(&mut self, actor: Entity) {
-        self.msg.write(DockMsg::CancelShip(actor));
-    }
-    pub fn dock_as(&mut self, actor: Entity, dockee: Entity) {
-        self.msg.write(DockMsg::Dock { docker: Some(actor), dockee });
-    }
     /// The ship `tower` is towing, if any (links are kept by the rules: campaign missions only).
     pub fn towee_of(&self, tower: Entity) -> Option<Entity> {
         self.mission.as_deref()?.script.towee_of(tower)
@@ -1028,12 +1023,6 @@ impl Dockees<'_, '_> {
     }
     pub fn towable(&self, e: Entity) -> bool {
         !self.untowable.contains(e)
-    }
-    pub fn tow_as(&mut self, actor: Entity, towee: Entity) {
-        self.msg.write(DockMsg::TowStart { tower: Some(actor), towee });
-    }
-    pub fn break_tow_as(&mut self, actor: Entity) {
-        self.msg.write(DockMsg::TowBreak { tower: Some(actor) });
     }
 }
 

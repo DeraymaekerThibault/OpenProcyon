@@ -498,3 +498,46 @@ fn a_board_order_ends_when_the_target_is_no_longer_an_enemy_and_an_abandoned_shi
     tick(&mut app, 0.1);
     assert!(app.world().get::<order::BoardOrder>(a).is_none() && app.world().get::<GrappleOrder>(a).is_none(), "abandoned on the way: both orders end");
 }
+
+/// Two fights at once draw their casualty coins from the one `SimRng` in the boarders' spawn order, whatever order the entities were
+/// created (and the query lists them) in: the same battle gives the same losses on every run (#369).
+#[test]
+fn two_fights_at_once_draw_in_spawn_order_not_query_order() {
+    let run = |first_pair_first: bool| {
+        let class = crate::fixed_tests::synthetic_class();
+        let mut app = App::new();
+        app.add_message::<Settled>()
+            .add_message::<Sfx>()
+            .insert_resource(Time::<()>::default())
+            .insert_resource(Library { classes: vec![class], guns: default(), bullets: default(), names: default(), clips: default() })
+            .insert_resource(SimRng::new(11))
+            .add_systems(Update, fights);
+        // A fight: boarder `n` (spawn number n) on its grappled target, both hulls at one spot, the crews already fighting.
+        let pair = |app: &mut App, n: u32, at: Vec3| {
+            let hull = |app: &mut App, side: Side, index: u32| {
+                let health = Health::new(&app.world().resource::<Library>().classes[0]);
+                let boardable = Boardable { on: true, strength: Strength::ship(SCHOONER, Skill::Average.member()), skill: Skill::Average, counts: SCHOONER, points: vec![] };
+                app.world_mut().spawn((Transform::from_translation(at), Ship::new(0, side), health, Drift::default(), boardable, crate::scenario::SpawnIndex(index))).id()
+            };
+            let (b, t) = (hull(app, Side::Player, n), hull(app, Side::Enemy, 10 + n));
+            app.world_mut().spawn(Grapple::new(b, t, 0.0));
+            app.world_mut().entity_mut(b).insert(Boarding { target: t, interval: 0.0, since: 0.0, live: true, fx: vec![] });
+            (b, t)
+        };
+        let (a, c) = if first_pair_first {
+            let a = pair(&mut app, 0, Vec3::ZERO);
+            (a, pair(&mut app, 1, Vec3::X * 500.0))
+        } else {
+            let c = pair(&mut app, 1, Vec3::X * 500.0);
+            (pair(&mut app, 0, Vec3::ZERO), c)
+        };
+        for _ in 0..12 {
+            tick(&mut app, 0.033);
+        }
+        let left = |e: Entity| app.world().get::<Boardable>(e).map(|b| (b.strength.attack, b.strength.defend));
+        [left(a.0), left(a.1), left(c.0), left(c.1)]
+    };
+    let (one, other) = (run(true), run(false));
+    assert_eq!(one, other);
+    assert!(one[0] != one[2] || one[1] != one[3], "the two fights drew different coins, so their order shows: {one:?}");
+}
