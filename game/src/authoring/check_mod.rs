@@ -545,29 +545,85 @@ impl Checker<'_> {
         ids.sort();
         let sounds = self.have_base.then(|| sound_stems(&self.root));
         let models = self.have_base.then(|| model_files(&self.root));
+        let base_sounds = std::cell::OnceCell::new();
+        let base_models = std::cell::OnceCell::new();
         for id in ids {
             let dir = self.root.join("maps").join(&id);
             let Some(rules) = crate::rules::cli::rules_file(&dir) else { continue };
             let rules_name = rules.file_name().map_or_else(String::new, |n| n.to_string_lossy().into_owned());
-            let have_sound = |f: &str| sounds.as_ref().is_some_and(|s| s.contains(&f.to_lowercase()));
-            let lookups: Option<(&Path, &dyn Fn(&str) -> bool)> = self.have_base.then_some((self.root.as_path(), &have_sound as &dyn Fn(&str) -> bool));
-            match crate::rules::cli::check_map_in(&dir, lookups) {
-                Ok(found) => self.out.extend(found.into_iter().map(|mut f| {
-                    f.file = format!("maps/{}", f.file);
-                    f
-                })),
-                Err(e) => self.error(&format!("maps/{id}/{rules_name}"), "", e),
+            // The same map in the base game, when the mod touches a retail one: its own warnings are not the mod's.
+            let base_dir = self.base.as_ref().map(|b| b.join("maps").join(&id)).filter(|d| d.is_dir());
+            if let Some(bd) = &base_dir
+                && ["map.json", "media.json", rules_name.as_str()].iter().all(|f| same_file(&dir.join(f), &bd.join(f)))
+            {
+                continue; // the merged files are the base's own: nothing of the mod to check
             }
-            let (Some(mission), map) = (crate::data::try_json(&rules), crate::data::try_json(&dir.join("map.json")).unwrap_or_default()) else { continue };
-            let mission_file = format!("maps/{id}/{rules_name}");
-            self.out.extend(unused_definitions(&mission).into_iter().map(|f| f.with_file(&mission_file)));
-            // Findings of `rules::check` name `map.json` or nothing (the rules file); here they get the map folder.
-            let map_file = format!("maps/{id}/map.json");
-            let placed = outside_world(&mission, &map).into_iter().chain(models.as_ref().map(|m| missing_scenery(&map, m)).unwrap_or_default());
-            self.out.extend(placed.map(|f| {
-                let file = if f.file == "map.json" { map_file.clone() } else { mission_file.clone() };
-                f.with_file(&file)
-            }));
+            let mut found = match map_findings(&self.root, &dir, &id, &rules_name, sounds.as_ref(), models.as_ref()) {
+                Ok(found) => found,
+                Err(e) => {
+                    self.error(&format!("maps/{id}/{rules_name}"), "", e);
+                    continue;
+                }
+            };
+            if let (Some(bd), Some(base)) = (&base_dir, &self.base) {
+                let (bs, bm) = (base_sounds.get_or_init(|| sound_stems(base)), base_models.get_or_init(|| model_files(base)));
+                if let Ok(inherited) = map_findings(base, bd, &id, &rules_name, Some(bs), Some(bm)) {
+                    mark_inherited(&mut found, &inherited);
+                }
+            }
+            self.out.extend(found);
+        }
+    }
+}
+
+/// Everything `--check-mod` says about the map folder `dir` (`maps/<id>` under `root`, which is where ships, sounds and models are looked
+/// up; `sounds`/`models` are `None` without imported assets): the mission checker's findings and the extra warnings.
+fn map_findings(root: &Path, dir: &Path, id: &str, rules_name: &str, sounds: Option<&HashSet<String>>, models: Option<&HashSet<String>>) -> Result<Vec<Finding>, String> {
+    let have_sound = |f: &str| sounds.is_some_and(|s| s.contains(&f.to_lowercase()));
+    let lookups: Option<(&Path, &dyn Fn(&str) -> bool)> = sounds.map(|_| (root, &have_sound as &dyn Fn(&str) -> bool));
+    let mut out: Vec<Finding> = crate::rules::cli::check_map_in(dir, lookups)?
+        .into_iter()
+        .map(|mut f| {
+            f.file = format!("maps/{}", f.file);
+            f
+        })
+        .collect();
+    let rules = dir.join(rules_name);
+    let (Some(mission), map) = (crate::data::try_json(&rules), crate::data::try_json(&dir.join("map.json")).unwrap_or_default()) else { return Ok(out) };
+    let mission_file = format!("maps/{id}/{rules_name}");
+    out.extend(unused_definitions(&mission).into_iter().map(|f| f.with_file(&mission_file)));
+    // Findings of `rules::check` name `map.json` or nothing (the rules file); here they get the map folder.
+    let map_file = format!("maps/{id}/map.json");
+    let placed = outside_world(&mission, &map).into_iter().chain(models.map(|m| missing_scenery(&map, m)).unwrap_or_default());
+    out.extend(placed.map(|f| {
+        let file = if f.file == "map.json" { map_file.clone() } else { mission_file.clone() };
+        f.with_file(&file)
+    }));
+    Ok(out)
+}
+
+/// Both files are missing, or both are there with the same bytes.
+fn same_file(a: &Path, b: &Path) -> bool {
+    std::fs::read(a).ok() == std::fs::read(b).ok()
+}
+
+/// What makes two findings the same one for inheritance: the file, the place (JSON pointer, or the rule by name, its list and field,
+/// never by index: indices shift when a mod adds rules), and the message.
+fn inherit_key(f: &Finding) -> (String, String, String, String, Option<String>, String) {
+    (f.file.clone(), f.pointer.clone(), f.rule.clone(), f.field.clone(), f.list.clone(), f.message.clone())
+}
+
+/// Sets `inherited` on each warning of `found` that the base game's own run (`base`) has too. Each base warning covers one mod warning,
+/// so a mod that repeats a retail warning gets the extra copy as its own. Errors are never marked.
+fn mark_inherited(found: &mut [Finding], base: &[Finding]) {
+    let mut left: std::collections::HashMap<_, usize> = std::collections::HashMap::new();
+    for f in base.iter().filter(|f| f.level == Level::Warning) {
+        *left.entry(inherit_key(f)).or_default() += 1;
+    }
+    for f in found.iter_mut().filter(|f| f.level == Level::Warning) {
+        if let Some(n) = left.get_mut(&inherit_key(f)).filter(|n| **n > 0) {
+            *n -= 1;
+            f.inherited = true;
         }
     }
 }
@@ -1038,6 +1094,67 @@ mod tests {
         assert!(!all.contains("'Island.glb'"), "{all}");
         let ship_m_errors = found.iter().filter(|f| f.level == Level::Error && f.file == m && f.message.contains("cannot load")).count();
         assert_eq!(ship_m_errors, 0, "the loader is asked only about a ship the other checks found no error in");
+        std::fs::remove_dir_all(base).unwrap();
+        std::fs::remove_dir_all(mod_dir).unwrap();
+    }
+
+    /// A base with `maps/m1`: an error (a ship class nobody has) and a warning (a scenery model that is not there).
+    fn base_with_a_map(tag: &str) -> PathBuf {
+        let base = scratch(tag);
+        put(&base, "ships/readme.txt", "x");
+        put(&base, "models/scenery/Island.glb", "x");
+        put(&base, "sound/ship/real.ogg", "x");
+        put_json(&base, "maps/m1/mission.json", json!({"players": ["P"], "ships": [{"id": 1, "type": "Ship_Ghost", "group": "P", "pos": [0, 0, 0]}], "rules": []}));
+        put_json(&base, "maps/m1/map.json", json!({"objects": [{"type": "Isle", "scene": "Isel", "pos": [0, 0, 0]}]}));
+        put_json(&base, "maps/m1/media.json", json!({}));
+        base
+    }
+
+    #[test]
+    fn warnings_the_base_game_has_for_the_same_map_are_inherited_and_its_errors_and_the_mods_own_warnings_are_not() {
+        let (base, mod_dir) = (base_with_a_map("inherit"), scratch("inherit-mod"));
+        // the mod keeps the retail object and adds one more scenery model that is not there
+        put_json(&mod_dir, "maps/m1/map.json", json!({"objects": [{"type": "Isle", "scene": "Isel", "pos": [0, 0, 0]}, {"type": "Rock", "scene": "Rok", "pos": [5, 5, 0]}]}));
+        let found = check_mod_with(&mod_dir, Some(&base), &[]);
+        let all = lines(&found).join("\n");
+        let map = "maps/m1/map.json";
+        let at = |file: &str, needle: &str| found.iter().filter(|f| f.file == file && f.message.contains(needle)).collect::<Vec<_>>();
+        let retail = at(map, "'Isel.glb'");
+        assert_eq!(retail.len(), 1, "{all}");
+        assert!(retail[0].inherited, "the retail warning is the base game's: {all}");
+        let own = at(map, "'Rok.glb'");
+        assert_eq!(own.len(), 1, "{all}");
+        assert!(!own[0].inherited, "the mod's own warning is its own: {all}");
+        let ghost = at("maps/m1/mission.json", "'Ship_Ghost'");
+        assert!(ghost.iter().all(|f| f.level == Level::Error && !f.inherited) && !ghost.is_empty(), "errors always stay the mod's: {all}");
+        assert!(found.iter().filter(|f| f.inherited).all(|f| f.level == Level::Warning), "{all}");
+        // without a base nothing is inherited
+        let alone = check_mod_with(&mod_dir, None, &[]);
+        assert!(alone.iter().all(|f| !f.inherited), "{:?}", lines(&alone));
+        std::fs::remove_dir_all(base).unwrap();
+        std::fs::remove_dir_all(mod_dir).unwrap();
+    }
+
+    #[test]
+    fn rule_warnings_match_by_rule_field_and_message_not_by_index_and_a_repeat_is_the_mods() {
+        let rule_warning = |idx: usize, msg: &str| {
+            let mut f = Finding::new(Level::Warning, "\"Spawn\"", format!("condition #{idx}"), "Group Name", msg);
+            f.rule_index = Some(idx);
+            f.with_file("maps/m1/mission.json")
+        };
+        let base = vec![rule_warning(2, "group 'A' is empty"), Finding::new(Level::Error, "\"Spawn\"", "rule", "", "bad").with_file("maps/m1/mission.json")];
+        let mut found = vec![rule_warning(5, "group 'A' is empty"), rule_warning(6, "group 'A' is empty"), rule_warning(7, "group 'B' is empty"), base[1].clone()];
+        mark_inherited(&mut found, &base);
+        let flags: Vec<bool> = found.iter().map(|f| f.inherited).collect();
+        assert_eq!(flags, [true, false, false, false], "the shifted index still matches once; an error is never marked");
+    }
+
+    #[test]
+    fn a_map_the_mod_leaves_as_the_base_has_it_is_not_checked_at_all() {
+        let (base, mod_dir) = (base_with_a_map("same"), scratch("same-mod"));
+        put(&mod_dir, "maps/m1/map.json", std::fs::read(base.join("maps/m1/map.json")).unwrap());
+        let found = check_mod_with(&mod_dir, Some(&base), &[]);
+        assert!(found.iter().all(|f| !f.file.starts_with("maps/")), "{:?}", lines(&found));
         std::fs::remove_dir_all(base).unwrap();
         std::fs::remove_dir_all(mod_dir).unwrap();
     }
