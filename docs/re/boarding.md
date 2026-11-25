@@ -116,6 +116,18 @@ texture repeat every 2 units, alpha blended. Tow links use the same effect betwe
 Grapples are weapon hits: the harpoon guns (`Gun_Harpoon_Light`, bullet `Bullet_Harpoon`/GrapplingHarpoon, sound `Weapon_GrapHarpoon_*`) of the Navy
 cutter, frigate, man-o-war, sloop, tug and most pirate hulls; the link ("Grapple Type": front / right side) holds the two ships together.
 
+### Harpoon guns
+A harpoon gun has two bullets: its first (`BulletTypeName_Primary`) is `Bullet_Harpoon`, an ordinary shell (30-50 damage on wood, 55 % critical
+chance, 3 s life), its second (`BulletTypeName_Secondary`) is `Bullet_GrapplingHarpoon`. Each gun keeps a choice of which of the two it fires, and
+the gun spawns that bullet when it fires. It starts on the first, so a harpoon gun sits in its bank and **fires ordinary harpoons with it**, at
+whatever the bank fires at: ships, bases, rocks or animals, like any shell. Grappling switches the gun to its second bullet. The computer's
+grapple-and-board routine (every computer ship, target a hostile ship, a harpoon bank with a free grapple, no friend or scenery on the line)
+puts the harpoon banks back on the ordinary harpoon on 95 % of its updates and on 5 % switches them to the grappling harpoon and fires them at
+the target; with a target that is not a ship it always leaves them on the ordinary harpoon. A grappling harpoon carries a rope from the gun
+while it flies; the **grapple is made only when it hits** (its hit removes the bullet and links the two ships), so flight time and misses
+count. Remake: harpoon guns fire their first bullet with their bank (`combat::gunnery`). PROVISIONAL: the Grapple order and the computer's
+grapples still make the grapple without a projectile (below); the second bullet is not exported yet.
+
 ## 6. HUD
 `ShipStatus_Icon_Boarding_Start / Frame0..5 / Stop` animate in the primary ship's status slot like the docking icon. A world "boarding info" panel
 (`BOARDINGSTATUS_HEALTHBAR` 171×40, two colour discs at x = 0 and 131, `ATTACKER` sword and `DEFENDER` shield icons, a relative strength bar inside
@@ -139,7 +151,7 @@ the menu slots (Board / Grapple start and stop); range test; capture (new owner 
 `Player Vs Player capture count` / `Team has captured a ship from Group/Unit` / `Set Group/Unit Boardable`; Setup Ship `Boardable` + `Crew Skill Level`, Setup
 Island `Combat Strength`; fight effect on the target's boarding nodes, fight sound, first-mate lines, the status bar and the status icon.
 PROVISIONAL: no leadership bonus for generic crews (ships with named crew get it) and no per-man crews (generic crew values); `Players` = Average; the harpoon is not a projectile (the order closes to
-100 units, stops and the hook bites after distance / 45 s) and harpoon guns no longer fire at will; a ship holds as many live grapples (flying or bitten) as its limit, counted as in the original (every gun bank whose first working gun fires the grappling harpoon adds all its guns), but at most one per target, which is our choice; the Grapple Stop item lets go of all of the ship's grapples; the grapple line as
+100 units, stops and the hook bites after distance / 45 s) while the harpoon guns keep firing ordinary harpoons; a ship holds as many live grapples (flying or bitten) as its limit, counted as in the original (every gun bank whose first working gun fires the grappling harpoon adds all its guns), but at most one per target, which is our choice; the Grapple Stop item lets go of all of the ship's grapples; the grapple line as
 above (no tow, snaps 2 units past its bite distance, reels in at 3 u/s to 12 while a fight is registered; the reel acts on the ships'
 velocities at a rate of our choosing, "allied" is read as "no longer hostile" and the side test takes the nearer of the bow-stern and beam axes); a Board order on a grappled ship waits for
 the hulls to close instead of failing at once, and the fight effect, crew lines and HUD status start only when the crews meet; the rope is a

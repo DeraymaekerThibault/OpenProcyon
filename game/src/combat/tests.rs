@@ -478,11 +478,15 @@ fn a_skirmish_computer_ship_with_a_map_script_fires_at_its_captains_target() {
     let enemy = spawn(&mut app, Side::Enemy, 60.0);
     app.world_mut().entity_mut(enemy).insert(crate::campaign::MissionShip { visible: true, ..default() });
     app.world_mut().resource_mut::<crate::ship::CaptainTargets>().0.insert(enemy, (me, 0.0, Vec3::ZERO));
+    let mut bullets = std::collections::HashSet::new();
     for _ in 0..200 {
         app.world_mut().resource_mut::<Time>().advance_by(std::time::Duration::from_secs_f32(0.05));
         app.update();
+        bullets.extend(app.world_mut().query::<&Shell>().iter(app.world()).filter(|s| s.shooter == enemy).map(|s| s.bullet.clone()));
     }
     assert!(app.world_mut().query::<&Shell>().iter(app.world()).any(|s| s.shooter == enemy), "the computer ship engages its captain's target");
+    // Its port harpoons face us at 60 units: they fire their first bullet, the ordinary harpoon, with the rest of the ship's guns.
+    assert!(bullets.contains("Bullet_Harpoon"), "harpoon guns fire at will: {bullets:?}");
 }
 
 #[test]
