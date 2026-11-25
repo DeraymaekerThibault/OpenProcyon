@@ -3,7 +3,14 @@
 use crate::Nearest;
 use crate::bindings::Act;
 use crate::commands::{Engine, Kind, Orders};
-use crate::*;
+use crate::{
+    EngineOrder, GunStates, Health, Library, Outcome, PlayerShip, Ship, Side, Target, audio, bindings, boarding, briefing, campaign, combat, course, docking, environment, menu,
+    options_menu, panels, rules, ship, toggle_pause,
+};
+use bevy::input::mouse::AccumulatedMouseMotion;
+use bevy::input::mouse::AccumulatedMouseScroll;
+use bevy::prelude::*;
+use bevy::window::PrimaryWindow;
 
 #[derive(Component, Clone, Copy)]
 pub enum Slot {

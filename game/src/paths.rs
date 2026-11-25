@@ -1,6 +1,6 @@
 //! Where the game finds its files: the imported assets, `content/`, the bundled mods and the overlay the launch builds.
 
-use crate::*;
+use crate::{campaign, modding};
 use std::path::PathBuf;
 
 static ASSETS: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();

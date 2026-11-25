@@ -193,8 +193,9 @@ fn skirmish_ship_names_default_to_the_pool_and_follow_the_pull_down() {
 #[test]
 #[ignore = "needs imported assets"]
 fn border_dispute_keeps_the_humans_command_ship() {
-    use crate::*;
+    use crate::{Config, Orbit, PlayerShip, Ship, Target, collision, data, fx, ship};
     use bevy::ecs::system::RunSystemOnce;
+    use bevy::prelude::*;
     let lib = Library::load(assets_dir());
     let mut sk = skirmish("border_dispute");
     let other = sk.slots.iter().position(|s| s.kind != Kind::Human).unwrap();

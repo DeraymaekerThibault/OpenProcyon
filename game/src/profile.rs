@@ -1,6 +1,7 @@
 //! `PROCYON_PROFILE`: frame-time and entity-count logging for performance runs.
 
-use crate::*;
+use crate::{Ship, campaign, combat, fx};
+use bevy::prelude::*;
 
 /// Whether `PROCYON_PROFILE` is set (frame-time logging, and vsync off so the display does not cap the measurement).
 pub(crate) fn profiling() -> bool {

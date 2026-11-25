@@ -1,4 +1,6 @@
-use crate::*;
+use crate::{Config, EngineOrder, Health, Library, Orbit, PlayerShip, Ship, Side, Target, campaign, combat, game_to_bevy, menu, options_menu, rules, ship};
+use bevy::prelude::*;
+use bevy::window::PrimaryWindow;
 
 /// ECS/UI self-check through shared keys and widget markers, usable with either presentation.
 /// Each frame's step runs once: the count stops while a battle loads (and is advanced after this system), so without the check a

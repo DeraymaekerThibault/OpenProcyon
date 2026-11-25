@@ -1,6 +1,7 @@
 //! Screenshot runs (`--shot`, `--shot-frame`, `--late-frame`) and the `Config` the command line fills for a battle.
 
-use crate::*;
+use crate::{Group, exit, loading, smoke};
+use bevy::prelude::*;
 
 #[derive(Resource)]
 pub struct Config {

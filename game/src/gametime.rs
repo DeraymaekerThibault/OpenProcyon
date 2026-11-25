@@ -1,6 +1,7 @@
 //! Game time: the fixed battle tick, the speed setting, pause, and the fixed-step mode screenshots and traces run in.
 
-use crate::*;
+use crate::{menu, profiling};
+use bevy::prelude::*;
 
 /// `--fixed-step` / `PROCYON_FIXED_STEP=1` (#535): every frame advances exactly one battle tick of game time at 1x, whatever the
 /// machine's frame rate, and the clock-seeded cosmetic draws (ship names, stars) use a fixed seed. With the battle seed (`--seed`)

@@ -3,7 +3,11 @@
 //! `course::plugin`, `view::plugin`, ...).
 //!
 //! `ship::Fleets` and `collision::Shapes` are wired here only until `ship.rs` and `collision.rs` can host plugins of their own.
-use crate::*;
+use crate::{
+    BATTLE_TICK, ai, blackhole, briefing, camera, collision, combat, course, debug_kill, hud, input, leave_battle, loading, menu, outcome, restart, screenshot, scripted_kills,
+    scripted_steps, ship, sky, toggle_debug, view, wake,
+};
+use bevy::prelude::*;
 
 /// Queued for removal: the object is destroyed at the start of the next tick and, until then, still takes part in the logic of
 /// the tick it was queued in (the original's deferred removal, docs/re/tick.md).

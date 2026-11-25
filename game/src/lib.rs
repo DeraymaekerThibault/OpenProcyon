@@ -88,9 +88,7 @@ pub(crate) use shot::screenshot;
 // view.rs: camera, input and HUD wiring.
 pub use view::{Orbit, Sky, Slot, camera, hud, input, sky, toggle_debug};
 
-use bevy::input::mouse::{AccumulatedMouseMotion, AccumulatedMouseScroll};
 use bevy::prelude::*;
-use bevy::window::PrimaryWindow;
 pub use combat::{GunStates, Health, Library, Target, Transient};
 use std::f32::consts::{PI, TAU};
 use std::path::PathBuf;
