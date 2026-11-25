@@ -130,7 +130,7 @@ fn pull_spirals_clockwise_toward_the_centre_and_is_horizontal() {
 #[test]
 #[ignore = "needs imported assets"]
 fn class_data_gives_the_measured_pulls() {
-    let lib = crate::combat::Library::load(assets_dir());
+    let lib = crate::testutil::lib();
     for (class, measured) in [("Ship_Navy_Cutter", 4.50), ("Ship_Navy_Frigate", 1.235), ("Ship_Navy_ManOWar", 1.015)] {
         let c = &lib.classes[lib.index(class)];
         let a = small().strength(c.length, c.phys.mass);
@@ -152,7 +152,7 @@ fn the_centre_destroys_a_ship_and_credits_nobody() {
     let mut app = App::new();
     app.add_message::<Hit>()
         .init_resource::<Time>()
-        .insert_resource(Library::load(assets_dir()))
+        .insert_resource(crate::testutil::lib())
         .init_resource::<crate::stats::GameStats>()
         .add_systems(Update, (pull, crate::stats::collect).chain());
     app.world_mut().spawn((Transform::default(), small()));

@@ -131,7 +131,7 @@ mod rotation_tests {
             .init_asset::<StandardMaterial>()
             .init_asset::<AudioSource>()
             .init_asset::<crate::fx::EffectMaterial>()
-            .insert_resource(Library::load(crate::assets_dir()))
+            .insert_resource(crate::testutil::lib())
             .init_resource::<fx::FxLib>()
             .init_resource::<collision::Shapes>()
             .init_resource::<data::AsteroidDefs>()

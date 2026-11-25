@@ -53,6 +53,8 @@ pub mod smoke;
 pub mod sprites;
 pub mod starmap;
 pub mod stats;
+#[cfg(test)]
+mod testutil;
 pub mod theme;
 pub mod victory;
 pub mod view;

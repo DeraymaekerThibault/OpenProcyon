@@ -205,13 +205,13 @@ fn campaign_repair_skips_persistent_captains_and_docks_out_of_sight() {
 }
 
 fn app() -> (App, Library) {
-    let lib = Library::load(assets_dir());
+    let lib = crate::testutil::lib();
     let mut app = App::new();
     app.add_message::<DockMsg>()
         .add_message::<Sfx>()
         .insert_resource(Time::<()>::default())
         .init_resource::<ButtonInput<KeyCode>>()
-        .insert_resource(Library::load(assets_dir()))
+        .insert_resource(crate::testutil::lib())
         .add_systems(Update, (handle_messages, docked_hold, dock_glide, routine, docked_repair).chain());
     (app, lib)
 }
