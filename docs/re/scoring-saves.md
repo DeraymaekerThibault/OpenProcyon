@@ -92,6 +92,13 @@ Data the screen reads, serialized as `GameStats` (see saves): `PlayerKillInfo`, 
 `SinglePlayer Points` (points earned in *this* mission; the campaign total is the separate `SinglePlayerVictoryPoints`).
 Ships Left = Ending Size; Ships Sunk = kills from `PlayerKillInfo` (a won 1-vs-1 skirmish showed Ships Sunk 1 after one kill).
 
+Remake: the kill table the rules read (`Player Killed A Object`, `Team has destroyed a ship from Group/Unit`) and the summary's Ships
+Sunk use one credit rule. A ship that starts sinking is a kill by the owner of the ship that last damaged it (a shell, blast, mine or
+beam hit, or a ram), counted once (`combat::deaths` sends `Destroyed`, `combat::LastDamager`); a black-hole kill, a hull nobody
+damaged and a hull of the killer's own player credit nobody; a boarding capture is a capture, not a kill. PROVISIONAL: the original's
+rule for the killing blow when several ships hit the hull, fire as the last damage, and the kill of a lifeboat (credited to nobody here)
+are not measured.
+
 ## 4. Save games
 
 - Location: `SavedGames/` (directory key `SAVED GAMES DIRECTORY` in `AppSettings.ini`), extension `.twt`, one file per save. The

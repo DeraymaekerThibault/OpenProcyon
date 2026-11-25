@@ -104,7 +104,8 @@ pub struct Hit {
 /// A blast (mortar, mine, star burst) struck a section of `.0`: cloaked ships drop their cloak (cloak.rs).
 #[derive(Message)]
 pub struct Splashed(pub Entity);
-/// An asteroid crossed the death threshold; breakup and rules consume independent readers.
+/// An object crossed the death threshold: an asteroid (breakup and rules consume independent readers) or a ship (`deaths`, once, when
+/// it starts sinking; `by` is the ship that last damaged it). The rules count it as a kill by `by`'s owner.
 #[derive(Message)]
 pub struct Destroyed {
     pub by: Entity,
@@ -297,6 +298,7 @@ pub fn plugin(app: &mut App) {
     crate::scenario::number_spawns::<ArmedBase>(app);
     app.insert_resource(PRELOADED.lock().ok().and_then(|mut slot| slot.take()).unwrap_or_else(|| Library::load(assets_dir())))
         .init_resource::<Target>()
+        .init_resource::<LastDamager>()
         .add_message::<Hit>()
         .add_message::<Splashed>()
         .add_message::<Fired>()
@@ -313,7 +315,7 @@ pub fn plugin(app: &mut App) {
             FixedUpdate,
             (
                 (minefield::arm, fire, beam::burn, base_fire, lob::shoot, shells, lob::detonate, lob::blasts, lob::grav_wells, lob::ram_damage, lob::strikes).chain(),
-                (asteroid_deaths, fires, status::tick_nets, crew_repair, sink_clock, deaths).chain(),
+                (asteroid_deaths, fires, status::tick_nets, crew_repair, sink_clock, note_damagers, deaths).chain(),
             )
                 .chain()
                 .in_set(crate::BattleSet::Combat),
@@ -431,16 +433,43 @@ fn hide_time(d: &crate::data::Destruct) -> f32 {
     if d.fx.is_some() { d.start } else { d.end }
 }
 
+/// The ship that last damaged each ship: a shell, blast, mine or beam hit (`Hit`) or a ram (`lob::ram_damage`). It credits the kill
+/// when the hull sinks. Fire and the collision with a rock add nothing, so they keep the earlier credit. PROVISIONAL: the original's
+/// rule for the killing blow is not measured; the Game Summary's "Ships Sunk" (`stats.rs`) uses the same last-shooter rule.
+#[derive(Resource, Default)]
+pub struct LastDamager(pub std::collections::HashMap<Entity, Entity>);
+
+fn note_damagers(mut hits: MessageReader<Hit>, mut last: ResMut<LastDamager>) {
+    for h in hits.read() {
+        if h.shooter != h.victim {
+            last.0.insert(h.victim, h.shooter);
+        }
+    }
+}
+
 /// Gameplay death is immediate (`destroyed`: not a target, no collision, not alive for the rules); the hull keeps its speed and
 /// heading and is steered on by the computer (`collision::tick` drives it while `Sinking`), while the presentation breaks it up for a
-/// few seconds, then removes it.
-fn deaths(mut commands: Commands, lib: Res<Library>, mut lost: MessageWriter<crate::lifeboats::ShipLost>, mut ships: Query<(Entity, &Ship, &mut Health)>) {
-    for (e, ship, mut hp) in &mut ships {
+/// few seconds, then removes it. A hull that starts sinking sends one `Destroyed` credited to the ship that last damaged it, which the
+/// rules count as that player's kill ('Player Killed A Object', 'Team has destroyed a ship'). No credit, as in the retail summary, for
+/// a hull the black hole swallowed, for a lifeboat, or when nothing ever damaged it (PROVISIONAL: lifeboats).
+#[allow(clippy::too_many_arguments)]
+fn deaths(
+    mut commands: Commands,
+    lib: Res<Library>,
+    mut lost: MessageWriter<crate::lifeboats::ShipLost>,
+    mut killed: MessageWriter<Destroyed>,
+    mut last: ResMut<LastDamager>,
+    mut ships: Query<(Entity, &Ship, &mut Health, Has<crate::blackhole::Swallowed>, Has<crate::lifeboats::Lifeboat>)>,
+) {
+    for (e, ship, mut hp, swallowed, boat) in &mut ships {
         if hp.destroyed || hp.core > 0.0 {
             continue;
         }
         hp.destroyed = true;
         lost.write(crate::lifeboats::ShipLost(e));
+        if let Some(by) = last.0.remove(&e).filter(|_| !swallowed && !boat) {
+            killed.write(Destroyed { by, victim: e });
+        }
         commands.entity(e).insert(Sinking::new());
         info!("{} destroyed", lib.classes[ship.class].name);
     }

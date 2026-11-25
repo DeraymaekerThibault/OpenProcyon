@@ -963,3 +963,25 @@ fn the_in_game_menu_overlay_walks_its_transitions() {
     step(&mut app, None);
     assert_eq!(overlay(&app), Some(Overlay::Closed));
 }
+
+/// A `--lobby` launch (a tool waits on the process) ends when the battle is left for the main menu; interactive play, which has no
+/// `LobbyScenario`, stays in the menu.
+#[test]
+fn leaving_a_lobby_scenario_battle_exits_the_process() {
+    for (scenario, exits) in [(true, true), (false, false)] {
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, bevy::state::app::StatesPlugin))
+            .insert_state(Screen::Battle)
+            .add_message::<AppExit>()
+            .add_systems(OnEnter(Screen::Main), exit_after_lobby_scenario);
+        if scenario {
+            app.insert_resource(LobbyScenario::parse("map=border_dispute;slots=human,computer").unwrap());
+        }
+        app.update();
+        assert!(app.world_mut().resource_mut::<Messages<AppExit>>().drain().next().is_none(), "no exit while the battle is on");
+        app.world_mut().resource_mut::<NextState<Screen>>().set(Screen::Main);
+        app.update();
+        let sent = app.world_mut().resource_mut::<Messages<AppExit>>().drain().count();
+        assert_eq!(sent > 0, exits, "lobby scenario: {scenario}");
+    }
+}
