@@ -6,18 +6,21 @@
 //! the end of its frame instead ([`apply_paused`]), as the order dial and the target marker answered at once before.
 //!
 //! Recording (`PROCYON_COMMANDS=<file>`, like `PROCYON_TRACE`) writes JSON lines: a header (format, game version, seed, scenario
-//! arguments, mod folders), the battle's frames (each frame's game-time advance in nanoseconds and how many ticks ran in it, run-length
-//! packed), and the commands stamped with the tick (or, while paused, the frame) they were applied on. Ids only (`NetId`: object kind
-//! and `SpawnIndex`), never names or strings from the game files.
+//! arguments, mod folders and, for a battle launched from the skirmish lobby, the lobby's whole setup: `menu::SkirmishSetup`), written
+//! once the battle has loaded, then the battle's frames (each frame's game-time advance in nanoseconds and how many ticks ran in it,
+//! run-length packed), and the commands stamped with the tick (or, while paused, the frame) they were applied on. Ids only (`NetId`:
+//! object kind and `SpawnIndex`), never names or strings from the game files.
 //!
 //! `--replay <file>` plays a recording back from a normal session, not only a `--fixed-step` one: once the battle has loaded it feeds
 //! the recorded frame advances to Bevy's clock (`TimeUpdateStrategy::ManualDuration`) and runs exactly the recorded ticks in each
 //! frame, so the frame-driven rules (`FrameRules`) and the ticks see the same clock as when the log was made, and the recorded
 //! commands go in on their ticks while live input is dropped. The scenario arguments, seed and mods must match the recording (the
-//! game says which to pass when they do not). Only the first battle of a run is recorded; a restart ends the recording.
+//! game says which to pass when they do not). A recording that holds a skirmish setup launches it through the lobby's Launch path by
+//! itself (`--replay <file>` alone, however the lobby was set up); campaign missions started from the menus are still refused. Only
+//! the first battle of a run is recorded; a restart ends the recording.
 //!
 //! Routed so far: engine orders and target picks. The other orders still change the battle directly and are not in a recording yet
-//! (later PRs, one group each). PROVISIONAL: the file format (version 1).
+//! (later PRs, one group each). PROVISIONAL: the file format (version 2; version 1, without the skirmish setup, still reads).
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::io::{BufRead, Write};
@@ -26,7 +29,9 @@ use std::time::Duration;
 use crate::{BATTLE_TICK, EngineOrder, Ship};
 
 /// Version of the command-log format. Bump on any change a reader of the old format would misread.
-pub const FORMAT: u32 = 1;
+pub const FORMAT: u32 = 2;
+/// The oldest format this game still reads.
+const OLDEST_FORMAT: u32 = 1;
 
 /// The player who gave an order: a lobby slot. Single-player has one, 0.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -131,6 +136,7 @@ fn frame_start(world: &mut World) {
         world.resource_mut::<Outbox>().0.clear();
         return;
     }
+    let starts = !clock.active;
     if clock.active {
         clock.frame += 1;
     } else {
@@ -138,6 +144,9 @@ fn frame_start(world: &mut World) {
     }
     clock.frame_ticks = 0;
     let (frame, first) = (clock.frame, clock.battle == 0);
+    if starts && first {
+        write_header(world);
+    }
     let Some(replay) = world.get_resource::<Replay>().filter(|r| first && !r.finished) else { return };
     if let Some(&(advance, ticks)) = replay.frames.get(frame as usize) {
         // Exactly `ticks` ticks run this frame: with the overstep at max(0, ticks x tick - advance), the loop fits floor(max(ticks x
@@ -263,10 +272,37 @@ struct Header {
     seed: u64,
     args: Vec<String>,
     mods: Vec<String>,
-    /// The battle was set up in the menus, not by `--map`, `--lobby` or `--mission`: the arguments do not hold it, so it cannot be
-    /// replayed yet (recording the lobby's setup is a follow-up).
+    /// The battle was set up in the menus and no skirmish setup holds it (a campaign mission): neither it nor the arguments say what
+    /// the battle was, so it cannot be replayed yet.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     from_menu: bool,
+    /// The skirmish lobby's setup at Launch (format 2). The arguments then leave out `--lobby`: the setup replaces it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    skirmish: Option<crate::menu::SkirmishSetup>,
+}
+
+impl Header {
+    /// This run's header once its battle has loaded; `skirmish` is what the lobby launched, if the lobby launched it.
+    fn new(seed: u64, args: &[String], skirmish: Option<crate::menu::SkirmishSetup>) -> Self {
+        let mut args = scenario_args(args);
+        if skirmish.is_some()
+            && let Some(i) = args.iter().position(|a| a == "--lobby")
+        {
+            args.drain(i..(i + 2).min(args.len()));
+        }
+        let from_menu = skirmish.is_none() && !sets_up_battle(&args);
+        Header { format: FORMAT, version: env!("CARGO_PKG_VERSION").into(), seed, args, mods: mod_names(), from_menu, skirmish }
+    }
+}
+
+/// The skirmish setup the `--replay` recording holds, if any: the run then opens the lobby and launches it. A file that cannot be
+/// read gives none here; the replay itself says why (`plugin`).
+pub fn recorded_setup(args: &[String]) -> Option<crate::menu::SkirmishSetup> {
+    let path = args.iter().position(|a| a == "--replay").and_then(|i| args.get(i + 1))?;
+    let mut first = String::new();
+    // A header is one short line: a damaged file cannot make this read without end.
+    std::io::BufReader::new(std::io::Read::take(std::fs::File::open(path).ok()?, 1 << 20)).read_line(&mut first).ok()?;
+    serde_json::from_str::<Header>(&first).ok()?.skirmish
 }
 
 /// Whether these scenario arguments set up a battle by themselves.
@@ -385,6 +421,8 @@ fn mod_names() -> Vec<String> {
 #[derive(Resource)]
 struct Recorder {
     out: std::io::BufWriter<std::fs::File>,
+    /// The run's seed and arguments until the header goes out, once the first battle has loaded (`write_header`).
+    pending: Option<(u64, Vec<String>)>,
     /// Frames not written yet, run-length packed.
     frames: Vec<Vec<u64>>,
     warned: bool,
@@ -422,6 +460,23 @@ impl Drop for Recorder {
     fn drop(&mut self) {
         self.flush();
     }
+}
+
+/// The recording's first line, once its battle has loaded: by then the lobby (if it launched the battle) holds the setup.
+fn write_header(world: &mut World) {
+    let Some((seed, args)) = world.get_resource_mut::<Recorder>().and_then(|mut r| r.pending.take()) else { return };
+    let skirmish = match (world.get_resource::<crate::menu::Skirmish>(), world.get_resource::<crate::combat::Library>()) {
+        (Some(sk), Some(lib)) if sk.map.is_some() => crate::menu::SkirmishSetup::capture(sk, lib),
+        _ => None,
+    };
+    let header = Header::new(seed, &args, skirmish);
+    if header.from_menu {
+        warn!("PROCYON_COMMANDS: this battle was set up in the menus without a skirmish setup (a campaign mission): --replay will refuse it");
+    }
+    let mut rec = world.resource_mut::<Recorder>();
+    let _ = serde_json::to_writer(&mut rec.out, &header);
+    let _ = rec.out.write_all(b"\n");
+    let _ = rec.out.flush();
 }
 
 fn record(world: &mut World, at: At, c: &PlayerCommand) {
@@ -498,8 +553,8 @@ impl Replay {
             Some((_, Ok(l))) => serde_json::from_str(&l).map_err(|e| format!("line 1 is not a command-log header: {e}"))?,
             _ => return Err("empty file".into()),
         };
-        if header.format != FORMAT {
-            return Err(format!("format {} (this game reads {FORMAT})", header.format));
+        if !(OLDEST_FORMAT..=FORMAT).contains(&header.format) {
+            return Err(format!("format {} (this game reads {OLDEST_FORMAT} to {FORMAT})", header.format));
         }
         let mut replay = Replay { frames: vec![], commands: vec![], finished: false };
         let mut unrecorded = 0;
@@ -573,7 +628,10 @@ fn finish(replay: &mut Replay, strategy: &mut bevy::time::TimeUpdateStrategy, wh
 /// Why a recording cannot replay with this launch, if it cannot: the scenario arguments, seed or mods differ.
 fn mismatch(header: &Header, args: &[String], seed: u64, mods: &[String]) -> Option<String> {
     if header.from_menu {
-        return Some("it was recorded from a battle set up in the menus; only battles started with --map, --lobby or --mission replay so far".into());
+        return Some("it was recorded from a campaign mission started in the menus; only skirmishes and battles started with --map or --mission replay so far".into());
+    }
+    if header.skirmish.is_some() && args.iter().any(|a| a == "--lobby") {
+        return Some("it holds its own skirmish setup: leave out --lobby".into());
     }
     let mine = scenario_args(args);
     if header.args != mine {
@@ -618,17 +676,7 @@ pub fn plugin(app: &mut App) {
     }
     if let Ok(path) = std::env::var("PROCYON_COMMANDS") {
         let file = std::fs::File::create(&path).unwrap_or_else(|e| panic!("PROCYON_COMMANDS: cannot write {path}: {e}"));
-        let mut rec = Recorder { out: std::io::BufWriter::new(file), frames: vec![], warned: false };
-        let scenario = scenario_args(&args);
-        let from_menu = !sets_up_battle(&scenario);
-        if from_menu {
-            warn!("PROCYON_COMMANDS: the battle will be set up in the menus, which a recording does not hold yet: --replay will refuse it");
-        }
-        let header = Header { format: FORMAT, version: env!("CARGO_PKG_VERSION").into(), seed, args: scenario, mods: mod_names(), from_menu };
-        let _ = serde_json::to_writer(&mut rec.out, &header);
-        let _ = rec.out.write_all(b"\n");
-        let _ = rec.out.flush();
-        app.insert_resource(rec);
+        app.insert_resource(Recorder { out: std::io::BufWriter::new(file), pending: Some((seed, args)), frames: vec![], warned: false });
     }
 }
 

@@ -49,12 +49,19 @@ Git Bash (`GIT_BASH=<path>` if it is not in the default place), and the screensh
    `PROCYON_COMMANDS=<file.jsonl>` records the player's orders (`commands.rs`, so far engine orders and target picks), and
    `--replay <file.jsonl>` plays them back with the same scenario arguments, seed and mods (the game names any that differ), also
    from a normal play session: the log keeps each frame's game-time advance and tick count, the replay feeds those to the clock, so
-   frame-driven rules and ticks line up as recorded. JSON lines, format 1 (PROVISIONAL): a header (format, version, seed, scenario
-   arguments, mod folders), `frames` ([advance ns, ticks] or [advance ns, ticks, repeat]), and `command` lines stamped with the
-   tick (or paused frame) they were applied on, naming objects by kind and `SpawnIndex` only. Only the first battle of a run is
-   recorded, and only a battle started with `--map`, `--lobby` or `--mission` replays (one set up in the menus is marked `from_menu`
-   and refused: the arguments do not hold its setup). Arguments that take a path (`--mod <dir>`, ...) are left out of the header. `battle_check --replay` (in `check.sh --full` for `red_rover`) records a run of `--script commands` and fails when
-   its replay's battle report differs.
+   frame-driven rules and ticks line up as recorded. JSON lines, format 2 (PROVISIONAL; format 1 still reads): a header (format,
+   version, seed, scenario arguments, mod folders and, for a battle launched from the skirmish lobby, the lobby's whole setup:
+   `skirmish`, `menu/skirmish_setup.rs`), written once the battle has loaded; `frames` ([advance ns, ticks] or [advance ns, ticks,
+   repeat]); and `command` lines stamped with the tick (or paused frame) they were applied on, naming objects by kind and
+   `SpawnIndex` only. The setup holds ids only (map, ship classes, gun keys per weapon bank, crew keys, a picked name as its
+   position in the hull's name list) and the computers' draw seed, not their fleets: those are drawn again at launch, so a setup
+   replays only on the same data and mods. A lobby battle, set up by hand in the menus or with `--lobby`, replays with `--replay
+   <file>` alone: the game opens the lobby, sets it up from the header and presses Launch (`--lobby` next to such a log is refused,
+   and the header leaves it out of the arguments). `--lobby` also takes a whole setup as JSON (a spec starting with `{`). Only the
+   first battle of a run is recorded; a campaign mission started from the menus is marked `from_menu` and refused (neither the
+   arguments nor a setup hold it). Arguments that take a path (`--mod <dir>`, ...) are left out of the header. `battle_check
+   --replay` (in `check.sh --full` for `red_rover` and the lobby scenario `border_dispute_full`) records a run of `--script
+   commands` and fails when its replay's battle report differs; a lobby scenario replays from the log alone.
    `--fixed-step` (or `PROCYON_FIXED_STEP=1`; `--shot` implies it unless `PROCYON_FIXED_STEP=0`, `lib.rs::wants_fixed_step`) makes a scripted run reproducible: each frame is one 33 ms tick at 1x whatever
    the frame rate, and the clock-seeded cosmetic draws (ship names, stars) use a fixed seed. Run twice, it gives the same
    pictures and the same trace. `python3 -m tools.tracediff A.csv B.csv` compares two traces (one line per file, then the
