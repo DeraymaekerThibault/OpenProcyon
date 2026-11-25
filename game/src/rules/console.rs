@@ -301,6 +301,133 @@ impl Command {
     }
 }
 
+/// What a command needs from the battle it runs in. Commands depend on this, not on which resource (`Mission`, `SkirmishScript`) the
+/// battle happens to hold: one dispatch (`Script::console_run_with`) refuses a command whose need the battle cannot meet and says why.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
+pub enum Needs {
+    /// The view and the help only: any screen of a battle.
+    Nothing,
+    /// The battle's ships and bases (the player's ship, the target): any singleplayer battle, with or without a script.
+    World,
+    /// A rules script: a campaign mission or a skirmish map with a `script.json` (flags, timers, tasks, counters, rule actions, shapes).
+    Rules,
+    /// A campaign mission: cutscenes, level changes, the human's ship handoff, mission music.
+    Mission,
+}
+
+impl Needs {
+    /// How `help <command>` words it.
+    pub fn describe(self) -> &'static str {
+        match self {
+            Needs::Nothing => "any battle",
+            Needs::World => "any singleplayer battle",
+            Needs::Rules => "a battle that runs rules: a campaign mission, or a skirmish map with a script.json",
+            Needs::Mission => "a campaign mission",
+        }
+    }
+}
+
+/// What the running battle offers (`Needs` it can meet). The default is a campaign mission, which offers everything.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct Caps {
+    /// A rules script runs (`Mission` or `SkirmishScript`).
+    pub rules: bool,
+    /// It is a campaign mission.
+    pub mission: bool,
+}
+impl Caps {
+    pub const MISSION: Caps = Caps { rules: true, mission: true };
+    pub const SKIRMISH_SCRIPT: Caps = Caps { rules: true, mission: false };
+    pub const BARE: Caps = Caps { rules: false, mission: false };
+    pub fn meets(self, n: Needs) -> bool {
+        match n {
+            Needs::Nothing | Needs::World => true,
+            Needs::Rules => self.rules,
+            Needs::Mission => self.mission,
+        }
+    }
+}
+impl Default for Caps {
+    fn default() -> Self {
+        Caps::MISSION
+    }
+}
+
+/// The action Types that only change the ships and the world; every other Type records into the rules' state or steers the rules' AI.
+const WORLD_ACTS: &[&str] = &[
+    "Set Group/Unit Vulnerability",
+    "Damage Group/Unit by X percent",
+    "Destroy Group/Unit",
+    "Set Group/Unit Visibility",
+    "Teleport Group/Unit",
+    "Set Group Throttle Percent",
+];
+
+/// What one raw rule action needs: the schema marks the campaign-only Types; `Play Music Track` is read by the campaign's music system.
+fn act_needs(a: &Value) -> Needs {
+    let ty = s(a, "Type");
+    if ty == "Play Music Track" || schema::lookup(Role::Action, ty).is_some_and(|d| d.campaign_only) {
+        Needs::Mission
+    } else if WORLD_ACTS.contains(&ty) {
+        Needs::World
+    } else {
+        Needs::Rules
+    }
+}
+
+impl Command {
+    /// What it needs of the battle (see `Needs`). `tp` to a coordinate only moves the ship; to a point set it reads the script's.
+    pub fn needs(&self) -> Needs {
+        match self {
+            Command::Nothing | Command::Help(_) | Command::Fps(_) | Command::Hud(_) | Command::Cam(CamMode::Free) | Command::Schema(_) => Needs::Nothing,
+            Command::Reveal
+            | Command::Kill
+            | Command::Repair(_)
+            | Command::Restart
+            | Command::Ships(_)
+            | Command::Inspect
+            | Command::Where
+            | Command::Mark(_)
+            | Command::Cam(CamMode::Player)
+            | Command::Teleport(Dest::Xy(..)) => Needs::World,
+            Command::Cond(c) => {
+                if schema::lookup(Role::Condition, s(c, "Type")).is_some_and(|d| d.campaign_only) {
+                    Needs::Mission
+                } else {
+                    Needs::World
+                }
+            }
+            Command::Acts { acts, .. } | Command::Soft(acts) => acts.iter().map(act_needs).max().unwrap_or(Needs::World),
+            Command::Teleport(Dest::Set(_))
+            | Command::Fire(_)
+            | Command::Why(_)
+            | Command::Flags
+            | Command::Timers
+            | Command::Tasks
+            | Command::Counters
+            | Command::Rules(_)
+            | Command::Skip
+            | Command::List(..)
+            | Command::Find(_)
+            | Command::Show(..)
+            | Command::Hide(..) => Needs::Rules,
+            Command::Win | Command::Lose | Command::Cam(CamMode::Follow(_)) => Needs::Mission,
+        }
+    }
+
+    /// Why this battle cannot run the command, or nothing when it can. `word` is what the player typed first.
+    pub fn refusal(&self, word: &str, caps: Caps) -> Option<String> {
+        let need = self.needs();
+        if caps.meets(need) {
+            return None;
+        }
+        Some(match need {
+            Needs::Mission => format!("{word}: needs a campaign mission (this battle is a skirmish: its own rules do not hand over levels, cutscenes or the ship)"),
+            _ => format!("{word}: needs rules (this battle runs no rules script: its map has no script.json)"),
+        })
+    }
+}
+
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Group {
     Cheats,
@@ -348,7 +475,7 @@ pub static TABLE: &[Entry] = &[
     entry("repair", Group::Cheats, "repair [group]", "full repair of the player's fleet, or of a group (no rule action exists for it)", "repair", true),
     entry("kill", Group::Cheats, "kill", "destroy the current target (Destroy Group/Unit)", "kill", true),
     entry("reveal", Group::Cheats, "reveal", "show every hidden unit (Set Group/Unit Visibility)", "reveal", true),
-    entry("tp", Group::Cheats, "tp <x> <y> [z] | tp <point set>", "move the player's ship to game coordinates or to a point set of the mission", "tp 120 -40", true),
+    entry("tp", Group::Cheats, "tp <x> <y> [z] | tp <point set>", "move the player's ship to game coordinates (any battle) or to a point set of the map's script", "tp 120 -40", true),
     entry("fire", Group::State, "fire <rule>", "run a rule's actions now, as --fire-rule does; a part of the name is enough", "fire \"Open the gate\"", true),
     entry("set", Group::State, "set <flag> [on|off]", "Set Flag Action", "set key off", true),
     entry("timer", Group::State, "timer <name> start|stop", "Start Timer / Stop Timer", "timer t start", true),
@@ -498,6 +625,11 @@ fn nearest_command(word: &str) -> Option<&'static str> {
 /// pieces in separate columns instead of padding with spaces.
 pub const HELP_COLUMN: char = '\t';
 
+/// What a table row's command needs: that of its example line (the tests parse every example).
+pub fn needs_of(e: &Entry) -> Needs {
+    parse(e.example, "Player", false).map_or(Needs::Rules, |c| c.needs())
+}
+
 /// `help` (every command, grouped) or `help <command>` (its usage and an example), as output lines.
 pub fn help_lines(topic: Option<&str>) -> Vec<String> {
     if let Some(word) = topic {
@@ -507,6 +639,7 @@ pub fn help_lines(topic: Option<&str>) -> Vec<String> {
                 format!("{}: {}", e.name, e.about),
                 format!("  usage:   {}", e.usage),
                 format!("  example: {}", e.example),
+                format!("  runs in: {}", needs_of(e).describe()),
                 if e.cheats { "  changes the game: marks the session as cheated".into() } else { "  a query: does not mark the session".into() },
             ],
             None => vec![format!("no command '{word}'{}", nearest_command(&word).map_or(String::new(), |n| format!("; did you mean {n}?")))],
@@ -772,35 +905,6 @@ pub struct Outcome {
     pub view: Vec<ViewChange>,
 }
 
-/// Runs a command in a battle with no mission rules (a skirmish): the commands that only change the view or print console help work, every
-/// other answers one line saying it needs a mission. Nothing here changes the game, so it never marks the session as cheated.
-pub fn console_without_mission(line: &str, cmd: &Command) -> Outcome {
-    let mut o = Outcome::default();
-    match cmd {
-        Command::Nothing => {}
-        Command::Help(topic) => o.lines = help_lines(topic.as_deref()),
-        Command::Fps(on) => o.view.push(ViewChange::Fps(*on)),
-        Command::Hud(on) => {
-            o.view.push(ViewChange::Hud(*on));
-            o.lines.push(format!("HUD {}", if *on { "on" } else { "off" }));
-        }
-        Command::Cam(CamMode::Free) => {
-            o.view.push(ViewChange::FreeCam(true));
-            o.lines.push("free camera: arrows move, PageUp / PageDown rise and sink, right mouse drag looks, Shift is faster; `cam player` returns".into());
-        }
-        Command::Cam(CamMode::Player) => {
-            o.view.push(ViewChange::FreeCam(false));
-            o.lines.push("orbit camera back".into());
-        }
-        _ => {
-            let word = line.split_whitespace().next().unwrap_or_default().to_lowercase();
-            o.lines.push(format!("{word}: needs a mission (this battle has no mission rules)"));
-            o.rejected = true;
-        }
-    }
-    o
-}
-
 impl Script {
     /// Runs a command against the unit list `w` (what `systems::units` builds each frame). ECS effects go to `out`, as in `step`.
     /// `target`: the player's current target.
@@ -811,6 +915,11 @@ impl Script {
     pub fn console_run_with(&mut self, cmd: &Command, w: &mut [Unit], env: &Env, out: &mut Vec<Fx>) -> Outcome {
         let target = env.target;
         let mut o = Outcome::default();
+        if let Some(why) = cmd.refusal(&env.word, env.caps) {
+            o.lines.push(why);
+            o.rejected = true;
+            return o;
+        }
         if let Err(e) = self.check_names(cmd, w) {
             o.lines.push(e);
             o.rejected = true;

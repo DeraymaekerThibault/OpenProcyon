@@ -565,21 +565,128 @@ fn the_keys_help_lists_match_what_key_with_does() {
     }
 }
 
+/// A battle that runs no rules at all (a map without a script, a lobby battle): the script is empty, the world is the ships.
+fn bare() -> Script {
+    Script::new(&json!({"rules": []}), Value::Null)
+}
+/// `line` run with what the battle offers, as the ECS side does: the effects, the outcome.
+fn run_in(caps: Caps, sc: &mut Script, line: &str, w: &mut [Unit], target: Option<Entity>) -> (Vec<Fx>, Outcome) {
+    let cmd = parse(line, "Hero", false).unwrap_or_else(|e| panic!("{line}: {e}"));
+    let env = Env { target, caps, word: line.split_whitespace().next().unwrap_or_default().to_lowercase(), ..Env::default() };
+    let mut out = vec![];
+    let o = sc.console_run_with(&cmd, w, &env, &mut out);
+    (out, o)
+}
+
 #[test]
-fn without_a_mission_view_commands_run_and_rule_commands_say_so() {
-    let run = |line: &str| console_without_mission(line, &parse(line, "", false).unwrap());
-    let o = run("fps");
-    assert_eq!(o.view, vec![ViewChange::Fps(None)], "fps works in a skirmish");
-    assert!(!o.rejected);
-    assert_eq!(run("fps off").view, vec![ViewChange::Fps(Some(false))]);
-    assert!(run("help").lines.iter().any(|l| l.contains("fps")), "help lists the commands");
-    assert_eq!(run("hud off").view, vec![ViewChange::Hud(false)]);
-    assert_eq!(run("cam free").view, vec![ViewChange::FreeCam(true)]);
-    for line in ["god", "tp 1 2", "flags", "rules", "ships", "win", "restart", "show volumes", "cam follow Raiders", "act {\"Type\": \"NIS End\"}"] {
-        let o = run(line);
+fn what_each_command_needs_follows_what_it_touches() {
+    let needs = |line: &str| parse(line, "Hero", false).unwrap_or_else(|e| panic!("{line}: {e}")).needs();
+    for line in ["help", "fps on", "hud off", "cam free", "schema Teleport", ""] {
+        assert_eq!(needs(line), Needs::Nothing, "{line}: the view and the help run on any screen");
+    }
+    for line in [
+        "god", "repair", "kill", "reveal", "tp 1 2", "tp 1 2 3", "ships", "inspect", "where", "mark spot", "damage 0.5", "restart", "cam player",
+        r#"act {"Type": "Destroy Group/Unit", "Group Name": "Hero"}"#,
+        r#"cond {"Type": "Group has X members", "Group Name": "Hero", "Equivalence": "Equal To", "number": 1}"#,
+    ] {
+        assert_eq!(needs(line), Needs::World, "{line}: only the battle's ships");
+    }
+    for line in [
+        "tp Harbour", "fire gate", "why gate", "flags", "timers", "tasks", "counters", "rules", "skip", "list groups", "find x", "show volumes", "hide all", "set key", "timer t start",
+        "task Escape complete", "counter k 3", "attack A B", "stance A aggressive", "ally A B", "hostile A B", "tow A B", "untow A B", "say Opening",
+        r#"act {"Type": "Set Flag Action", "Flag Name": "x", "Boolean Value": true}"#,
+    ] {
+        assert_eq!(needs(line), Needs::Rules, "{line}: reads or writes the rules' state");
+    }
+    for line in ["win", "lose", "nis end", "primary Hero,Escort", "cam follow Raiders", "music Battle"] {
+        assert_eq!(needs(line), Needs::Mission, "{line}: a campaign mission's cutscene, level or handoff");
+    }
+}
+
+#[test]
+fn every_table_row_has_a_need_and_help_says_where_it_runs() {
+    for e in TABLE {
+        let n = needs_of(e);
+        let text = help_lines(Some(e.name)).join("\n");
+        assert!(text.contains(&format!("runs in: {}", n.describe())), "{}: {text}", e.name);
+    }
+    assert_eq!(needs_of(entry_named("god").unwrap()), Needs::World);
+    assert_eq!(needs_of(entry_named("win").unwrap()), Needs::Mission);
+    assert_eq!(needs_of(entry_named("flags").unwrap()), Needs::Rules);
+}
+
+#[test]
+fn the_view_and_ship_commands_run_in_a_battle_without_any_rules() {
+    let mut sc = bare();
+    let mut w = vec![unit(1, "Flagship", "Hero"), unit(3, "Raider", "Pirates")];
+    // View commands.
+    for (line, view) in [("fps", ViewChange::Fps(None)), ("hud off", ViewChange::Hud(false)), ("cam free", ViewChange::FreeCam(true)), ("cam player", ViewChange::FreeCam(false))] {
+        let (fx, o) = run_in(Caps::BARE, &mut sc, line, &mut w, None);
+        assert_eq!((o.view.clone(), o.rejected), (vec![view], false), "{line}");
+        assert!(fx.is_empty(), "{line}: the orbit camera of a skirmish is not a rule's to steer");
+    }
+    assert!(run_in(Caps::BARE, &mut sc, "help", &mut w, None).1.lines.iter().any(|l| l.contains("god")));
+    // Moving, protecting and damaging the player's ship need only the ships.
+    let (fx, o) = run_in(Caps::BARE, &mut sc, "tp 12 -30", &mut w, None);
+    assert!(!o.rejected, "{:?}", o.lines);
+    assert!(matches!(fx.as_slice(), [Fx::Teleport(ids, p)] if ids == &[e(1)] && (p.x, p.z) == (12.0, 30.0)), "{} effect(s)", fx.len());
+    let (fx, o) = run_in(Caps::BARE, &mut sc, "god on", &mut w, None);
+    assert!(!o.rejected, "{:?}", o.lines);
+    assert!(matches!(fx.as_slice(), [Fx::Invuln(ids, v)] if ids == &[e(1)] && *v == 1.0), "{} effect(s)", fx.len());
+    let (fx, _) = run_in(Caps::BARE, &mut sc, "kill", &mut w, Some(e(3)));
+    assert!(matches!(fx.as_slice(), [Fx::Destroy(ids)] if ids == &[e(3)]), "{} effect(s)", fx.len());
+    let (fx, _) = run_in(Caps::BARE, &mut sc, "damage 0.5", &mut w, None);
+    assert!(matches!(fx.as_slice(), [Fx::Damage(ids, _)] if ids == &[e(1)]), "{} effect(s)", fx.len());
+    assert_eq!(run_in(Caps::BARE, &mut sc, "repair", &mut w, None).1.repair, vec![e(1)]);
+    assert!(run_in(Caps::BARE, &mut sc, "restart", &mut w, None).1.restart);
+    // Inspection.
+    let o = run_in(Caps::BARE, &mut sc, "ships", &mut w, None).1;
+    assert!(o.lines.last().is_some_and(|l| l == "2 unit(s)"), "{:?}", o.lines);
+    assert!(run_in(Caps::BARE, &mut sc, "where", &mut w, None).1.lines[0].contains("Flagship"));
+    assert!(run_in(Caps::BARE, &mut sc, "inspect", &mut w, Some(e(3))).1.lines[0].contains("Raider"));
+    let (fx, o) = run_in(Caps::BARE, &mut sc, "reveal", &mut w, None);
+    assert!(!o.rejected, "{:?}", o.lines);
+    let _ = fx;
+}
+
+#[test]
+fn rule_commands_say_what_they_need_in_a_battle_without_rules() {
+    let mut sc = bare();
+    let mut w = vec![unit(1, "Flagship", "Hero")];
+    for line in ["flags", "rules", "fire gate", "tp Harbour", "set key", "counter n 1", "show volumes", "list groups", "skip", "stance Hero aggressive"] {
+        let (fx, o) = run_in(Caps::BARE, &mut sc, line, &mut w, None);
         let word = line.split(' ').next().unwrap();
-        assert_eq!(o.lines, vec![format!("{word}: needs a mission (this battle has no mission rules)")], "{line}");
-        assert!(o.rejected && o.view.is_empty() && !o.restart, "{line} must not run");
+        assert_eq!(o.lines, vec![format!("{word}: needs rules (this battle runs no rules script: its map has no script.json)")], "{line}");
+        assert!(o.rejected && fx.is_empty() && o.view.is_empty(), "{line} must not run");
+    }
+}
+
+#[test]
+fn a_skirmish_script_runs_the_rule_commands_but_not_the_campaigns() {
+    let mut sc = script();
+    let mut w = world();
+    let skirmish = Caps::SKIRMISH_SCRIPT;
+    assert_eq!(run_in(skirmish, &mut sc, "flags", &mut w, None).1.lines, vec!["no flag has been set"]);
+    assert!(run_in(skirmish, &mut sc, "rules", &mut w, None).1.lines.iter().any(|l| l.contains("Open the gate")));
+    let (_, o) = run_in(skirmish, &mut sc, "fire vault", &mut w, None);
+    assert!(!o.rejected && o.lines[0].starts_with("fired 'Open the vault'"), "{:?}", o.lines);
+    assert!(sc.flag("vault"));
+    let (fx, o) = run_in(skirmish, &mut sc, "tp Harbour", &mut w, None);
+    assert!(!o.rejected && matches!(fx.as_slice(), [Fx::Teleport(..)]), "{:?}", o.lines);
+    for line in ["win", "lose", "nis end", "primary Hero,Escort", "cam follow Hero", "music Battle"] {
+        let (fx, o) = run_in(skirmish, &mut sc, line, &mut w, None);
+        let word = line.split(' ').next().unwrap();
+        assert_eq!(
+            o.lines,
+            vec![format!("{word}: needs a campaign mission (this battle is a skirmish: its own rules do not hand over levels, cutscenes or the ship)")],
+            "{line}"
+        );
+        assert!(o.rejected && fx.is_empty(), "{line} must not run");
+    }
+    // The same lines run in a campaign mission.
+    let mut sc = script();
+    for line in ["win", "cam follow Hero", "primary Hero,Escort"] {
+        assert!(!run_in(Caps::MISSION, &mut sc, line, &mut w, None).1.rejected, "{line}");
     }
 }
 

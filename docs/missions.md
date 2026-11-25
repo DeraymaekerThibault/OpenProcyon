@@ -314,7 +314,7 @@ Each entry of `objects`: `{"type", "id", "pos", "rot", "player": -1, "scene"}`.
 3. **Starting at a later beat.** `--fire-rule "<rule>"` (repeatable) runs the named rule's actions at the start, after the
    `World Initialize` rules and in the order given, as if its conditions had held; a run-once rule counts as fired. A beat depends on
    the flags, counters and tasks earlier beats set, so fire the earlier beats too, in order. `--start-at x,y` moves the human's ship
-   (rules do not): `--map gate_ambush --fire-rule "Arrive at the gate" --start-at 380,590`. An unknown name is a warning listing the
+   (rules do not): `--map gate_ambush --fire-rule "Arrive at the gate" --start-at 380,590`. A skirmish map with a `script.json` takes both too. An unknown name is a warning listing the
    rule names. To watch why rules are not firing: `--rule-trace` or `--why "<rule>"`.
 4. Let the autopilot play it: `--script mission` (`docs/development.md`) sails the human's ship through objective points and the volumes
    the unfired rules wait for, at any `--speed`. It has no tactics, so losing rules and optional detours never fire, and the list of rules that

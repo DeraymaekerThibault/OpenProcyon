@@ -612,3 +612,157 @@ fn teleporting_ships_to_one_point_keeps_them_apart_and_at_rest() {
     assert_eq!((sa.speed, sa.ang_vel, sa.order), (0.0, 0.0, crate::EngineOrder::Stop), "the player's ship is at all stop");
     assert_eq!((sb.speed, sb.ang_vel, sb.order), (0.0, 0.0, crate::EngineOrder::Emergency), "a computer ship keeps its order");
 }
+
+// ---- The developer console in a battle that is not a campaign mission (asset-free: one synthetic class).
+
+use crate::rules::console::{Cheats, Console, DevView};
+use crate::rules::skirmish::SkirmishScript;
+
+/// A singleplayer battle as the lobby makes it: ships with no `MissionShip`, no `Mission`, no script unless the test adds one.
+fn console_battle() -> App {
+    let mut app = App::new();
+    app.init_resource::<Time>()
+        .init_resource::<Target>()
+        .init_resource::<RuleWorld>()
+        .init_resource::<crate::campaign::CampaignPoints>()
+        .init_resource::<crate::nebula::StormShift>()
+        .init_resource::<crate::environment::Sensors>()
+        .init_resource::<crate::ship::Fleets>()
+        .init_resource::<Cheats>()
+        .init_resource::<DevView>()
+        .init_resource::<dev_console::BareScript>()
+        .init_resource::<crate::scenario::RestartRequest>()
+        .add_message::<DockMsg>()
+        .add_message::<crate::boarding::BoardMsg>()
+        .add_message::<crate::boarding::Captured>()
+        .add_message::<crate::combat::AsteroidSetup>()
+        .add_message::<crate::nebula::MeteorRoute>()
+        .add_message::<crate::combat::Detonate>()
+        .insert_resource(Console::new(true))
+        .insert_resource(Orbit { yaw: 0.0, pitch: 0.4, dist: 90.0, focus: None })
+        .insert_resource(Library { classes: vec![crate::fixed_tests::synthetic_class()], guns: default(), bullets: default(), names: default(), clips: default() })
+        .add_systems(Update, (dev_console::attach_ship_state, dev_console::run).chain());
+    app
+}
+/// A ship with the components of a lobby battle's: no `MissionShip`.
+fn lobby_ship(app: &mut App, owner: &str, at: Vec3, primary: bool) -> Entity {
+    let ship = Ship { heading: 0.0, ..Ship::new(0, Side::Player) };
+    let mut e = app.world_mut().spawn((
+        ship,
+        Health { sections: vec![], core: 100.0, destroyed: false },
+        Transform::from_translation(at),
+        Visibility::Inherited,
+        crate::ship::FleetMember(owner.into(), 0),
+        crate::ShipName("RLS Legacy".into()),
+    ));
+    if primary {
+        e.insert(PlayerShip);
+    }
+    e.id()
+}
+fn say(app: &mut App, lines: &[&str]) -> String {
+    for l in lines {
+        app.world_mut().resource_mut::<Console>().submit(l);
+    }
+    app.update();
+    app.world().resource::<Console>().log.join("\n")
+}
+fn skirmish_script(data: serde_json::Value) -> SkirmishScript {
+    SkirmishScript {
+        script: Script::new(&data, serde_json::json!({})),
+        sides: [("Player0".to_string(), Side::Player)].into(),
+        paths: data["paths"].clone(),
+        environment: serde_json::Value::Null,
+        map_text: serde_json::Value::Null,
+    }
+}
+
+#[test]
+fn ship_commands_run_in_a_battle_with_no_mission_and_no_script() {
+    let mut app = console_battle();
+    app.world_mut().resource_mut::<crate::ship::Fleets>().local = "player0".into();
+    let hero = lobby_ship(&mut app, "player0", Vec3::ZERO, true);
+    let raider = lobby_ship(&mut app, "player1", Vec3::new(50.0, 0.0, 0.0), false);
+    assert!(app.world().get_resource::<Mission>().is_none() && app.world().get_resource::<SkirmishScript>().is_none());
+    // Queries run, mark nothing, and give the ships the state the commands read.
+    let log = say(&mut app, &["where", "ships"]);
+    assert!(log.contains("RLS Legacy at x 0.0, y"), "{log}");
+    assert!(log.contains("2 unit(s)"), "{log}");
+    assert!(!log.contains("needs"), "{log}");
+    assert!(!app.world().resource::<Cheats>().used, "queries are not cheats");
+    // tp: x east, y north; the Bevy position is (x, 0, -y).
+    let log = say(&mut app, &["tp 100 -40"]);
+    assert!(log.contains("teleported to 100, -40"), "{log}");
+    app.update();
+    let at = app.world().get::<Transform>(hero).unwrap().translation;
+    assert!(at.distance(Vec3::new(100.0, 0.0, 40.0)) < 1.0, "{at:?}");
+    assert!(app.world().resource::<Cheats>().used, "a command that changes the game marks the session, here as in a mission");
+    // god, damage, kill on the target.
+    let log = say(&mut app, &["god on"]);
+    assert!(log.contains("ran Set Group/Unit Vulnerability"), "{log}");
+    app.update();
+    assert!(app.world().resource::<Cheats>().god);
+    assert_eq!(app.world().get::<MissionShip>(hero).unwrap().invuln, 1.0);
+    assert_eq!(app.world().get::<MissionShip>(raider).unwrap().owner.as_str(), "player1");
+    app.world_mut().resource_mut::<Target>().0 = Some(raider);
+    say(&mut app, &["kill"]);
+    app.update();
+    assert!(app.world().get::<Health>(raider).unwrap().destroyed, "kill reaches the target");
+    assert!(!app.world().get::<Health>(hero).unwrap().destroyed);
+    // View commands and restart.
+    let log = say(&mut app, &["hud off", "restart"]);
+    assert!(app.world().resource::<DevView>().hud_hidden, "{log}");
+    assert!(app.world().resource::<crate::scenario::RestartRequest>().0);
+}
+
+#[test]
+fn rule_and_mission_commands_say_what_they_need_with_no_script() {
+    let mut app = console_battle();
+    lobby_ship(&mut app, "player0", Vec3::ZERO, true);
+    let log = say(&mut app, &["flags", "rules", "set key", "tp Harbour", "win", "nis end", "cam follow x"]);
+    for word in ["flags", "rules", "set", "tp"] {
+        assert!(log.contains(&format!("{word}: needs rules (this battle runs no rules script")), "{word}: {log}");
+    }
+    for word in ["win", "nis", "cam"] {
+        assert!(log.contains(&format!("{word}: needs a campaign mission")), "{word}: {log}");
+    }
+    assert!(!app.world().resource::<Cheats>().used, "a refused command changes nothing");
+}
+
+#[test]
+fn a_skirmish_script_serves_the_rule_commands_of_the_console() {
+    let mut app = console_battle();
+    let gate = once("Open the gate", serde_json::json!([]), serde_json::json!([{"Type": "Set Flag Action", "Flag Name": "gate", "Boolean Value": "TRUE"}]));
+    app.insert_resource(skirmish_script(serde_json::json!({"rules": [gate], "environment": {"point_sets": {"Harbour": [{"pos": [10.0, 20.0, 0.0]}]}}})));
+    let hero = lobby_ship(&mut app, "player0", Vec3::ZERO, true);
+    app.world_mut().resource_mut::<crate::ship::Fleets>().local = "player0".into();
+    let log = say(&mut app, &["rules", "fire gate", "flags", "tp Harbour", "win"]);
+    assert!(log.contains("never fired") && log.contains("Open the gate"), "{log}");
+    assert!(log.contains("fired 'Open the gate'"), "{log}");
+    assert!(app.world().resource::<SkirmishScript>().script.flag("gate"), "the skirmish map's own script ran the rule");
+    app.update();
+    let at = app.world().get::<Transform>(hero).unwrap().translation;
+    assert!(at.distance(Vec3::new(10.0, 0.0, -20.0)) < 1.0, "tp to a point set of the map's script: {at:?}");
+    assert!(log.contains("win: needs a campaign mission"), "{log}");
+}
+
+#[test]
+fn the_console_dispatch_is_the_same_in_a_campaign_mission() {
+    let data = serde_json::json!({"rules": [], "player_start": {"name": "Hero"}});
+    let mission = Mission { id: "synthetic".into(), script: Script::new(&data, serde_json::json!({})), data, opening: None };
+    let mut app = console_battle();
+    app.insert_resource(mission);
+    let hero = app.world_mut().spawn((
+        Ship::new(0, Side::Player),
+        Health { sections: vec![], core: 100.0, destroyed: false },
+        Transform::default(),
+        Visibility::Inherited,
+        PlayerShip,
+        MissionShip { id: 1, name: "RLS Hawk".into(), owner: "Hero".into(), visible: true, ..default() },
+    ));
+    let hero = hero.id();
+    let log = say(&mut app, &["tp 30 10", "flags", "cam follow Hero"]);
+    assert!(!log.contains("needs"), "a mission serves every need: {log}");
+    app.update();
+    assert!(app.world().get::<Transform>(hero).unwrap().translation.distance(Vec3::new(30.0, 0.0, -10.0)) < 1.0);
+}

@@ -387,8 +387,24 @@ pub fn load() -> Mission {
     load_id("mission01")
 }
 
-/// Not retail: debug launch options (`--fire-rule`, `--start-at`), set once by `run` and applied to every mission loaded.
+/// Not retail: debug launch options (`--fire-rule`, `--start-at`), set once by `run` and applied to every script loaded: a campaign mission's
+/// (`try_load_id`) and a skirmish map's (`SkirmishScript::load`).
 static START: std::sync::OnceLock<(Vec<String>, Option<(f32, f32)>)> = std::sync::OnceLock::new();
+/// Hands the debug launch options to a script about to run: a campaign mission's or a skirmish map's (`SkirmishScript::load`). The first
+/// `step` consumes them (`Script::fire_start_rules`).
+pub fn apply_start(script: &mut rules::Script) {
+    apply_start_options(script, START.get());
+}
+/// `apply_start` with the options given (a test's; the real ones are process-wide).
+pub fn apply_start_options(script: &mut rules::Script, options: Option<&(Vec<String>, Option<(f32, f32)>)>) {
+    if let Some((rules, at)) = options {
+        (script.start_rules, script.start_at) = (rules.clone(), *at);
+    }
+}
+/// Whether `--fire-rule` or `--start-at` was given.
+pub fn start_requested() -> bool {
+    START.get().is_some_and(|(rules, at)| !rules.is_empty() || at.is_some())
+}
 pub fn set_start(rules: Vec<String>, at: Option<(f32, f32)>) {
     let _ = START.set((rules, at));
 }
@@ -431,9 +447,7 @@ pub fn try_load_id(id: &str) -> Result<Mission, String> {
                 false
             }
         };
-    if let Some((rules, at)) = START.get() {
-        (script.start_rules, script.start_at) = (rules.clone(), *at);
-    }
+    apply_start(&mut script);
     Ok(Mission { id: id.into(), data, opening: script.briefing_opening.then(default), script })
 }
 

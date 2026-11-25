@@ -128,6 +128,10 @@ pub struct Env {
     pub ships: Vec<ShipInfo>,
     /// Where `mark` appends (`<user data>/console_marks.txt`).
     pub marks: Option<std::path::PathBuf>,
+    /// The first word of the line, for the message of a refused command.
+    pub word: String,
+    /// What the battle offers (`Caps`); a campaign mission by default.
+    pub caps: super::Caps,
 }
 
 /// Game units of a Bevy position: x east, y north (mission JSON), z up.
@@ -268,7 +272,10 @@ impl Script {
                 }
                 CamMode::Player => {
                     o.view.push(ViewChange::FreeCam(false));
-                    self.console_act(&focus_camera(&flagship(&player)), w, out);
+                    // The cutscene camera is the campaign's; a skirmish's orbit camera never left the player.
+                    if env.caps.mission {
+                        self.console_act(&focus_camera(&flagship(&player)), w, out);
+                    }
                     o.lines.push("camera back on the player's ship".into());
                 }
                 CamMode::Follow(group) => {

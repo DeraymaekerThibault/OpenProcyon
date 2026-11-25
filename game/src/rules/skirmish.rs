@@ -15,7 +15,7 @@ pub struct SkirmishScript {
     pub script: Script,
     /// The side each map player fights for (an owner change moves a ship to the new owner's side).
     pub sides: HashMap<String, Side>,
-    paths: Value,
+    pub(in crate::rules) paths: Value,
     /// The script's environment block (space animal and dragon definitions).
     pub environment: Value,
     /// The script's map text (place names the star map labels).
@@ -35,6 +35,8 @@ impl SkirmishScript {
         let mut script = Script::new(&if decides { data.clone() } else { without_end_rules(&data) }, media);
         script.set_teams(teams);
         script.decide_game(decides);
+        // `--fire-rule` / `--start-at` work in a skirmish as in a mission: the script's first step runs them.
+        crate::campaign::apply_start(&mut script);
         Some(SkirmishScript { script, sides, paths: data["paths"].clone(), environment: data["environment"].clone(), map_text: data["map_text"].clone() })
     }
     /// Whether the map's `script.json` decides how the game ends (`"victory": "script"`; `"objectives"` too, the name the campaign
