@@ -1,0 +1,27 @@
+{
+  "id": "escort-to-gate",
+  "title": "Escort to a gate",
+  "kind": "mission",
+  "description": "A required task that is done when the escorted group, all of it, is inside an area, and failed when the escorted group is destroyed. The escorted group is marked mission essential. It starts with the mission and shows the objective point. The escorted ships do not sail by themselves: give them orders in another rule (PROVISIONAL: no movement order is written).",
+  "parameters": [
+    {"name": "name", "kind": "text", "label": "Task name", "default": "Escort to the gate"},
+    {"name": "task_text", "kind": "text", "label": "Task text", "default": "Bring the convoy to the gate."},
+    {"name": "escorted", "kind": "group", "label": "Group to escort"},
+    {"name": "volume", "kind": "volume", "label": "Area to reach"},
+    {"name": "point", "kind": "point", "label": "Objective point shown"}
+  ],
+  "mission": {"victory": "objectives"},
+  "tasks": [
+    {"Name": "{name}", "text": "{task_text}", "Active": false, "required": true,
+     "complete_when": [{"Type": "Is Group In Volume", "Group Name": "{escorted}", "Volume Name": "{volume}", "Entire Group": "TRUE"}],
+     "fail_when": [{"Type": "Group Destroyed", "Group Name": "{escorted}"}]}
+  ],
+  "rules": [
+    {"name": "{name} Start", "Run Once": true, "Is Active": true, "conditions": [{"Type": "World Initialize"}],
+     "actions": [
+       {"Type": "Set Group/Unit Mission Essential", "Group Name": "{escorted}", "Boolean": "TRUE"},
+       {"Type": "Set Objective Task Active State", "Objective Task": "{name}", "Active State": "TRUE"},
+       {"Type": "Set Current Objective Point", "Objective Point": "{point}"}
+     ]}
+  ]
+}

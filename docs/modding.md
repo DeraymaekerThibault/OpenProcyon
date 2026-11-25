@@ -358,6 +358,32 @@ names that the mission does not define (`mission rules: rule 'X': group 'Fleat' 
 
 A tool that lays speech or sound out against mission time can ask the engine how long a sound plays: `openprocyon::authoring::sound_duration(path)` returns the length in seconds of an Ogg Vorbis file (what the game plays), decoded with the same decoder the game uses. Vorbis states no length, so the file is decoded to its end and the samples counted: the result is the stream's length plus at most one decoder block (under 0.1 s for the game's sounds), and a long music track takes a moment. A file that cannot be read or played is an `Err` naming it. It needs no window, audio device or assets.
 
+## Mission templates (engine-added, not retail)
+
+A template is a data file that writes ordinary rules (and tasks) with a few names filled in, so authors and scripts start a mission from a working piece instead of an empty list. They are `content/templates/*.json`, hand-written for this project, compiled into the engine (a mod cannot add one yet: PROVISIONAL). `authoring::templates()` lists them, `authoring::expand_template(&template, &params)` fills one in, `authoring::template_schema()` is the JSON Schema of the file. Nothing remembers a template after it is expanded: the result is plain rules and tasks to put into `mission.json`, and the editor's "Templates" menu does exactly that as one undo step.
+
+| key | meaning |
+| --- | --- |
+| `id`, `title`, `description` | the file name without `.json`, and what a picker shows |
+| `kind` | `block` (a piece to put into a mission) or `mission` (a whole objective) |
+| `parameters` | `name`, `kind`, `label`, optional `default` (text). `kind` is `text`, `number` or a rule-schema kind the mission defines (`group`, `volume`, `point`, `point_set`, `speech_event`, `rule`), which a tool offers as a picker. A parameter without `default` is required |
+| `rules`, `tasks` | entries of `mission.json` `rules` / `tasks` in which a string value may hold `{parameter}`. A string that is exactly the placeholder of a `number` parameter becomes a JSON number. Object keys are never substituted, and an inserted value is not expanded again |
+| `mission` | keys the mission document needs (`"victory": "objectives"` for the templates that use tasks), to be written only where the mission has no such key |
+
+Expanding errors on a parameter the template does not declare, a required one left empty, a `number` that is not a number, and a placeholder that is not a parameter. The caller refuses or renames a rule or task whose name the mission already has (`--check-mission` warns about a repeated rule name). The templates:
+
+| id | writes |
+| --- | --- |
+| `dialogue` (block) | one rule: three `Play speech event` lines, each followed by `OP Wait Until Speech Done`; starts with the mission |
+| `cutscene` (block) | one rule: `NIS Start`, the camera on a group, `OP Teleport` of a group to a point set, `OP Wait`, `NIS End`; starts with the mission |
+| `failsafe` (block) | a rule that starts a timer, and a rule that, when the timer runs out or a group is destroyed (`OP Any Of`) and that group is not in an area (`OP Not`), switches one rule off and one on (`OP Set Rule Active`) |
+| `reach-point` | a required task done by a group entering an area, and the rule that starts it and shows the objective point |
+| `ambush-on-arrival` | rule 2 and 3 and the second task of `docs/examples/gate-ambush.mission.json` (a unit test compares them) |
+| `escort-to-gate` | a required task done when all of the escorted group is in an area, failed when it is destroyed; the group is made mission essential. No movement order is written (PROVISIONAL) |
+| `sink-group` | a required task done when a group is destroyed, failed when the player's group is |
+
+The default names and texts are placeholders to edit, not retail text.
+
 ## Mission rule extensions (engine-added, not retail)
 
 A custom `mission.json` can use a few additions to the retail rule vocabulary. **None of this is in the retail game**: every new Type starts with `OP ` (so it can never clash with a retail name), every new key is optional, and a mission that uses none of it plays exactly as before. The retail rule format is unchanged: a rule is `{"name", "Run Once", "Is Active", "conditions": [...], "actions": [...]}`, its conditions are ANDed, its actions run in order. Boolean fields of the new Types are the retail strings `"TRUE"` / `"FALSE"` (a JSON `true` reads as FALSE, `--check-mission` reports it); only the rule field `"Is Active"` and the task key `required` take JSON booleans.

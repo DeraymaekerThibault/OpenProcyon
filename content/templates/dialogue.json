@@ -1,0 +1,23 @@
+{
+  "id": "dialogue",
+  "title": "Dialogue",
+  "kind": "block",
+  "description": "Three speech lines one after another: say a line, wait until it is done, say the next. It starts with the mission; change the condition to start it elsewhere, and add a `Play speech event` / `OP Wait Until Speech Done` pair per extra line.",
+  "parameters": [
+    {"name": "name", "kind": "text", "label": "Rule name", "default": "Dialogue"},
+    {"name": "line_1", "kind": "speech_event", "label": "First line"},
+    {"name": "line_2", "kind": "speech_event", "label": "Second line"},
+    {"name": "line_3", "kind": "speech_event", "label": "Third line"}
+  ],
+  "rules": [
+    {"name": "{name}", "Run Once": true, "Is Active": true, "conditions": [{"Type": "World Initialize"}],
+     "actions": [
+       {"Type": "Play speech event", "Speech Event Name": "{line_1}"},
+       {"Type": "OP Wait Until Speech Done", "Speech Event Name": "{line_1}"},
+       {"Type": "Play speech event", "Speech Event Name": "{line_2}"},
+       {"Type": "OP Wait Until Speech Done", "Speech Event Name": "{line_2}"},
+       {"Type": "Play speech event", "Speech Event Name": "{line_3}"},
+       {"Type": "OP Wait Until Speech Done", "Speech Event Name": "{line_3}"}
+     ]}
+  ]
+}

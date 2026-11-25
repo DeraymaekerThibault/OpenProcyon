@@ -1,0 +1,25 @@
+{
+  "id": "reach-point",
+  "title": "Reach a point",
+  "kind": "mission",
+  "description": "A required task that is done when a group is inside an area; it shows the objective point and starts with the mission.",
+  "parameters": [
+    {"name": "name", "kind": "text", "label": "Task name", "default": "Reach the point"},
+    {"name": "task_text", "kind": "text", "label": "Task text", "default": "Sail to the marked point."},
+    {"name": "group", "kind": "group", "label": "Group that must arrive"},
+    {"name": "volume", "kind": "volume", "label": "Area to reach"},
+    {"name": "point", "kind": "point", "label": "Objective point shown"}
+  ],
+  "mission": {"victory": "objectives"},
+  "tasks": [
+    {"Name": "{name}", "text": "{task_text}", "Active": false, "required": true,
+     "complete_when": [{"Type": "Is Group In Volume", "Group Name": "{group}", "Volume Name": "{volume}", "Entire Group": "FALSE"}]}
+  ],
+  "rules": [
+    {"name": "{name} Start", "Run Once": true, "Is Active": true, "conditions": [{"Type": "World Initialize"}],
+     "actions": [
+       {"Type": "Set Objective Task Active State", "Objective Task": "{name}", "Active State": "TRUE"},
+       {"Type": "Set Current Objective Point", "Objective Point": "{point}"}
+     ]}
+  ]
+}
