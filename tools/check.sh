@@ -5,7 +5,7 @@
 #   default  before a commit: ruff, hygiene, Python tests, rustfmt, clippy, Rust tests (asset tests too when an import exists).
 #   --full   before a push or PR: default + the `fast` game build, the startup smoke, the battle check and the replay check. Fails without imported
 #            assets unless --allow-partial.
-# Cheap checks run first. Each step prints one line; its full log is local/check/<step>.log. The last line is GATE OK, GATE FAIL
+# Cheap checks run first (the Python tests run beside the Rust steps). Each step prints one line; its full log is local/check/<step>.log. The last line is GATE OK, GATE FAIL
 # or GATE PARTIAL (something was skipped for lack of assets). Needs ruff (pip install -r requirements-dev.txt); a .venv in the
 # checkout is used when present. Clippy and tests build in the dev profile, the game in `fast` (game/Cargo.toml).
 set -e
@@ -30,20 +30,52 @@ command -v ruff >/dev/null || { echo "ruff not found: pip install -r requirement
 logs=local/check; mkdir -p "$logs"
 start=$(date +%s)
 
+# report <name> <status> <seconds> <command...>: the one line of a step; on failure also the first 20 relevant lines of its log and
+# the command to rerun (the caller prints GATE FAIL).
+report() {
+  rname=$1 rstatus=$2 rsecs=$3; shift 3
+  if [ "$rstatus" = 0 ]; then
+    printf 'ok   %-14s %4ss\n' "$rname" "$rsecs"
+  else
+    printf 'FAIL %-14s %4ss\n' "$rname" "$rsecs"
+    { grep -E -i -m 20 'error|warning|panicked|FAIL|Traceback|would reformat|Diff in' "$logs/$rname.log" || tail -n 20 "$logs/$rname.log"; } | cut -c1-200
+    echo "rerun: $*"
+  fi
+}
+
 # step <name> <command...>: runs the command with its output in local/check/<name>.log and prints one line. On failure: the
-# first 20 relevant lines, the command to rerun, and GATE FAIL.
+# first 20 relevant lines, the command to rerun, and GATE FAIL (after the background step's own line, if one is running).
 step() {
   name=$1; shift
   t=$(date +%s)
-  if "$@" >"$logs/$name.log" 2>&1; then
-    printf 'ok   %-14s %4ss\n' "$name" "$(($(date +%s) - t))"
-  else
-    printf 'FAIL %-14s %4ss\n' "$name" "$(($(date +%s) - t))"
-    { grep -E -i -m 20 'error|warning|panicked|FAIL|Traceback|would reformat|Diff in' "$logs/$name.log" || tail -n 20 "$logs/$name.log"; } | cut -c1-200
-    echo "rerun: $*"
-    echo "GATE FAIL $name ($logs/$name.log)"
-    exit 1
-  fi
+  if "$@" >"$logs/$name.log" 2>&1; then status=0; else status=1; fi
+  if [ "$status" != 0 ]; then bg_join; fi
+  report "$name" "$status" "$(($(date +%s) - t))" "$@"
+  [ "$status" = 0 ] || { echo "GATE FAIL $name ($logs/$name.log)"; exit 1; }
+}
+
+# bg_start <name> <command...>: like step, but runs beside the following steps; bg_join prints its line (and, on failure, the
+# excerpt and rerun command) and sets bg_failed. Nothing is printed before the join, so the lines stay one per step.
+bgpid= bgname= bgcmd= bg_failed=
+bg_start() {
+  bgname=$1; shift; bgcmd="$*"
+  ( t=$(date +%s)
+    if "$@" >"$logs/$bgname.log" 2>&1; then status=0; else status=1; fi
+    echo "$status $(($(date +%s) - t))" >"$logs/$bgname.status" ) &
+  bgpid=$!
+}
+bg_join() {
+  [ -n "$bgpid" ] || return 0
+  wait "$bgpid" || true
+  bgpid=
+  read -r bstatus bsecs <"$logs/$bgname.status"
+  report "$bgname" "$bstatus" "$bsecs" $bgcmd
+  [ "$bstatus" = 0 ] || bg_failed=1
+}
+# bg_finish: join, and stop the gate when the background step failed.
+bg_finish() {
+  bg_join
+  [ -z "$bg_failed" ] || { echo "GATE FAIL $bgname ($logs/$bgname.log)"; exit 1; }
 }
 
 rust=1 python=1
@@ -53,9 +85,9 @@ if [ "$tier" = quick ] && base=$(git merge-base HEAD origin/main 2>/dev/null || 
   printf '%s\n' "$changed" | grep -q -E '\.py$' || python=
 fi
 
-# The imported assets, found like every tool finds them (tools/import_assets.py find_assets: also the main checkout's from a
+# The imported assets, found like every tool finds them (tools/import_assets.py --print-assets: also the main checkout's from a
 # linked worktree) and exported so the game and the battle check read the same folder.
-assets=$($py -c 'from tools.import_assets import find_assets; print(find_assets() or "")')
+assets=$($py -m tools.import_assets --print-assets)
 # The game builds its mod overlay next to the assets (<assets>/../local/overlay); with the main checkout's import every worktree
 # would rebuild the same folder under the others' runs, so each checkout gets its own.
 export PROCYON_OVERLAY="${PROCYON_OVERLAY:-$PWD/local/tool-overlay}"
@@ -64,7 +96,9 @@ else imported=0; echo "ASSETS: missing"; fi
 step ruff-format ruff format --check .
 step ruff-lint ruff check .
 step hygiene $py -m unittest discover -s tests -p test_repo_hygiene.py
-[ -z "$python" ] || step python-tests $py -m unittest discover -s tests
+# The Python tests run beside rustfmt, clippy and the Rust tests (they start no compiler); the hygiene rules ran above, so the
+# discover run is told to skip them (tests/test_repo_hygiene.py).
+[ -z "$python" ] || bg_start python-tests env PROCYON_HYGIENE_DONE=1 $py -m unittest discover -s tests
 if [ -n "$rust" ]; then
   step rustfmt cargo fmt --manifest-path game/Cargo.toml --check
   step clippy cargo clippy --manifest-path game/Cargo.toml --all-targets -- -D warnings
@@ -73,6 +107,7 @@ if [ "$tier" = quick ]; then
   skipped=${rust:+x}${python:+y}  # x: Rust checked, y: Python tests ran
   case $skipped in x) note=" (no Python change: Python tests skipped)" ;; y) note=" (no Rust change: rustfmt, clippy skipped)" ;;
     "") note=" (no Rust or Python change: rustfmt, clippy, Python tests skipped)" ;; *) note= ;; esac
+  bg_finish
   echo "GATE OK quick $(($(date +%s) - start))s$note"
   exit 0
 fi
@@ -103,6 +138,7 @@ if [ "$tier" = full ]; then
     skipped="startup smoke, battle check, replay check, "
   fi
 fi
+bg_finish
 total="$(($(date +%s) - start))s"
 if [ "$imported" = 1 ]; then
   echo "GATE OK $tier $total"

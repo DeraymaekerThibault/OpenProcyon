@@ -1,6 +1,7 @@
 """Repository rules that keep OpenProcyon shareable (AGENTS.md "Hard rules"), enforced for every contributor and tool:
 no original game files, no executable addresses or decompiler output, no reverse-engineering tooling in tracked files."""
 
+import os
 import re
 import subprocess
 import unittest
@@ -80,6 +81,10 @@ def tracked():
         ]
 
 
+@unittest.skipIf(
+    os.environ.get("PROCYON_HYGIENE_DONE"),
+    "tools/check.sh already ran the hygiene rules as their own step",
+)
 class RepoHygiene(unittest.TestCase):
     def setUp(self):
         self.files = [p for p in tracked() if p.is_file()]

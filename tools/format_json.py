@@ -5,15 +5,13 @@ import json
 from pathlib import Path
 
 from tools import cli
-from tools.jsonio import dump
+from tools.jsonio import write
 
 
 def main(assets):
     for pattern in ("maps/*.json", "campaign/*.json", "maps/*/*.json"):
         for f in sorted(Path(assets).glob(pattern)):
-            f.write_text(
-                dump(json.loads(f.read_text(encoding="utf-8"))), encoding="utf-8"
-            )
+            write(f, json.loads(f.read_text(encoding="utf-8")))
 
 
 if __name__ == "__main__":

@@ -7,7 +7,7 @@ from pathlib import Path
 from tools import cli
 from tools.export_maps import strings
 from tools.gamefs import ci_files
-from tools.jsonio import dump
+from tools.jsonio import write
 from tools.wot import parse_text, properties
 
 SKILLS = (
@@ -49,7 +49,7 @@ def main(root, out):
         for f in ci_files(Path(root) / "WorldObjects", "Crew_*.wot")
     }
     (Path(out) / "data").mkdir(parents=True, exist_ok=True)
-    (Path(out) / "data/crew.json").write_text(dump(crew), encoding="utf-8")
+    write(Path(out) / "data/crew.json", crew)
     print(len(crew), "crew")
 
 

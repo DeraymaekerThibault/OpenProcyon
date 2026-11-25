@@ -9,7 +9,7 @@ from pathlib import Path
 
 from tools import cli
 from tools.gamefs import ci_file
-from tools.jsonio import dump
+from tools.jsonio import write
 
 
 def parse(text):
@@ -55,7 +55,7 @@ def export(root, out):
     src = ci_file(Path(root) / "MeshDetailSettings", "MeshDetailSettings.dmt")
     meshes = parse(src.read_text(encoding="latin1"))
     (Path(out) / "data").mkdir(exist_ok=True)
-    (Path(out) / "data/mesh_detail.json").write_text(dump(meshes), encoding="utf-8")
+    write(Path(out) / "data/mesh_detail.json", meshes)
     print("mesh detail:", len(meshes), "meshes")
 
 

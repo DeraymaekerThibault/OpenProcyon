@@ -11,7 +11,7 @@ import json
 from pathlib import Path
 
 from tools import cli
-from tools.jsonio import dump
+from tools.jsonio import write
 from tools.skirmish_ships import SKIRMISH_SHIPS
 
 # Ships offered in the skirmish pickers: tools/skirmish_ships.py (also the importer's first ships); mods opt in with "skirmish": true.
@@ -89,17 +89,11 @@ def pack(assets):
         ):
             if k in j:
                 ship[k] = j[k]
-        (assets / "data/ships" / f"{name}.json").write_text(
-            dump(rnd(ship)), encoding="utf-8"
-        )
-        (assets / "data/geometry" / f"{name}.json").write_text(
-            dump(geometry), encoding="utf-8"
-        )
+        write(assets / "data/ships" / f"{name}.json", rnd(ship))
+        write(assets / "data/geometry" / f"{name}.json", geometry)
         f.unlink()
-    (assets / "data/weapons/guns.json").write_text(dump(rnd(guns)), encoding="utf-8")
-    (assets / "data/weapons/bullets.json").write_text(
-        dump(rnd(bullets)), encoding="utf-8"
-    )
+    write(assets / "data/weapons/guns.json", rnd(guns))
+    write(assets / "data/weapons/bullets.json", rnd(bullets))
 
 
 if __name__ == "__main__":

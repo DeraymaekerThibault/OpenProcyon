@@ -99,7 +99,7 @@ tools/shot.sh local/pause-restart.png --map red_rover --script pause-restart --s
 ```
 
 `make check` calls `tools/check.sh` (`make check ARGS=--quick` / `--full` pick a tier). The steps, cheapest first: ruff format check and
-lint (Python, rules in `ruff.toml`) → hygiene rules → Python tests → rustfmt check → strict Clippy → Rust tests; `--full` then builds the
+lint (Python, rules in `ruff.toml`) → hygiene rules (once; the Python tests skip them via `PROCYON_HYGIENE_DONE`) → rustfmt check → strict Clippy → Rust tests; the Python tests run in the background beside those three and are reported just before the final line; `--full` then builds the
 game and runs the startup smoke and the battle check.
 
 | Tier | When | Runs |
@@ -139,7 +139,7 @@ Use a scratch `XDG_DATA_HOME` for automated campaign runs if the player's campai
 Converted assets are found in this order: `PROCYON_ASSETS`, `assets/` in the source checkout (the checkout is found from the working directory or the executable: either must lie inside it), then the
 per-user folder `$XDG_DATA_HOME/openprocyon/assets` (Linux default `~/.local/share`; `%APPDATA%\openprocyon\assets` on Windows). Without
 any, the game exits with import instructions. `content/` is always layered on top. The tools (tests, `check.sh`, `shot.sh`, `smokes.sh`,
-`battle_check`, `autoplay`) use one order, `find_assets()` in `tools/import_assets.py`: the game's, with the main checkout's `assets/`
+`battle_check`, `autoplay`) use one order, `find_assets()` in `tools/import_assets.py` (`python3 -m tools.import_assets --print-assets` for the shell tools): the game's, with the main checkout's `assets/`
 after this checkout's, so a linked worktree uses the main import (never copy `assets/`). They export it as `PROCYON_ASSETS` for the game;
 `check.sh` prints `ASSETS: <path>` or `ASSETS: missing`. CLI mod/screenshot paths remain relative to the working directory.
 
@@ -290,6 +290,7 @@ compares two imports by meaning (JSON by value, images by pixels) to check expor
 | Retail format readers | `source_text.py`, `wot.py`, `mdb.py`, `msb.py`, `hdt.py`, `fft.py`, `eft.py` |
 | Mesh conversion | `mdb_to_glb.py`, `preview.py` |
 | Content export | `export_ship.py`, `export_combat.py`, `export_maps.py`, `export_campaign.py`, `export_campaign_media.py`, `export_environment.py`, `export_crew.py`, `export_effects.py`, `export_hud.py`, `export_voices.py`, `export_waypoint_art.py`, `export_collision.py`, `export_asteroids.py`, `ogg.py` |
+| Shared helpers | `paths.py` (`REPO`), `jsonio.py` (`dump`/`write`: the one JSON layout the exporters write), `rungame.py` (build the game, display, scratch data home and environment, logged run: `autoplay.py`, `battle_check.py`) |
 | Asset preparation | `pack_data.py`, `format_json.py`, `fix_alpha_bleed.py`, `make_slices.py`, `hud_sprites.py` (shared sprite layout) |
 | Workflow | `import_assets.py` (the importer; `build_assets.sh` wraps it), `check.sh`, `shot.sh`, `compare_assets.py`, `package_release.py` (player download) |
 | Research | `extract_wot.py` (catalog of WOT properties) |

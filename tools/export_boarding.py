@@ -9,7 +9,7 @@ from pathlib import Path
 
 from tools import cli, importlog
 from tools.export_combat import flat, load, placed_objects, scene_name
-from tools.jsonio import dump
+from tools.jsonio import write
 from tools.mdb_to_glb import hardpoints, layer_offsets, with_layer_offset
 from tools.msb import parse_scene_file
 
@@ -64,7 +64,7 @@ def export(root, out):
         if points or "crew" in entry:
             data[name] = entry
     (Path(out) / "data").mkdir(exist_ok=True)
-    (Path(out) / "data/boarding.json").write_text(dump(data), encoding="utf-8")
+    write(Path(out) / "data/boarding.json", data)
     print("boarding:", len(data), "entities")
 
 
