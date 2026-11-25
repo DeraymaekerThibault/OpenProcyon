@@ -99,6 +99,39 @@ fn a_ship_handed_to_the_human_is_stopped_not_capped_by_a_group_throttle() {
     assert_eq!((sh.cap, sh.order), (1.0, EngineOrder::Stop), "stopped, but free to sail on the human's orders");
 }
 
+/// Mission 4 stops 'Player0 Group' at every cutscene ("Nelson Speech", the sightings) and no rule sets it back to full. The human's
+/// escort (the RLS Beans) must be stopped like the flagship, not capped at 0: a cap left it unable to move for the whole mission.
+/// An allied computer ship named in the same group keeps the cap.
+#[test]
+#[ignore = "needs imported assets"]
+fn the_humans_escort_is_stopped_not_capped_by_a_group_throttle() {
+    let mut mission = crate::campaign::load_id("mission02");
+    let data = serde_json::json!({"rules": [{"name": "Cutscene", "conditions": [{"Type": "World Initialize"}], "actions": [
+        {"Type": "Set Group Throttle Percent", "Group Name": "Player0 Group", "Throttle Percent": 0.0},
+        {"Type": "Set Group Throttle Percent", "Group Name": "navy", "Throttle Percent": 0.0}]}]});
+    mission.script = Script::new(&data, serde_json::json!({}));
+    let owner = mission.script.player().to_string();
+    let lib = Library::load(crate::assets_dir());
+    let class = lib.index("Ship_Navy_Torpedo");
+    let mut app = rules_app(mission);
+    let ship = |order| Ship { heading: 0.0, order, ..Ship::new(class, Side::Player) };
+    let ms = |name: &str, owner: &str| MissionShip { name: name.into(), owner: owner.into(), visible: true, ..default() };
+    app.world_mut().spawn((ship(EngineOrder::Full), Health::new(&lib.classes[class]), Transform::default(), Visibility::Inherited, PlayerShip, ms("RLS Frank", &owner)));
+    let escort = app
+        .world_mut()
+        .spawn((ship(EngineOrder::Full), Health::new(&lib.classes[class]), Transform::from_xyz(20.0, 0.0, 0.0), Visibility::Inherited, ms("RLS Beans", &owner)))
+        .id();
+    let ally = app
+        .world_mut()
+        .spawn((ship(EngineOrder::Full), Health::new(&lib.classes[class]), Transform::from_xyz(90.0, 0.0, 0.0), Visibility::Inherited, ms("RLS Sleekshot", "navy")))
+        .id();
+    app.insert_resource(lib);
+    app.update();
+    let escort = app.world().get::<Ship>(escort).unwrap();
+    assert_eq!((escort.cap, escort.order), (1.0, EngineOrder::Stop), "stopped, but free to sail on the human's orders");
+    assert_eq!(app.world().get::<Ship>(ally).unwrap().cap, 0.0, "a computer ship's group throttle is its cap");
+}
+
 #[test]
 #[ignore = "needs imported assets"]
 fn mission_two_attack_volume_changes_base_owner_and_gunfire_advances_the_story() {

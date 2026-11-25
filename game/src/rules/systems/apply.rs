@@ -111,9 +111,12 @@ pub(in crate::rules) fn apply(
             Fx::Throttle(u, v) => each_ship(ships, u, |s| s.ship.cap = v),
             // A ship just handed to the human (Captain_Human earlier in the same rule; the primary handoff itself is queued) counts as
             // the player's: mission 9's "Dark Matter Ignited" gives back the Longboat, then sets the group's throttle to 0. As a cap
-            // that would have left the Longboat unable to move for the rest of the mission. A skirmish's human ship keeps its throttle.
+            // that would have left the Longboat unable to move for the rest of the mission. The human's other fleet ships are the
+            // same: mission 4 stops 'Player0 Group' for each cutscene and never raises it again, and as a cap that froze the RLS Beans
+            // (and the RLS Swiftsure once it joins) for good. A skirmish's human ship keeps its throttle.
             Fx::Speed(u, v) => each_ship(ships, u, |s| {
-                if !s.primary && !s.mission.human {
+                let own = s.ship.side == Side::Player && s.mission.owner == env.script.player();
+                if !s.primary && !s.mission.human && !own {
                     s.ship.cap = v;
                 } else if v <= 0.0 && !skirmish {
                     s.ship.order = EngineOrder::Stop;

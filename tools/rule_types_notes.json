@@ -128,7 +128,7 @@
     "SetCollidable": "Switches collisions for the ships.",
     "Set Lifeboat Creation State": "Allows or forbids the ships to release lifeboats when destroyed.",
     "Group to follow path": "Makes the group follow `Path Name`. `Follow Mode` is `to end`, `loop`, `teleport loop` or `end to end`; only `loop` loops a ship, the others differ for meteor groups. `Find Closest Point` starts at the nearest point instead of the first.",
-    "Set Group Throttle Percent": "Throttle as a fraction 0..1. Not applied to the human's ship (a value of 0 stops the player's scripted course only).",
+    "Set Group Throttle Percent": "Throttle as a fraction 0..1. Not applied to the human's ships (a value of 0 stops their scripted course only).",
     "Set Max Throttle Percent (Max user settable)": "Caps the throttle as a fraction 0..1, also for the human.",
     "Set Ship Top Speed Percentage": "Treated as the same cap as the max throttle (PROVISIONAL), fraction 0..1.",
     "GroupA to attack GroupB": "Adds the target group to the attackers' orders.",
