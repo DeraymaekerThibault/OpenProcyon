@@ -592,15 +592,15 @@ impl Checker<'_> {
 fn map_findings(root: &Path, dir: &Path, id: &str, rules_name: &str, sounds: Option<&HashSet<String>>, models: Option<&HashSet<String>>) -> Result<Vec<Finding>, String> {
     let have_sound = |f: &str| sounds.is_some_and(|s| s.contains(&f.to_lowercase()));
     let lookups: Option<(&Path, &dyn Fn(&str) -> bool)> = sounds.map(|_| (root, &have_sound as &dyn Fn(&str) -> bool));
-    let mut out: Vec<Finding> = crate::rules::cli::check_map_in(dir, lookups)?
+    let (problems, docs) = crate::rules::cli::check_map_docs(dir, lookups)?;
+    let mut out: Vec<Finding> = problems
         .into_iter()
         .map(|mut f| {
             f.file = format!("maps/{}", f.file);
             f
         })
         .collect();
-    let rules = dir.join(rules_name);
-    let (Some(mission), map) = (crate::data::try_json(&rules), crate::data::try_json(&dir.join("map.json")).unwrap_or_default()) else { return Ok(out) };
+    let (mission, map) = (docs.mission, docs.map.unwrap_or_default());
     let mission_file = format!("maps/{id}/{rules_name}");
     out.extend(unused_definitions(&mission).into_iter().map(|f| f.with_file(&mission_file)));
     // Findings of `rules::check` name `map.json` or nothing (the rules file); here they get the map folder.
@@ -710,19 +710,12 @@ fn schema_of(rel: &str) -> Option<&'static str> {
 
 /// Lower-case names of every `.ogg` under `sound/` and `maps/*/speech/` of `root`: what a sound is looked up by (`audio::sound`).
 fn sound_stems(root: &Path) -> HashSet<String> {
-    let mut files = vec![];
-    modding::walk(&root.join("sound"), Path::new(""), &mut files);
-    for m in std::fs::read_dir(root.join("maps")).into_iter().flatten().flatten() {
-        modding::walk(&m.path().join("speech"), Path::new(""), &mut files);
-    }
-    files.iter().filter(|p| p.extension().is_some_and(|e| e == "ogg")).filter_map(|p| Some(p.file_stem()?.to_str()?.to_lowercase())).collect()
+    crate::data::AssetIndex::scan_sounds(root).into_keys().collect()
 }
 
 /// File names of every model under `models/` of `root` (`data::model` finds a scenery mesh by its file name).
 fn model_files(root: &Path) -> HashSet<String> {
-    let mut files = vec![];
-    modding::walk(&root.join("models"), Path::new(""), &mut files);
-    files.iter().filter_map(|p| Some(p.file_name()?.to_str()?.to_string())).collect()
+    crate::data::AssetIndex::scan_models(root).into_keys().collect()
 }
 
 /// The keys of `value` that the JSON Schema `root` does not list, as `(path, keys the schema lists there)`, in document order. A path

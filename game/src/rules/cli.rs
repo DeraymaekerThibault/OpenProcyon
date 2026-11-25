@@ -122,6 +122,20 @@ pub fn check_map(dir: &Path) -> Result<Vec<Problem>, String> {
 /// `check_map` for a tool that has its own asset tree: `lookups` is the folder ships are looked up in (`ships/<id>/ship.json`, only
 /// when it has a `ships/` folder) and the test for a sound by name; `None` skips ship and sound lookups (no assets to look in).
 pub fn check_map_in(dir: &Path, lookups: Option<(&Path, &dyn Fn(&str) -> bool)>) -> Result<Vec<Problem>, String> {
+    check_map_docs(dir, lookups).map(|(problems, _)| problems)
+}
+
+/// The files of a map folder `check_map_in` parsed, for a caller that checks more of the same documents without reading them again.
+pub struct MapDocs {
+    /// File name of the rules (`mission.json` or `script.json`).
+    pub rules_name: String,
+    pub mission: Value,
+    /// `map.json`, when it is there and valid JSON.
+    pub map: Option<Value>,
+}
+
+/// `check_map_in` that also hands back the documents it parsed.
+pub fn check_map_docs(dir: &Path, lookups: Option<(&Path, &dyn Fn(&str) -> bool)>) -> Result<(Vec<Problem>, MapDocs), String> {
     let rules_file = rules_file(dir).ok_or_else(|| format!("no mission.json or script.json in {}", dir.display()))?;
     let mission = crate::data::try_json(&rules_file).ok_or_else(|| format!("{} is not valid JSON", rules_file.display()))?;
     let (map, media) = (crate::data::try_json(&dir.join("map.json")), crate::data::try_json(&dir.join("media.json")));
@@ -146,7 +160,7 @@ pub fn check_map_in(dir: &Path, lookups: Option<(&Path, &dyn Fn(&str) -> bool)>)
     if map.is_none() {
         problems.insert(0, note(Level::Error, "map.json", "missing or not valid JSON; the map cannot be played"));
     }
-    Ok(problems)
+    Ok((problems, MapDocs { rules_name, mission, map }))
 }
 
 #[cfg(test)]
