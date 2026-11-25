@@ -139,7 +139,7 @@ fn describe(
     ships: Query<(Entity, &Ship, &Health, &Transform, Option<&crate::campaign::MissionShip>, Has<PlayerShip>)>,
     animals: Query<(Entity, &Transform), (With<crate::environment::SpaceAnimal>, Without<Ship>)>,
     sensors: Res<crate::environment::Sensors>,
-    skirmish: Option<Res<crate::rules::skirmish::SkirmishScript>>,
+    active: crate::rules::active::ActiveScript,
     fleets: Res<crate::ship::Fleets>,
 ) {
     contents.icons.clear();
@@ -162,11 +162,13 @@ fn describe(
             icon(MapIconKind::Whale, transform);
         }
     }
-    if let Some(sk) = skirmish.as_deref().filter(|_| mission.is_none()) {
+    if mission.is_none()
+        && let Some(script) = active.script()
+    {
         // Skirmish (retail, Border Dispute): the map's place names, the human team's objective point and an "Objectives:" panel.
-        push_labels(&mut contents.labels, &sk.map_text, &sk.script.map_text);
-        if let Some(team) = sk.script.team_of(&fleets.local)
-            && let Some((point, task)) = sk.script.team_objective(team)
+        push_labels(&mut contents.labels, active.map_text(), &script.map_text);
+        if let Some(team) = script.team_of(&fleets.local)
+            && let Some((point, task)) = script.team_objective(team)
         {
             if let Some(p) = point {
                 contents.icons.push(MapIcon { kind: MapIconKind::Objective, position: crate::game_to_bevy(&p), yaw: 0.0 });

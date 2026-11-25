@@ -203,14 +203,9 @@ pub fn chat_thumb_top(offset: f32, view: f32, content: f32) -> f32 {
     CHAT_LIST_MARGIN + track * if reach > 0.0 { (offset / reach).clamp(0.0, 1.0) } else { 1.0 }
 }
 /// Moves the lines of mission and skirmish speech that just started into the log.
-fn chat_feed(mission: Option<ResMut<crate::campaign::Mission>>, skirmish: Option<ResMut<crate::rules::skirmish::SkirmishScript>>, mut log: ResMut<ChatLog>) {
-    if let Some(mut m) = mission.filter(|m| !m.script.started.is_empty()) {
-        for (text, colour) in std::mem::take(&mut m.script.started) {
-            log.push(text, colour);
-        }
-    }
-    if let Some(mut sk) = skirmish.filter(|s| !s.script.started.is_empty()) {
-        for (text, colour) in std::mem::take(&mut sk.script.started) {
+fn chat_feed(mut script: crate::rules::active::ActiveScriptMut, mut log: ResMut<ChatLog>) {
+    if let Some(script) = script.script_mut().filter(|s| !s.started.is_empty()) {
+        for (text, colour) in std::mem::take(&mut script.started) {
             log.push(text, colour);
         }
     }

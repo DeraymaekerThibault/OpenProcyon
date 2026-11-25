@@ -6,7 +6,6 @@ use bevy::input::keyboard::KeyboardInput;
 use super::*;
 use crate::menu::Screen;
 use crate::rules::console::{Caps, Cheats, Command, Console, DevView, Edit, Env, FrameStats, Needs, ShipInfo, ViewChange, marks_path, parse};
-use crate::rules::skirmish::SkirmishScript;
 
 /// Whether the console is on without the Display option "Developer Console": debug builds, `--console` or `PROCYON_CONSOLE` in the
 /// environment. A release build otherwise leaves it to the option (off by default), so a stray `~` never hands a player the cheats.
@@ -155,8 +154,7 @@ pub(super) fn run(
     mut console: ResMut<Console>,
     mut dev: ResMut<DevView>,
     mut restart: ResMut<crate::scenario::RestartRequest>,
-    mut mission: Option<ResMut<Mission>>,
-    mut skirmish: Option<ResMut<SkirmishScript>>,
+    mut active: crate::rules::active::ActiveScriptMut,
     mut bare: ResMut<BareScript>,
     fleets: Option<Res<crate::ship::Fleets>>,
     target: Res<Target>,
@@ -173,14 +171,13 @@ pub(super) fn run(
         return;
     }
     // The script the battle runs, with what applying its effects needs: a campaign mission, a skirmish map's script, or neither.
-    let in_mission = mission.is_some();
+    let in_mission = active.is_mission();
     let (null, no_sides) = (serde_json::Value::Null, std::collections::HashMap::new());
-    let (script, paths, sides, caps, mission_id): (&mut Script, &serde_json::Value, _, _, _) = if let Some(m) = mission.as_deref_mut() {
-        let Mission { script, data, id, .. } = m;
-        (script, &data["paths"], None, Caps::MISSION, id.clone())
-    } else if let Some(sk) = skirmish.as_deref_mut() {
-        let SkirmishScript { script, paths, sides, .. } = sk;
-        (script, &*paths, Some(&*sides), Caps::SKIRMISH_SCRIPT, String::new())
+    let (script, paths, sides, caps, mission_id): (&mut Script, &serde_json::Value, _, _, _) = if let Some(p) = active.parts() {
+        match p.mission_id {
+            Some(id) => (p.script, p.paths, p.sides, Caps::MISSION, id.to_string()),
+            None => (p.script, p.paths, p.sides, Caps::SKIRMISH_SCRIPT, String::new()),
+        }
     } else {
         (bare.0.get_or_insert_with(|| Script::new(&serde_json::json!({"rules": []}), serde_json::Value::Null)), &null, Some(&no_sides), Caps::BARE, String::new())
     };
