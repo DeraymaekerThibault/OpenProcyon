@@ -46,6 +46,14 @@ Git Bash (`GIT_BASH=<path>` if it is not in the default place), and the screensh
    the map's `map.json`. Ships and shells are numbered by creation order (`SpawnIndex`) and `gt` restarts at 0 when a battle restarts,
    so two runs compare row by row. Every battle logs `battle seed N`; `--seed N` or `PROCYON_SEED=N` replays it (`combat::SimRng`,
    docs/re/tick.md).
+   `PROCYON_COMMANDS=<file.jsonl>` records the player's orders (`commands.rs`, so far engine orders and target picks), and
+   `--replay <file.jsonl>` plays them back with the same scenario arguments, seed and mods (the game names any that differ), also
+   from a normal play session: the log keeps each frame's game-time advance and tick count, the replay feeds those to the clock, so
+   frame-driven rules and ticks line up as recorded. JSON lines, format 1 (PROVISIONAL): a header (format, version, seed, scenario
+   arguments, mod folders), `frames` ([advance ns, ticks] or [advance ns, ticks, repeat]), and `command` lines stamped with the
+   tick (or paused frame) they were applied on, naming objects by kind and `SpawnIndex` only. Only the first battle of a run is
+   recorded. `battle_check --replay` (in `check.sh --full` for `red_rover`) records a run of `--script commands` and fails when
+   its replay's battle report differs.
    `--fixed-step` (or `PROCYON_FIXED_STEP=1`; `--shot` implies it unless `PROCYON_FIXED_STEP=0`, `lib.rs::wants_fixed_step`) makes a scripted run reproducible: each frame is one 33 ms tick at 1x whatever
    the frame rate, and the clock-seeded cosmetic draws (ship names, stars) use a fixed seed. Run twice, it gives the same
    pictures and the same trace. `python3 -m tools.tracediff A.csv B.csv` compares two traces (one line per file, then the
@@ -158,8 +166,11 @@ delta clamps. Virtual pause and speed still control this clock. At the original'
 does not have, a call advances at most 0.1 s (about 3 ticks) so 16x stays smooth. Single-player mission and skirmish rules are not in the tick:
 the `FrameRules` set runs them once per frame in `Update`, after the last tick, also while paused.
 
-Keyboard/mouse/UI capture remains in `PreUpdate`/`Update`. Store a command in the existing resource/component or registered
-message queue and consume it on a fixed tick; never read `just_pressed` in a simulation system. Frame input may wait until the
+Keyboard/mouse/UI capture remains in `PreUpdate`/`Update`. A player order goes through `commands::Orders` (`commands.rs`): the input
+system sends a `PlayerCommand` and `commands::apply_tick` applies it first thing in the next tick (`BattleSet::Tick`), or at the end
+of the frame while the battle is paused, so it is recorded and replayable. Engine orders and target picks go this way so far; the
+other orders still store a command in their resource/component or registered message queue and consume it on a fixed tick
+(#369 moves them over one group at a time). Never read `just_pressed` in a simulation system. Frame input may wait until the
 next tick. Bevy 0.20's `TimePlugin` gates message maintenance on fixed-schedule execution, retaining commands through zero-tick
 frames and fixed output for frame readers. `fixed_tests.rs` verifies both directions, including multi-tick catch-up and no replay.
 
@@ -219,6 +230,7 @@ Keep the existing module boundaries. New files should own a real feature, not ju
 | `view.rs` | Orbit camera, world mouse/keyboard input, sky and background stars (`docs/re/sky.md`), retail and free camera (`docs/re/camera.md`), F1 debug text | Changing camera or world input |
 | `data.rs` | JSON → ship classes, sections, mounts, geometry and shared weapon definitions | Changing simulation data schemas; coordinate the exporter and mod fixtures |
 | `combat/` | `mod.rs` health, targets, messages, engines, destruction; `gunnery.rs` gun mounts, turret aim/lead, bursts, ship and tower fire; `shells.rs` shells in flight, torpedo guidance, point defence, hit damage; `hit_test.rs` ray/segment tests against sections; `asteroid.rs` asteroid motion/breakup; `damage.rs` smoke/fires/mesh swaps; `status.rs` HUD-facing gun/section queries; `tests.rs` | Changing combat; report hits/firing/destruction through the existing messages |
+| `commands.rs` | Player orders as data (`PlayerCommand`, `Orders`), applied at the start of the next tick (or at the end of a paused frame); command-log recording (`PROCYON_COMMANDS`) and `--replay` | Routing another order kind through it (one group per PR, `tracediff` before and after) or changing the log format (ask a maintainer) |
 | `collision.rs` | Ship movement substeps, ship/scenery contact, separation and contact velocity; AI collision avoidance (`collision/avoid.rs`) | Changing physical collision; free-motion equations remain in `step` |
 | `campaign.rs` | Mission loading (`load_id`, `next`), campaign ship/map setup, campaign points and save files (`CampaignSave`, `list_saves`, `write_save`) | Changing mission initialization or which exported mission is loadable |
 | `rules/` | `eval.rs` pure rule evaluator (`Script`, no ECS; `eval/` holds types, state, conditions, actions); `systems.rs` ECS dispatch (`systems/` holds mission AI, presentation, autopilot); `tests.rs` | Implementing a retail condition/action; test the evaluator before ECS wiring |

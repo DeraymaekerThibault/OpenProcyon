@@ -2,6 +2,7 @@
 pub mod autopilot;
 mod fleet;
 mod lifeboats;
+mod orders;
 mod report;
 mod shells;
 mod trace;
@@ -47,7 +48,7 @@ macro_rules! scripts {
 
 scripts! {
     Animals => "animals", Asteroid => "asteroid", Board => "board", BriefingSkip => "briefing-skip",
-    Cloak => "cloak", Console => "console", ConsoleView => "console-view", Course => "course", CurrentM3 => "current-m3", Damage => "damage", Defeat => "defeat",
+    Cloak => "cloak", Commands => "commands", Console => "console", ConsoleView => "console-view", Course => "course", CurrentM3 => "current-m3", Damage => "damage", Defeat => "defeat",
     Dock => "dock", DockClick => "dock-click", DockMenu => "dock-menu",
     Fleet => "fleet", FleetPrimary => "fleet-primary", FleetCrew => "fleet-crew", FleetArms => "fleet-arms", FleetProfile => "fleet-profile", FleetProfileCrew => "fleet-profile-crew", FleetProfileArms => "fleet-profile-arms", FleetShips => "fleet-ships",
     Fire => "fire", FxTest => "fxtest", HuntM3 => "hunt-m3", Impacts => "impacts",
@@ -67,7 +68,7 @@ pub fn plugin(app: &mut App) {
     trace::plugin(app);
     app.add_systems(PreUpdate, fleet::fleet_smoke.after(bevy::ui::UiSystems::Focus).before(crate::panels::hud_input))
         .add_systems(PreUpdate, lifeboats::smoke.after(bevy::ui::UiSystems::Focus))
-        .add_systems(Update, (shells::shells, animals, stormflash, allstop, fire, impacts, console));
+        .add_systems(Update, (shells::shells, animals, stormflash, allstop, fire, impacts, console, orders::orders));
 }
 
 /// `--script console-view --mission N --dist D --pitch P`: shows the mission's volumes, paths and points, hides the HUD and switches to

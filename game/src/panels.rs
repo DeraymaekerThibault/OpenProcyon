@@ -688,7 +688,8 @@ pub fn speed_order_at(p: Vec2) -> crate::EngineOrder {
 #[allow(deprecated)] // Interaction, see pointer.rs
 pub fn engine_input(
     mouse: Res<ButtonInput<MouseButton>>,
-    mut ship: Single<&mut Ship, With<PlayerShip>>,
+    ship: Single<Entity, With<PlayerShip>>,
+    mut orders: crate::commands::Orders,
     dial: Query<(&Interaction, &bevy::ui::RelativeCursorPosition), With<EngineDial>>,
     tabs: Query<(&EngineTab, &Interaction)>,
     visible: Query<&Visibility, With<HudRoot>>,
@@ -710,8 +711,7 @@ pub fn engine_input(
         })
     });
     if let Some(order) = order {
-        ship.throttle = None;
-        ship.order = order;
+        orders.send(crate::commands::Kind::Engine { ship: *ship, engine: crate::commands::Engine::To(order) });
     }
 }
 
@@ -764,6 +764,8 @@ pub fn input_app() -> (App, Entity) {
         .init_resource::<ChatLog>()
         .init_resource::<crate::bindings::Bindings>()
         .init_resource::<combat::Target>()
+        .init_resource::<crate::commands::Outbox>()
+        .init_resource::<crate::commands::Clock>()
         .insert_resource(Library::load(crate::assets_dir()))
         .insert_resource(Toggles { weapons: true, names: true })
         .insert_resource(crate::Orbit { yaw: 0.0, pitch: 0.5, dist: 50.0, focus: Some(Entity::PLACEHOLDER) })
@@ -1012,7 +1014,8 @@ pub mod tests {
     #[allow(deprecated)] // Interaction, see pointer.rs
     fn engine_tabs_clear_throttle_only_for_direct_visible_controls() {
         let (mut app, root) = input_app();
-        app.add_systems(Update, engine_input.before(hud_input));
+        // The dial sends an order; outside a running battle clock (this world has none) `apply_tick` applies it at once.
+        app.add_systems(Update, (engine_input.before(hud_input), crate::commands::apply_tick.after(engine_input)));
         let w = app.world_mut();
         let primary = w.query_filtered::<Entity, With<PlayerShip>>().single(w).unwrap();
         let secondary = w.spawn_empty().id();

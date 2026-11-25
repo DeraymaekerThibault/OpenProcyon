@@ -3,7 +3,7 @@
 #   --quick  while iterating (seconds): ruff and the hygiene rules always; rustfmt + clippy when Rust changed, the Python tests
 #            when Python changed ("changed" = against the merge base with origin/main, plus uncommitted and untracked files).
 #   default  before a commit: ruff, hygiene, Python tests, rustfmt, clippy, Rust tests (asset tests too when an import exists).
-#   --full   before a push or PR: default + the `fast` game build, the startup smoke and the battle check. Fails without imported
+#   --full   before a push or PR: default + the `fast` game build, the startup smoke, the battle check and the replay check. Fails without imported
 #            assets unless --allow-partial.
 # Cheap checks run first. Each step prints one line; its full log is local/check/<step>.log. The last line is GATE OK, GATE FAIL
 # or GATE PARTIAL (something was skipped for lack of assets). Needs ruff (pip install -r requirements-dev.txt); a .venv in the
@@ -96,8 +96,11 @@ if [ "$tier" = full ]; then
     # Battle check: short skirmishes with fixed fleets must still play like battles (the computer engages, nobody grinds on an
     # island, nothing panics). Whole-battle regressions that single-system tests miss show up here (~1-2 min).
     step battle-check $py -m tools.battle_check
+    # Replay check: a skirmish on the normal clock with scripted orders records a command log (PROCYON_COMMANDS), and its replay
+    # (--replay) must give the same battle report (game/src/commands.rs, ~1 min).
+    step replay-check $py -m tools.battle_check red_rover --replay
   else
-    skipped="startup smoke, battle check, "
+    skipped="startup smoke, battle check, replay check, "
   fi
 fi
 total="$(($(date +%s) - start))s"

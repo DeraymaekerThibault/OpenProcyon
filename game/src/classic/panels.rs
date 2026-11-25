@@ -1115,7 +1115,8 @@ mod tests {
     #[allow(deprecated)] // Interaction, see pointer.rs
     fn dial_click_sets_the_engine_order_and_counts_as_a_hud_click() {
         let (mut app, root) = crate::panels::input_app();
-        app.add_systems(Update, crate::panels::engine_input.before(crate::panels::hud_input));
+        // The dial sends an order; outside a running battle clock `apply_tick` applies it at once.
+        app.add_systems(Update, (crate::panels::engine_input.before(crate::panels::hud_input), crate::commands::apply_tick.after(crate::panels::engine_input)));
         let rel = RelativeCursorPosition { cursor_over: true, normalized: Some(Vec2::new(31.0 / 86.0 - 0.5, 44.0 / 101.0 - 0.5)) };
         app.world_mut().spawn((Solid, crate::panels::EngineDial, Interaction::Pressed, rel));
         app.world_mut().resource_mut::<ButtonInput<MouseButton>>().press(MouseButton::Left);
