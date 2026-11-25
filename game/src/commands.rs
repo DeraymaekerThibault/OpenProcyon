@@ -20,7 +20,8 @@
 //! the first battle of a run is recorded; a restart ends the recording.
 //!
 //! Routed so far: engine orders, target picks, move, course and cancel orders, the right-click menu's Stop, Hold, Cloak, Dock,
-//! Tow, Board and Grapple, Backspace's dock and grapple cancels, the Fleet Commands (formations, attack, cease fire) and P. The other orders still change the battle directly and are not in a recording yet
+//! Tow, Board and Grapple, Backspace's dock and grapple cancels, the Fleet Commands (formations, attack, cease fire), P,
+//! panic fire and indirect (lob) shots. The other orders still change the battle directly and are not in a recording yet
 //! (later PRs, one group each). PROVISIONAL: the file format (version 2; version 1, without the skirmish setup, still reads).
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
@@ -92,6 +93,11 @@ pub enum Kind {
     CeaseFire,
     /// P (Change Primary, skirmish only): `ship` becomes the fleet's command ship (`ship::promote`).
     Promote { ship: Entity },
+    /// Panic fire (X, or the panic button): every gun of the command ship picks its own nearest enemy until the player retargets.
+    PanicFire { ship: Entity },
+    /// The command ship's indirect shot: `Some((bank, point))` is the ground point a click gave the armed bank; `None` drops a shot
+    /// not fired yet (a click on a gun-bank icon). Which bank is armed is the player's own input state, not an order.
+    Lob { ship: Entity, shot: Option<(usize, Vec3)> },
 }
 
 /// One player order.
@@ -148,6 +154,20 @@ pub fn apply(world: &mut World, kind: &Kind) {
         }
         Kind::Promote { ship } => {
             crate::ship::promote(world, ship, false);
+        }
+        Kind::PanicFire { ship } => {
+            if direct(world, ship)
+                && let Some(mut t) = world.get_resource_mut::<crate::combat::Target>()
+            {
+                t.2.panic = true;
+            }
+        }
+        Kind::Lob { ship, shot } => {
+            if direct(world, ship)
+                && let Some(mut t) = world.get_resource_mut::<crate::combat::Target>()
+            {
+                t.2.shot = shot;
+            }
         }
         Kind::Engine { ship, engine } => {
             if let Some(mut s) = world.get_mut::<Ship>(ship) {
@@ -475,24 +495,79 @@ pub enum At {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Saved {
-    Engine { ship: NetId, engine: SavedEngine },
-    Target { ship: NetId, target: Option<NetId>, spot: Option<[f32; 3]> },
-    Move { ship: NetId, to: [f32; 3], append: bool },
-    Course { ship: NetId, points: Vec<[f32; 3]>, release: bool },
-    Cancel { ship: NetId },
-    Stop { ship: NetId },
-    Hold { ship: NetId, on: bool },
-    Cloak { ship: NetId, on: bool },
-    Dock { ship: NetId, dockee: NetId, release: bool },
-    Tow { ship: NetId, towee: Option<NetId> },
-    Board { ship: NetId, target: Option<NetId> },
-    Grapple { ship: NetId, target: Option<NetId> },
-    CancelDock { ship: NetId },
-    DropGrapple { ship: NetId },
-    Formation { formation: crate::ship::Formation, hold: bool },
+    Engine {
+        ship: NetId,
+        engine: SavedEngine,
+    },
+    Target {
+        ship: NetId,
+        target: Option<NetId>,
+        spot: Option<[f32; 3]>,
+    },
+    Move {
+        ship: NetId,
+        to: [f32; 3],
+        append: bool,
+    },
+    Course {
+        ship: NetId,
+        points: Vec<[f32; 3]>,
+        release: bool,
+    },
+    Cancel {
+        ship: NetId,
+    },
+    Stop {
+        ship: NetId,
+    },
+    Hold {
+        ship: NetId,
+        on: bool,
+    },
+    Cloak {
+        ship: NetId,
+        on: bool,
+    },
+    Dock {
+        ship: NetId,
+        dockee: NetId,
+        release: bool,
+    },
+    Tow {
+        ship: NetId,
+        towee: Option<NetId>,
+    },
+    Board {
+        ship: NetId,
+        target: Option<NetId>,
+    },
+    Grapple {
+        ship: NetId,
+        target: Option<NetId>,
+    },
+    CancelDock {
+        ship: NetId,
+    },
+    DropGrapple {
+        ship: NetId,
+    },
+    Formation {
+        formation: crate::ship::Formation,
+        hold: bool,
+    },
     FleetAttack,
     CeaseFire,
-    Promote { ship: NetId },
+    Promote {
+        ship: NetId,
+    },
+    PanicFire {
+        ship: NetId,
+    },
+    /// Bank and ground point (game axes).
+    Lob {
+        ship: NetId,
+        shot: Option<(usize, [f32; 3])>,
+    },
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -605,6 +680,8 @@ impl Saved {
             Kind::FleetAttack => Saved::FleetAttack,
             Kind::CeaseFire => Saved::CeaseFire,
             Kind::Promote { ship } => Saved::Promote { ship: id(ship)? },
+            Kind::PanicFire { ship } => Saved::PanicFire { ship: id(ship)? },
+            Kind::Lob { ship, shot } => Saved::Lob { ship: id(ship)?, shot: shot.map(|(bank, at)| (bank, game_axes(at))) },
         })
     }
     /// The command for this world; None when an object it names is gone.
@@ -635,6 +712,8 @@ impl Saved {
             Saved::FleetAttack => Kind::FleetAttack,
             Saved::CeaseFire => Kind::CeaseFire,
             Saved::Promote { ship } => Kind::Promote { ship: ship.find(world)? },
+            Saved::PanicFire { ship } => Kind::PanicFire { ship: ship.find(world)? },
+            Saved::Lob { ship, shot } => Kind::Lob { ship: ship.find(world)?, shot: shot.map(|(bank, at)| (bank, bevy_axes(at))) },
         })
     }
 }
