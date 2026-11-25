@@ -50,6 +50,9 @@ pub struct Finding {
     pub message: String,
     /// The name the message suggests ("did you mean"), also inside `message`.
     pub suggestion: Option<String>,
+    /// `--check-mod` only: a warning the base game's own files have too, for the same map or mission without the mod, so it is not the
+    /// mod's. Errors are never inherited. Always `false` when no imported assets were found to compare with.
+    pub inherited: bool,
 }
 
 /// The name `--check-mission` has always used for a finding.
@@ -73,6 +76,7 @@ impl Finding {
             field: field.into(),
             message: message.into(),
             suggestion: None,
+            inherited: false,
         }
     }
     /// A finding about a place in a file that is not a mission (a ship, a gun, `mod.json`); `path` fills both `path` and `pointer`.

@@ -19,7 +19,8 @@ Play:
   --only-mod                  with --mod: load only the --mod folders, not the installed mods
 
 Mod authoring (no window, no assets needed unless said):
-  --check-mod <folder> [--json]  check a mod folder (the imported assets, when found, are used); exit 1 on errors
+  --check-mod <folder> [--json] [--verbose]  check a mod folder (the imported assets, when found, are used); exit 1 on errors;
+                                 warnings the base game's own files have too are counted apart (--verbose lists them)
   --check-mission <map id|all>   check the mission rules of a map (needs assets; takes --mod)
   --dump-schemas <folder>        write the JSON Schemas of ship, guns, bullets, crew nodes, mod and map files
   --dump-rule-schema [file]      write the mission rule schema (stdout without a file)
@@ -75,15 +76,24 @@ fn check_mod(dir: Option<&String>, json: bool) -> i32 {
     let base = crate::authoring::base_assets();
     let findings = crate::authoring::check_mod(Path::new(dir), base.as_deref());
     let errors = findings.iter().filter(|f| f.level == crate::authoring::Level::Error).count();
-    let warnings = findings.len() - errors;
+    // Warnings the base game's own files have too are not the mod's: they do not count and are listed only with --verbose.
+    let inherited = findings.iter().filter(|f| f.inherited).count();
+    let warnings = findings.len() - errors - inherited;
+    let verbose = std::env::args().any(|a| a == "--verbose");
     // A closed pipe (`| head`) is not an error.
     let out = &mut std::io::stdout();
     if json {
-        let doc = serde_json::json!({"mod": dir, "engine": crate::authoring::ENGINE_VERSION, "errors": errors, "warnings": warnings, "findings": findings});
+        let doc = serde_json::json!({"mod": dir, "engine": crate::authoring::ENGINE_VERSION, "errors": errors, "warnings": warnings, "inherited": inherited, "findings": findings});
         let _ = writeln!(out, "{}", serde_json::to_string_pretty(&doc).expect("findings are JSON"));
     } else {
-        for f in &findings {
+        for f in findings.iter().filter(|f| !f.inherited) {
             let _ = if f.file.is_empty() { writeln!(out, "{f}") } else { writeln!(out, "{}: {f}", f.file) };
+        }
+        if inherited > 0 {
+            let _ = writeln!(out, "{inherited} warnings come from the base game's own files (not this mod){}", if verbose { ":" } else { "; --verbose to list" });
+            for f in findings.iter().filter(|f| f.inherited && verbose) {
+                let _ = writeln!(out, "  {}: {f}", f.file);
+            }
         }
         let name = Path::new(dir).file_name().map_or_else(|| dir.clone(), |n| n.to_string_lossy().into_owned());
         let _ = writeln!(out, "{name}: {errors} errors, {warnings} warnings");
