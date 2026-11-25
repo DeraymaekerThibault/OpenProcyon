@@ -12,6 +12,21 @@ use crate::{Library, PlayerShip, Ship};
 
 /// Height of the reference screen the HUD art is scaled against (the reference video draws the 640x480 art at twice that height).
 pub const REF_H: f32 = 960.0;
+
+/// Scale from the 960-pixel-high reference layout to this window: every HUD size is multiplied by it.
+pub fn hud_scale(window: &Window) -> f32 {
+    window.height() / REF_H
+}
+
+/// Size of full-screen message text (the end line, "Loading...") at `MESSAGE_TEXT_REF_H` window height.
+/// PROVISIONAL: one reference-footage frame measured about 16-17 px of 1080.
+pub const MESSAGE_TEXT_PX: f32 = 17.0;
+pub const MESSAGE_TEXT_REF_H: f32 = 1080.0;
+
+/// Message text size in pixels for this window.
+pub fn message_text_size(window: &Window) -> f32 {
+    MESSAGE_TEXT_PX * window.height() / MESSAGE_TEXT_REF_H
+}
 pub const MAX_CONTACTS: usize = 16;
 /// Radar range in world units mapped to the disk's radius: retail draws ships out to ~153 units (0.297 px per unit on a 45.6 px disk)
 /// and none beyond (docs/re/hud.md).
@@ -34,6 +49,58 @@ pub struct Toggles {
 /// Set while the cursor is over a HUD panel so the world ignores clicks that land on it.
 #[derive(Resource, Default)]
 pub struct UiClick(pub bool);
+
+/// Every "is a UI layer taking this input?" question, named by what it blocks. The sets differ on purpose or by accident, and each
+/// predicate reproduces exactly one definition that existed at the call site, so none is a general "UI is open" answer:
+///
+/// | predicate | options menu open | click swallowed | HUD panel under cursor | crew screen | star map | cinematic | script-locked | not direct |
+/// |---|---|---|---|---|---|---|---|---|
+/// | `blocks_world_click` | | yes | yes | | | | | |
+/// | `blocks_fleet_keys` | yes | | | | yes | yes | yes | |
+/// | `blocks_fleet_bar` | yes | | | | | | | |
+/// | `blocks_engine_dial` | yes | | | yes | | | | yes |
+/// | `blocks_hover` | yes | | yes | | | yes | | |
+///
+/// MAINTAINER QUESTION: should these agree? Today the engine dial ignores the star map and cinematics, the fleet keys ignore the crew
+/// screen, and the hover cursor ignores the crew screen and the star map. Not changed here.
+#[derive(bevy::ecs::system::SystemParam)]
+pub struct UiFocus<'w, 's> {
+    click: Option<Res<'w, UiClick>>,
+    menu: Option<Res<'w, crate::options_menu::OptionsMenu>>,
+    crew: Option<Res<'w, crate::crew_arms::ScreenModel>>,
+    maps: Query<'w, 's, (), With<crate::starmap::Starmap>>,
+    mission: Option<Res<'w, crate::campaign::Mission>>,
+}
+
+impl UiFocus<'_, '_> {
+    fn menu_open(&self) -> bool {
+        self.menu.as_ref().is_some_and(|m| m.is_open())
+    }
+    fn over_hud(&self) -> bool {
+        self.click.as_ref().is_some_and(|u| u.0)
+    }
+    /// A left click is not a world click: it lands on a HUD panel, or it just closed the options menu.
+    pub fn blocks_world_click(&self) -> bool {
+        self.over_hud() || self.menu.as_ref().is_some_and(|m| m.swallow.load(std::sync::atomic::Ordering::Relaxed))
+    }
+    /// The number keys and the primary-ship key do nothing: options menu, star map, cinematic or scripted lock.
+    pub fn blocks_fleet_keys(&self) -> bool {
+        self.menu_open() || !self.maps.is_empty() || cinematic(self.mission.as_deref()) || crate::rules::locked(self.mission.as_deref())
+    }
+    /// The ship bar's clicks (and its release latch) wait while the options menu is open.
+    pub fn blocks_fleet_bar(&self) -> bool {
+        self.menu_open()
+    }
+    /// The engine dial and order tabs do nothing: crew screen, options menu, or the selected ship is not the one flown directly.
+    /// (The star map and cinematics are not in this set; see the type's maintainer question.)
+    pub fn blocks_engine_dial(&self, fleets: Option<&crate::ship::Fleets>) -> bool {
+        self.crew.as_ref().is_some_and(|m| m.open) || self.menu_open() || fleets.is_some_and(|f| !f.direct())
+    }
+    /// The world-under-cursor pick (cursor shape, hover) is off: cinematic, options menu, or the cursor is over a HUD panel.
+    pub fn blocks_hover(&self) -> bool {
+        cinematic(self.mission.as_deref()) || self.menu_open() || self.over_hud()
+    }
+}
 
 /// Opening briefing or an in-game cutscene: the HUD hides and its controls do nothing.
 pub fn cinematic(mission: Option<&crate::campaign::Mission>) -> bool {
@@ -291,7 +358,7 @@ fn fleet_input(
     mut commands: Commands,
     mut sfx: MessageWriter<crate::audio::Sfx>,
     mut menu: ResMut<crate::options_menu::BarMenuRequest>,
-    options: Option<Res<crate::options_menu::OptionsMenu>>,
+    focus: UiFocus,
     mut chat: ResMut<ChatLog>,
 ) {
     if !model.shown {
@@ -314,7 +381,7 @@ fn fleet_input(
     {
         menu.0 = model.rows.get(n).and_then(|r| r.entity);
     }
-    if options.as_ref().is_some_and(|o| o.is_open()) {
+    if focus.blocks_fleet_bar() {
         *latch = None;
         return;
     }
@@ -499,7 +566,7 @@ fn update_docking_status(
     let set = if docking || boarding_art.is_empty() || !boarding { docking_art } else { boarding_art };
     let frame = &set[(time.elapsed_secs() * STATUS_FPS) as usize % set.len()];
     for (mut img, mut node, mut vis) in &mut icons {
-        frame.show(&mut img, &mut node, window.height() / REF_H);
+        frame.show(&mut img, &mut node, hud_scale(&window));
         vis.set_if_neq(if docking || boarding { Visibility::Inherited } else { Visibility::Hidden });
     }
 }
@@ -509,12 +576,12 @@ fn talking_head(
     time: Res<Time>,
     talk: Res<Talk>,
     crew: Query<&CrewSpeech>,
-    mission: Option<Res<crate::campaign::Mission>>,
+    script: crate::rules::active::ActiveScript,
     cfg: Res<crate::Config>,
     mut sfx: MessageWriter<crate::audio::Sfx>,
     mut head: ResMut<HeadState>,
 ) {
-    let line = talk.0.clone().filter(|_| mission.is_some());
+    let line = talk.0.clone().filter(|_| script.is_mission());
     let talk_smoke = (cfg.script.as_deref() == Some("talk")).then(|| "TalkingHead_Character_1stMate".to_string());
     let speaker = line.or_else(|| crew.iter().next().map(|c| c.0.clone())).or(talk_smoke);
     let speaking = speaker.is_some();
@@ -539,7 +606,7 @@ fn update_contacts(
     mut q: Query<(&Contact, &mut Node, &mut Visibility)>,
 ) {
     let Some(radar) = radar else { return };
-    let s = window.height() / REF_H;
+    let s = hud_scale(&window);
     // 'Set Radar Active State' FALSE blanks the disk.
     let on = mission.as_deref().is_none_or(|m| m.script.radar);
     // Living ships within range relative to the player's heading (forward = up); retail shows friendly ships too and none past the rim.
@@ -689,14 +756,9 @@ pub fn engine_input(
     tabs: Query<(&EngineTab, &Interaction)>,
     visible: Query<&Visibility, With<HudRoot>>,
     fleets: Option<Res<crate::ship::Fleets>>,
-    options: Option<Res<crate::options_menu::OptionsMenu>>,
-    crew: Option<Res<crate::crew_arms::ScreenModel>>,
+    focus: UiFocus,
 ) {
-    if crew.as_ref().is_some_and(|m| m.open)
-        || options.as_ref().is_some_and(|o| o.is_open())
-        || fleets.as_ref().is_some_and(|f| !f.direct())
-        || !(hud_shown(&visible) && mouse.just_pressed(MouseButton::Left))
-    {
+    if focus.blocks_engine_dial(fleets.as_deref()) || !(hud_shown(&visible) && mouse.just_pressed(MouseButton::Left)) {
         return;
     }
     let order = tabs.iter().find(|(_, i)| crate::pointer::over(i)).map(|(o, _)| o.0).or_else(|| {
@@ -713,6 +775,33 @@ pub fn engine_input(
 /// The HUD exists and is not hidden (cinematics hide it).
 pub fn hud_shown(visible: &Query<&Visibility, With<HudRoot>>) -> bool {
     !visible.is_empty() && visible.iter().all(|v| *v != Visibility::Hidden)
+}
+
+/// One owner's claim on the pause of virtual time: it remembers whether it was the one that paused, so releasing resumes only then
+/// (a battle the player or another owner paused stays paused). Each owner (the in-game menu, the console, the star map pause) holds
+/// its own claim; claims do not stack or know about each other.
+#[derive(Default, Debug, Clone, Copy, PartialEq)]
+pub struct PauseClaim(bool);
+
+impl PauseClaim {
+    /// Pauses unless time is already paused; remembers that it did (an earlier claim of ours is kept when it was not).
+    pub fn claim(&mut self, vtime: &mut Time<Virtual>) {
+        if !vtime.is_paused() {
+            vtime.pause();
+            self.0 = true;
+        }
+    }
+    /// Pauses and sets the claim to whether it was this call that paused, forgetting an earlier claim (the in-game menu's rule).
+    pub fn claim_afresh(&mut self, vtime: &mut Time<Virtual>) {
+        self.0 = !vtime.is_paused();
+        vtime.pause();
+    }
+    /// Resumes if this claim paused; a no-op otherwise.
+    pub fn release(&mut self, vtime: &mut Time<Virtual>) {
+        if std::mem::take(&mut self.0) {
+            vtime.unpause();
+        }
+    }
 }
 
 /// PAUSE button: a click toggles simulation pause (the Pause key does the same, `view.rs`).
@@ -1223,5 +1312,93 @@ pub mod tests {
         script.nis = true;
         w.app.insert_resource(crate::campaign::Mission { id: "t".into(), data: serde_json::json!({}), opening: None, script });
         assert_eq!(marks(&mut w, Some(enemy)), (None, vec![]), "an in-game cutscene hides banners and the reticle");
+    }
+    /// Pins what each input-blocking predicate looks at, one definition per call site (`UiFocus`): they differ on purpose or by
+    /// accident, and merging them would change behaviour.
+    #[test]
+    fn ui_focus_predicates_each_look_at_their_own_inputs() {
+        #[derive(Clone, Copy, Default, Debug)]
+        struct In {
+            over_hud: bool,
+            swallowed: bool,
+            menu_open: bool,
+            crew_open: bool,
+            map: bool,
+            nis: bool,
+            locked: bool,
+            not_direct: bool,
+        }
+        // (world click, fleet keys, fleet bar, engine dial, hover)
+        fn answers(i: In) -> [bool; 5] {
+            use bevy::ecs::system::RunSystemOnce;
+            let mut w = World::new();
+            w.insert_resource(UiClick(i.over_hud));
+            let menu = crate::options_menu::OptionsMenu::default();
+            menu.swallow.store(i.swallowed, std::sync::atomic::Ordering::Relaxed);
+            menu.set_open(i.menu_open);
+            w.insert_resource(menu);
+            w.insert_resource(crate::crew_arms::ScreenModel { open: i.crew_open, ..Default::default() });
+            if i.map {
+                w.spawn(crate::starmap::Starmap { opened: 0.0, half: 1.0, backdrop: None });
+            }
+            let mut script = crate::rules::Script::new(&serde_json::json!({"rules": []}), serde_json::json!({}));
+            script.nis = i.nis;
+            script.crew_screen = i.locked;
+            if i.nis || i.locked {
+                w.insert_resource(crate::campaign::Mission { id: "t".into(), data: serde_json::json!({}), opening: None, script });
+            }
+            let mut fleets = crate::ship::Fleets::default();
+            if !i.not_direct {
+                let e = w.spawn_empty().id();
+                fleets.groups.entry(fleets.local.clone()).or_default().members.push(e);
+                fleets.selected = Some(e);
+            }
+            w.run_system_once(move |f: UiFocus| [f.blocks_world_click(), f.blocks_fleet_keys(), f.blocks_fleet_bar(), f.blocks_engine_dial(Some(&fleets)), f.blocks_hover()])
+                .unwrap()
+        }
+        let base = In::default();
+        assert_eq!(answers(base), [false; 5]);
+        assert_eq!(answers(In { over_hud: true, ..base }), [true, false, false, false, true], "a HUD panel under the cursor");
+        assert_eq!(answers(In { swallowed: true, ..base }), [true, false, false, false, false], "the click that closed the options menu");
+        assert_eq!(answers(In { menu_open: true, ..base }), [false, true, true, true, true], "the options menu is open");
+        assert_eq!(answers(In { crew_open: true, ..base }), [false, false, false, true, false], "the crew screen: only the engine dial looks");
+        assert_eq!(answers(In { map: true, ..base }), [false, true, false, false, false], "the star map: only the fleet keys look");
+        assert_eq!(answers(In { nis: true, ..base }), [false, true, false, false, true], "a cutscene");
+        assert_eq!(answers(In { locked: true, ..base }), [false, true, false, false, false], "a script lock without a cutscene: only the fleet keys look");
+        assert_eq!(answers(In { not_direct: true, ..base }), [false, false, false, true, false], "a ship flown by its captain: only the engine dial looks");
+    }
+
+    #[test]
+    fn pause_claims_resume_only_what_they_paused() {
+        let mut t = Time::<Virtual>::default();
+        // Already paused by someone else: claiming changes nothing and releasing does not resume.
+        t.pause();
+        let mut c = PauseClaim::default();
+        c.claim(&mut t);
+        c.release(&mut t);
+        assert!(t.is_paused());
+        // Running: the claim pauses and its release resumes; a second release is a no-op.
+        t.unpause();
+        c.claim(&mut t);
+        assert!(t.is_paused());
+        t.unpause();
+        t.pause();
+        c.release(&mut t);
+        assert!(!t.is_paused());
+        t.pause();
+        c.release(&mut t);
+        assert!(t.is_paused(), "released twice: the second does nothing");
+        // `claim` keeps an earlier claim when time is already paused; `claim_afresh` forgets it (the in-game menu's rule).
+        t.unpause();
+        let (mut keep, mut fresh) = (PauseClaim::default(), PauseClaim::default());
+        keep.claim(&mut t);
+        fresh.claim(&mut t);
+        fresh.claim_afresh(&mut t);
+        keep.claim(&mut t);
+        keep.release(&mut t);
+        assert!(!t.is_paused(), "the kept claim still resumes");
+        t.pause();
+        fresh.release(&mut t);
+        assert!(t.is_paused(), "the afresh claim saw it paused already and let it stay paused");
     }
 }

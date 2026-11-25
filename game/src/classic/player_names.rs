@@ -6,7 +6,7 @@ use bevy::ui::FocusPolicy;
 
 use super::panels::Ctx;
 use crate::alliance::{AllianceIcon, Roster, RosterName};
-use crate::panels::{HudRoot, REF_H, Solid};
+use crate::panels::{HudRoot, Solid, hud_scale};
 use crate::sprites::{HudData, MENU_SKIN, offset};
 
 #[derive(Component)]
@@ -40,7 +40,7 @@ fn window(
         commands.entity(e).despawn();
     }
     *last = Some(key);
-    let s = win.height() / REF_H;
+    let s = hud_scale(&win);
     let c = Ctx { assets: &assets, hud: &hud, s };
     let menu = HudData { comps: hud.comps.clone(), skin: MENU_SKIN };
     let flags = Ctx { hud: &menu, ..c };

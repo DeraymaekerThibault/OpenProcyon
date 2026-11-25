@@ -15,7 +15,7 @@ use crate::audio::Sfx;
 use crate::boarding::BoardMsg;
 use crate::combat::{Health, Library, ray_hit, seg_sphere};
 use crate::docking::Dockees;
-use crate::panels::REF_H;
+use crate::panels::hud_scale;
 use crate::sprites::{HudData, offset, size_of};
 use crate::{Orbit, Ship, Side};
 
@@ -40,6 +40,10 @@ impl OptionsMenu {
     }
     pub fn is_open(&self) -> bool {
         self.open.load(Ordering::Relaxed)
+    }
+    #[cfg(test)]
+    pub(crate) fn set_open(&self, open: bool) {
+        self.open.store(open, Ordering::Relaxed);
     }
 }
 
@@ -506,7 +510,7 @@ fn menu(
         }
     }
     let (camera, gt) = *cam;
-    let Ok(ray) = camera.viewport_to_world(gt, cursor) else { return };
+    let Some(ray) = crate::view::cursor_ray(camera, gt, cursor) else { return };
     let Some((target, kind, can_dock)) = pick_target(&scene, &docks, ray, actor, player.1.class, player.2, bar_target) else { return };
     // The player's ship already towing this one gets Stop; any other ship gets Start, enabled for ships when a tow can be made.
     let tow = if docks.towee_of(player.0) == Some(target) { Tow::Stop } else { Tow::Start(docks.can_tow() && docks.towable(target) && scene.ships.get(target).is_ok()) };
@@ -529,7 +533,7 @@ pub struct OptionsMenuArt {
 
 /// Spawns the menu root around `cursor` with its `OptionsMenuArt`; hit rects are the retail icons at the retail slot offsets.
 fn spawn_menu(commands: &mut Commands, hud: &HudData, window: &Window, cursor: Vec2, kind: Kind, can_dock: bool, tow: Tow, hooks: Hooks) -> (Entity, Vec<(Act, Rect, bool)>) {
-    let s = window.height() / REF_H;
+    let s = hud_scale(window);
     let list = items(kind, can_dock, tow, hooks);
     let n = list.len();
     let centre = menu_centre(window, cursor);
@@ -547,7 +551,7 @@ fn spawn_menu(commands: &mut Commands, hud: &HudData, window: &Window, cursor: V
 }
 
 fn menu_centre(window: &Window, cursor: Vec2) -> Vec2 {
-    let s = window.height() / REF_H;
+    let s = hud_scale(window);
     // PROVISIONAL: the 70 px margin the menu keeps from the window edge is eyeballed.
     cursor.clamp(Vec2::splat(70.0 * s), Vec2::new(window.width(), window.height()) - Vec2::splat(70.0 * s))
 }
@@ -574,12 +578,12 @@ fn dev_click(
     };
     let Some((target, tf, _)) = tender.iter().find(|t| t.2.name == "RLS Bounty") else { return };
     let (camera, gt) = *cam;
-    let on_target = camera.world_to_viewport(gt, tf.translation).ok();
+    let on_target = crate::view::project(camera, gt, tf.translation);
     let button = if menu { MouseButton::Right } else { MouseButton::Left };
     match *step {
         0 => {
             orbit.focus = Some(target);
-            let ready = on_target.and_then(|p| docks.under(camera.viewport_to_world(gt, p).ok()?, *player));
+            let ready = on_target.and_then(|p| docks.under(crate::view::cursor_ray(camera, gt, p)?, *player));
             if ready == Some((target, true)) {
                 *step = 1;
             }
@@ -596,7 +600,7 @@ fn dev_click(
         3 => {
             // The Friendly menu's Dock icon is slot 2 of 3 (`items`).
             let (Some(hud), Some(cursor)) = (hud, window.cursor_position()) else { return };
-            let s = window.height() / REF_H;
+            let s = hud_scale(&window);
             let size = size_of(&hud, "OPTIONS_MENU_BUTTON_DOCK").expect("dock icon");
             let at = menu_centre(&window, cursor) + (offset(&hud, "OPTIONS_MENU_SLOT_OFFSET_2_OF_3") + size / 2.0) * s;
             window.set_cursor_position(Some(at));
@@ -635,8 +639,7 @@ fn context_cursor(
     cam: Single<(&Camera, &GlobalTransform)>,
     hud: Option<Res<HudData>>,
     lib: Res<Library>,
-    menu: Res<OptionsMenu>,
-    ui: Res<crate::panels::UiClick>,
+    focus: crate::panels::UiFocus,
     mission: Option<Res<crate::campaign::Mission>>,
     ships: Query<(Entity, &Transform, &Ship, &Health)>,
     objects: Query<
@@ -652,18 +655,18 @@ fn context_cursor(
     let mut aim = None;
     let want = (|| {
         hud.as_ref()?;
-        if crate::panels::cinematic(mission.as_deref()) || menu.open.load(Ordering::Relaxed) || ui.0 {
+        if focus.blocks_hover() {
             return None;
         }
         let cursor = window.cursor_position()?;
         let (camera, gt) = *cam;
-        let ray = camera.viewport_to_world(gt, cursor).ok()?;
+        let ray = crate::view::cursor_ray(camera, gt, cursor)?;
         let actor = fleets.selected?;
         // Armed lob bank: its cursor shows over everything (ships, bases, sea) while the pointer is on the sea plane.
         if let (true, Some(bank), Ok((_, tf, sh, health)), Ok(g)) = (fleets.direct(), target.2.armed, ships.get(actor), guns.get(actor)) {
             let class = &lib.classes[sh.class];
             let kind = class.mounts.iter().enumerate().find(|(_, m)| m.bank == bank).and_then(|(i, _)| crate::combat::lob_kind(lib.guns[g.gun(i)].bullet_family));
-            let point = ray.intersect_plane(Vec3::ZERO, InfinitePlane3d::new(Vec3::Y)).map(|t| ray.get_point(t));
+            let point = crate::view::ray_on_sea(ray);
             if let (Some(kind), Some(point)) = (kind, point) {
                 let a = crate::combat::LobAimed { kind, solution: crate::combat::lob_solution(&lib, class, health, g, tf, bank, point), point };
                 aim = Some(a);

@@ -941,7 +941,6 @@ pub struct Dockees<'w, 's> {
     sensors: Res<'w, crate::environment::Sensors>,
     mission: Option<Res<'w, Mission>>,
     msg: MessageWriter<'w, DockMsg>,
-    menu: Res<'w, crate::options_menu::OptionsMenu>,
 }
 /// A base is hostile by mission rules, or in a skirmish (no mission rules) when its side is not the player's.
 fn hostile_base(mission: Option<&Mission>, base: Option<&MissionBase>, side: Option<&crate::combat::BaseSide>) -> bool {
@@ -990,10 +989,6 @@ impl Dockees<'_, '_> {
                 Some((e, t, tf.to_matrix().inverse().transform_point3(ray.get_point(t))))
             })
             .min_by(|a, b| a.1.total_cmp(&b.1))
-    }
-    /// True on the frame an options-menu click closed the menu: that click is not a world click.
-    pub fn menu_swallows_click(&self) -> bool {
-        self.menu.swallow.load(std::sync::atomic::Ordering::Relaxed)
     }
     pub fn cancel_as(&mut self, actor: Entity) {
         self.msg.write(DockMsg::CancelShip(actor));

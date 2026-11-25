@@ -2,8 +2,8 @@
 //! original screenshots: the fleet-assembly backdrop, Ships / Crew / Arms tabs, the slot bar, crew posts around the ship outline or
 //! the weapon mounts on it, stat bars, and the crew or weapon list. Falls back to a plain list when the model has no `fit`.
 use super::widgets::{
-    Ctx, GOLD, PanelKind, canvas, dropdown, fleet_bar, full_screen, info_panel, list_row, list_row_cost, pad, panel, piece, pulldown_cell, scrollbar, selected_tab, size_of,
-    stretched_window, victory_points, wrapped,
+    Ctx, GOLD, PanelKind, canvas, canvas_scale, dropdown, fleet_bar, full_screen, info_panel, list_row, list_row_cost, pad, panel, piece, pulldown_cell, scrollbar, selected_tab,
+    size_of, stretched_window, victory_points, wrapped,
 };
 use crate::combat::Library;
 use crate::crew_arms::{Action, CrewSet, FitView, SORTS, ScreenModel};
@@ -27,7 +27,7 @@ struct Ghost;
 fn follow_cursor(window: Single<&Window, With<PrimaryWindow>>, mut ghosts: Query<&mut Node, With<Ghost>>) {
     let Some(at) = window.cursor_position() else { return };
     for mut node in &mut ghosts {
-        let half = FACE * 0.5 * (window.width() / 800.0).min(window.height() / 600.0);
+        let half = FACE * 0.5 * canvas_scale(&window);
         (node.left, node.top) = (Val::Px(at.x - half), Val::Px(at.y - half));
     }
 }

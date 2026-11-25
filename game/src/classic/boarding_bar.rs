@@ -5,6 +5,7 @@ use bevy::prelude::*;
 
 use crate::boarding::{Boardable, Boarding, friendly_share};
 use crate::campaign::Mission;
+use crate::panels::hud_scale;
 use crate::sprites::HudData;
 use crate::{Ship, Side};
 
@@ -44,15 +45,13 @@ fn board_bars(
             commands.entity(entity).despawn();
         }
     }
-    let scale = window.height() / crate::panels::REF_H;
+    let scale = hud_scale(&window);
     let (camera, camera_transform) = *camera;
     let friendly = |e: Entity| things.get(e).ok().and_then(|thing| thing.2).is_some_and(|ship| ship.side == Side::Player);
     for (boarder, fight) in fights.iter().filter(|fight| fight.1.live()) {
         let target = fight.target();
         let Ok([(_, boarder_crew, _), (target_transform, target_crew, _)]) = things.get_many([boarder, target]) else { continue };
-        let screen = camera
-            .world_to_viewport(camera_transform, target_transform.translation)
-            .ok()
+        let screen = crate::view::project(camera, camera_transform, target_transform.translation)
             .filter(|_| !crate::panels::cinematic(mission.as_deref()) && camera_transform.translation().distance(target_transform.translation) <= BAR_VISIBLE);
         let Some((_, _, mut node, mut visibility, children)) = bars.iter_mut().find(|bar| bar.1.boarder == boarder) else {
             if screen.is_some() {

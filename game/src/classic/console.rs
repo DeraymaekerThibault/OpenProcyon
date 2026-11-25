@@ -175,8 +175,8 @@ fn build_shapes(
 fn place_labels(camera: Single<(&Camera, &GlobalTransform), (With<Camera3d>, With<crate::MainCamera>)>, mut labels: Query<(&DebugLabel, &mut Node, &mut Visibility)>) {
     let (camera, ctf) = *camera;
     for (label, mut node, mut vis) in &mut labels {
-        match camera.world_to_viewport(ctf, label.0) {
-            Ok(p) if (ctf.translation() - label.0).dot(*ctf.forward()) < 0.0 => {
+        match crate::view::project(camera, ctf, label.0) {
+            Some(p) if (ctf.translation() - label.0).dot(*ctf.forward()) < 0.0 => {
                 node.left = Val::Px(p.x);
                 node.top = Val::Px(p.y);
                 vis.set_if_neq(Visibility::Inherited);
