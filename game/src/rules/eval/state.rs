@@ -34,13 +34,27 @@ pub(in crate::rules) enum Entered {
     OncePerUnit { group: String, volume: String },
 }
 
+/// Seconds to the hundredth, so the report shows 12.3 and not the float sum's 12.300001.
+fn centis(secs: f32) -> f32 {
+    (secs * 100.0).round() / 100.0
+}
+
+/// How often one rule's actions ran, and the script times of the first and last run (meaningful once `count` is above 0).
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub(in crate::rules) struct Runs {
+    pub count: u32,
+    pub first: f32,
+    pub last: f32,
+}
+
 pub struct Script {
     pub(in crate::rules) rules: Vec<Rule>,
     /// Engine-added rule features (`eval/ext.rs`).
     pub(in crate::rules) ext: Ext,
     pub(in crate::rules) fired: Vec<bool>,
-    /// Rules that fired at least once, repeating ones included (the autoplay report lists the others).
-    pub(in crate::rules) ran: Vec<bool>,
+    /// Per rule, how often its actions ran and when (repeating ones included): the one source of the autoplay log's never-fired list
+    /// and of the `--rule-report` file.
+    pub(in crate::rules) runs: Vec<Runs>,
     pub(in crate::rules) init_done: bool,
     /// Debug launch options (`--fire-rule`, `--start-at`, see `fire_start_rules`); consumed by the first step.
     pub start_rules: Vec<String>,
@@ -423,7 +437,36 @@ impl Script {
     }
     /// Names of the rules that have not fired yet, in script order. The opening NIS rules are left out: briefing.rs plays them.
     pub fn never_fired(&self) -> Vec<&str> {
-        self.rules.iter().zip(&self.ran).filter(|(r, ran)| !**ran && !(self.briefing_opening && opening_rule(&r.name))).map(|(r, _)| r.name.trim()).collect()
+        self.rules.iter().zip(&self.runs).filter(|(r, runs)| runs.count == 0 && !(self.briefing_opening && opening_rule(&r.name))).map(|(r, _)| r.name.trim()).collect()
+    }
+    /// Rule `i`'s actions ran (or were started by `--fire-rule` / the console) now: counts it and notes the time.
+    pub(in crate::rules) fn mark_ran(&mut self, i: usize) {
+        let runs = &mut self.runs[i];
+        if runs.count == 0 {
+            runs.first = self.time;
+        }
+        runs.last = self.time;
+        runs.count += 1;
+    }
+    /// What each rule did so far, in script order, for `--rule-report`: the same state `never_fired` reads. A rule counts as fired when
+    /// its actions ran at least once; `active` is its "Is Active" state now (`OP Set Rule Active`). Mission 1's opening NIS rules are played by
+    /// briefing.rs, not the interpreter (`briefing_opening`), so they report as not fired.
+    pub fn rule_report(&self, mission: &str, outcome: crate::authoring::RuleReportOutcome) -> crate::authoring::RuleReport {
+        let rules = self
+            .rules
+            .iter()
+            .zip(&self.runs)
+            .enumerate()
+            .map(|(i, (r, runs))| crate::authoring::RuleReportEntry {
+                name: r.name.trim().into(),
+                fired: runs.count > 0,
+                runs: runs.count,
+                first_run: (runs.count > 0).then(|| centis(runs.first)),
+                last_run: (runs.count > 0).then(|| centis(runs.last)),
+                active: self.ext.is_active(i),
+            })
+            .collect();
+        crate::authoring::RuleReport { mission: mission.into(), outcome, play_time: centis(self.time), rules }
     }
     /// What a rule that has not fired yet waits for the player's ship to dock with ("Group/Unit Docked" with the player among the dockers),
     /// minus the pairs already docked: the dev autopilot's dock targets (missions 5, 7, 8 dock with bases their tasks only name loosely).

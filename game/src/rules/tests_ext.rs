@@ -228,7 +228,7 @@ fn inactive_rules_are_not_evaluated_until_a_rule_activates_them() {
     for _ in 0..3 {
         s.step(&[], 0.1, false);
     }
-    assert!(!s.flag("woke") && !s.ran[0], "inactive");
+    assert!(!s.flag("woke") && s.runs[0].count == 0, "inactive");
     s.flags.insert("wake".into(), true);
     s.step(&[], 0.1, false);
     s.step(&[], 0.1, false);
@@ -848,4 +848,45 @@ fn a_fade_is_cleared_when_the_mission_ends_and_a_restarted_mission_has_none() {
     assert_eq!(s.fade_alpha(), 0.0, "the end text is shown on a clear picture");
     // A restart loads the mission again: a new script, no fade left over.
     assert_eq!(script(data, Value::Null).fade_alpha(), 0.0);
+}
+
+/// `--rule-report`: the report is built from the interpreter's own run counts, in script order.
+#[test]
+fn the_rule_report_says_what_each_rule_did() {
+    use crate::authoring::{RuleReport, RuleReportOutcome};
+    let mut asleep = rule("asleep", true, json!([]), json!([add("never", 1.0)]));
+    asleep["Is Active"] = json!(false);
+    let data = json!({"rules": [
+        rule(" tick ", false, json!([]), json!([add("ticks", 1.0)])),
+        rule("go", true, json!([flag_is("go", true)]), json!([set_flag("went")])),
+        rule("never", true, json!([flag_is("never", true)]), json!([])),
+        asleep,
+        rule("mute", true, json!([flag_is("went", true)]), json!([{"Type": "OP Set Rule Active", "Rule Name": "tick", "Boolean": "FALSE"}])),
+    ]});
+    let mut s = script(data, Value::Null);
+    s.step(&[], 0.5, false);
+    s.step(&[], 0.5, false);
+    s.flags.insert("go".into(), true);
+    s.step(&[], 0.5, false); // "go" runs at 1.5 s, and "mute", after it, sees "went" and switches "tick" off
+    s.step(&[], 0.5, false);
+    s.step(&[], 0.5, false);
+    let report = s.rule_report("mission_x", RuleReportOutcome::Quit);
+    let seen: Vec<_> = report.rules.iter().map(|r| (r.name.as_str(), r.fired, r.runs, r.first_run, r.last_run, r.active)).collect();
+    assert_eq!(
+        seen,
+        [
+            ("tick", true, 3, Some(0.5), Some(1.5), false),
+            ("go", true, 1, Some(1.5), Some(1.5), true),
+            ("never", false, 0, None, None, true),
+            ("asleep", false, 0, None, None, false),
+            ("mute", true, 1, Some(1.5), Some(1.5), true),
+        ]
+    );
+    assert_eq!((report.mission.as_str(), report.outcome, report.play_time), ("mission_x", RuleReportOutcome::Quit, 2.5));
+    // The autoplay log's list comes from the same counts.
+    assert_eq!(s.never_fired(), ["never", "asleep"]);
+    // The file is JSON an editor parses back; a rule that never ran carries no times.
+    let text = serde_json::to_string_pretty(&report).unwrap();
+    assert!(text.contains("\"outcome\": \"quit\"") && !text.contains("null"), "{text}");
+    assert_eq!(serde_json::from_str::<RuleReport>(&text).unwrap(), report);
 }

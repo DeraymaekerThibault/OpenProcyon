@@ -3,6 +3,7 @@ pub(super) mod apply;
 mod dev_console;
 mod mission_ai;
 mod presentation;
+mod report;
 mod teleport;
 
 use crate::Nearest;
@@ -23,6 +24,7 @@ use mission_ai::{follow_path, leash_player, mission_ai, path_points};
 pub use presentation::Ui;
 pub(super) use presentation::{EventFx, event_effect};
 use presentation::{music, nis_camera, presentation, ui};
+pub use report::{path_arg as report_path_arg, set_path as set_report_path, write as write_report, write_world as write_report_world};
 
 use crate::campaign::{Mission, MissionBase, MissionShip};
 
@@ -87,7 +89,7 @@ fn capture_input(keys: Res<ButtonInput<KeyCode>>, binds: Res<crate::bindings::Bi
 
 pub fn plugin(app: &mut App) {
     use crate::menu::Screen;
-    app.add_plugins(dev_console::plugin)
+    app.add_plugins((dev_console::plugin, report::plugin))
         .insert_resource(crate::campaign::CampaignPoints::load())
         .init_resource::<crate::campaign::CampaignValues>()
         .init_resource::<RuleInput>()

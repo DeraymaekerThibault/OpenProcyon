@@ -9,6 +9,7 @@
 //! - [`read_merged`] / [`read_map`]: a JSON file of such a root (or of the base folder), read like the game reads it, as a
 //!   [`DataError`] that names the file and the mod that provided it.
 //! - [`rule_schema`]: the mission rule vocabulary as JSON, the same document `--dump-rule-schema` writes.
+//! - [`RuleReport`] / [`rule_report_schema`]: the file `--rule-report <file>` writes (what each rule of a mission did in one play), to parse.
 //! - [`schemas`]: JSON Schemas of `ship.json`, `guns.json`, `bullets.json`, `data/crew_nodes.json`, `mod.json` and `maps/<id>/map.json` (`--dump-schemas <dir>`).
 //! - [`extensions`]: the engine's additions to the original (the table of docs/modding.md), as data.
 //! - [`check_mission`] / [`known_names`]: the mission checker behind `--check-mission`, on JSON values in memory.
@@ -43,6 +44,7 @@ mod extensions;
 mod json;
 #[cfg(test)]
 mod keyed_tests;
+mod rule_report;
 /// Whether a model's mesh layer is a damage variant (`<A>Damage_<B>`, swapped in when the section `<A>_<B>` is destroyed) rather than
 /// part of the intact hull: true when the name contains `Damage_`. The one rule the game, `--check-mod` and the ship art use, so a tool
 /// listing a model's sections must skip these layers too.
@@ -52,6 +54,7 @@ pub use art::{GunBank, ShipArt, ship_art};
 pub use check_mod::{check_mod, check_mod_with, unknown_key_findings, unknown_keys};
 pub use extensions::{Extension, ExtensionKind, extensions};
 pub use json::to_json_string;
+pub use rule_report::{RuleReport, RuleReportEntry, RuleReportOutcome, rule_report_schema};
 
 pub use crate::data::DataError;
 pub use crate::modding::{MERGED, MergeRule, ModEntry, ModReport, extends_parent, merge_rule};
@@ -429,6 +432,18 @@ mod tests {
     /// Paths of the keys of `value` that `schema` does not list.
     fn unknown(schema: &Value, value: &Value) -> Vec<String> {
         unknown_keys(schema, value).into_iter().map(|(path, _)| path).collect()
+    }
+
+    #[test]
+    fn the_rule_report_has_a_schema_and_parses_what_the_game_writes() {
+        let schema = rule_report_schema();
+        assert_eq!(schema["$schema"], "https://json-schema.org/draft/2020-12/schema");
+        assert!(schema["properties"]["rules"].is_object() && schema["properties"]["play_time"].is_object());
+        let text = r#"{"mission": "mission01", "outcome": "victory", "play_time": 61.5, "rules": [
+            {"name": "Start", "fired": true, "runs": 1, "first_run": 0.5, "last_run": 0.5, "active": true},
+            {"name": "Never", "fired": false, "runs": 0, "active": false}]}"#;
+        let report: RuleReport = serde_json::from_str(text).unwrap();
+        assert_eq!((report.outcome, report.rules[1].first_run, report.rules[1].active), (RuleReportOutcome::Victory, None, false));
     }
 
     #[test]

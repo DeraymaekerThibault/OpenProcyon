@@ -292,6 +292,7 @@ pub fn autoplay_end(
     let point = sc.point.and_then(|i| mission.data["points"][i]["Name"].as_str()).unwrap_or("none");
     info!("autoplay state point={point:?} tasks={:?}", sc.tasks_text());
     info!("autoplay end outcome={outcome:?} time={:.0} never_fired={:?}", sc.time, sc.never_fired());
+    crate::rules::write_report(&mission.id, sc, None);
     std::process::exit(0);
 }
 
