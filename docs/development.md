@@ -227,6 +227,7 @@ Keep the existing module boundaries. New files should own a real feature, not ju
 |---|---|---|
 | `lib.rs` | Library root and `run(view)`: application wiring, CLI `Config`, time scale/pause, profiling and the screenshot driver | Wiring/ordering systems; feature logic goes in its owning module |
 | `ship.rs` | `Ship`/`Side` state, movement integration (`step`), skirmish AI | Changing free motion or AI; movement tests live here |
+| `alliance.rs` `hostility` | The named answers to "is X hostile to Y" (`by_side`, `by_script`, `pair`, `base`, `friendly_dock`) that boarding, docking and the captain's target check use; gunnery, shells, cloak and crew still compare sides themselves. The test there pins where the side and script answers disagree (three factions) | Asking who is an enemy; do not add a sixth private copy |
 | `scenario.rs` | Battle lifecycle: spawn from map/mission, restart, leave, outcome, ship naming | Changing what spawns or how a battle starts/ends |
 | `view.rs` | Orbit camera, world mouse/keyboard input, sky and background stars (`docs/re/sky.md`), retail and free camera (`docs/re/camera.md`), F1 debug text | Changing camera or world input |
 | `data.rs` | JSON → ship classes, sections, mounts, geometry and shared weapon definitions | Changing simulation data schemas; coordinate the exporter and mod fixtures |
