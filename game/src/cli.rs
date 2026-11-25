@@ -4,8 +4,8 @@
 use std::io::Write;
 use std::path::Path;
 
-/// What `--help` / `-h` print: the flags a player or a mod author uses (the developer flags of the screenshot and smoke scripts are in
-/// docs/development.md).
+/// What `--help` / `-h` print: every flag the game reads, grouped by use (`the_help_names_every_flag_the_game_reads` fails when a flag
+/// in the source is missing here; the importer's own helper flags are `INTERNAL`). The developer flags are explained in docs/development.md.
 const HELP: &str = "\
 OpenProcyon: an open-source engine for Treasure Planet: Battle at Procyon (it needs your own imported assets).
 
@@ -17,6 +17,9 @@ Play:
   --menu <name>               open the front end at the screen <name> (skirmish, ...)
   --mod <folder>              load a mod folder over the assets (repeatable, later ones win)
   --only-mod                  with --mod: load only the --mod folders, not the installed mods
+  --lobby <spec>              set the skirmish lobby up from <spec> (map=<id>;points=N;limit=N;seed=N;slots=human,2*computer)
+                                 and launch; leaving the battle (the summary's continue arrow, F10) then exits the process instead of
+                                 opening the main menu, so a tool that started the game sees it end
 
 Mod authoring (no window, no assets needed unless said):
   --check-mod <folder> [--json] [--verbose]  check a mod folder (the imported assets, when found, are used); exit 1 on errors;
@@ -27,6 +30,25 @@ Mod authoring (no window, no assets needed unless said):
   --rule-trace, --why <rule>     while a mission plays, log why rules have not fired
   --rule-report <file>           when the battle ends, write what each rule of the mission did to <file> (JSON)
   --console                      open the developer console (~) in a release build
+
+Developer and smoke-test flags (docs/development.md):
+  --shot <file.png>           play the battle and save a screenshot (1280x720), then exit; implies --fixed-step
+  --shot-frame <n[,m,...]>    the frame(s) to picture (default 500); --late-frame <n> adds a _late picture
+  --script <name>             run a scripted smoke scenario (fxtest, victory, defeat, restart, mission, console, ...)
+  --ship <class>              the human's ship of a --map battle without a lobby (a class name such as Ship_Navy_Frigate)
+  --allies <a,b,...>          allied computer ships of that battle; --enemies <a,b,...|none> the enemy ships
+  --speed <x>                 game speed multiplier (default 1)
+  --seed <n>                  replay a battle's random seed (also PROCYON_SEED); --fixed-step: one 33 ms tick per frame (PROCYON_FIXED_STEP=1)
+  --cam <yaw,pitch,dist>      camera orbit (also --yaw, --pitch, --dist); --look <x,y[,z]> aims it at a point (game axes)
+  --starmap                   open the star map on the first frame
+  --autolaunch                with --menu lobby: fill the human fleet and launch
+  --fire-rule <name>          start a mission at a later beat: run that rule's actions after the world-initialise rules (repeatable)
+  --start-at <x,y>            with --fire-rule on a campaign or custom mission: move the player's ship to game position x,y
+  --json, --verbose           with --check-mod: machine-readable output; list the warnings of the base game's own files too
+
+Internal (the first-run import screen and the tools the game starts; not for typing):
+  --import, --game <dir>, --out <dir>, --output, --assets <dir>, --crashed <log>, --setup-shot <file.png>, --bake-skies,
+  --watch-stdin, --split-stars, --clipboard, --no-newline
 
 Other:
   --version                   print the version and exit
@@ -152,6 +174,40 @@ mod tests {
         ] {
             assert!(HELP.contains(flag), "{flag}");
         }
+    }
+
+    /// Flags the game reads for its own helper processes and the first-run screen; `HELP` lists them as a group.
+    const INTERNAL: [&str; 12] =
+        ["--import", "--game", "--out", "--output", "--assets", "--crashed", "--setup-shot", "--bake-skies", "--watch-stdin", "--split-stars", "--clipboard", "--no-newline"];
+
+    /// Every quoted flag literal in the game's sources must be in the help, so a new flag cannot be forgotten.
+    #[test]
+    fn the_help_names_every_flag_the_game_reads() {
+        fn sources(dir: &Path, out: &mut Vec<std::path::PathBuf>) {
+            for entry in std::fs::read_dir(dir).unwrap().flatten() {
+                let path = entry.path();
+                if path.is_dir() {
+                    sources(&path, out);
+                } else if path.extension().is_some_and(|e| e == "rs") {
+                    out.push(path);
+                }
+            }
+        }
+        let mut files = vec![];
+        sources(&Path::new(env!("CARGO_MANIFEST_DIR")).join("src"), &mut files);
+        assert!(files.len() > 50, "found the sources");
+        let mut missing = std::collections::BTreeSet::new();
+        for file in files {
+            let text = std::fs::read_to_string(&file).unwrap();
+            for part in text.split("\"--").skip(1) {
+                let name: String = part.chars().take_while(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || *c == '-').collect();
+                let flag = format!("--{name}");
+                if !name.is_empty() && part[name.len()..].starts_with('"') && !HELP.contains(&flag) && !INTERNAL.contains(&flag.as_str()) {
+                    missing.insert(format!("{flag} ({})", file.file_name().unwrap().to_string_lossy()));
+                }
+            }
+        }
+        assert!(missing.is_empty(), "flags read by the game but not in --help: {missing:?}");
     }
 
     #[test]
