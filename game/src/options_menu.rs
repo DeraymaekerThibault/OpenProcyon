@@ -104,10 +104,7 @@ pub struct HoverCursor(pub Option<(&'static str, Vec2)>);
 pub fn plugin(app: &mut App) {
     app.init_resource::<OptionsMenu>().init_resource::<BarMenuRequest>().init_resource::<HoverCursor>().init_resource::<crate::combat::LobAim>().add_systems(
         Update,
-        (
-            (dev_click, menu, context_cursor, dev_menu).chain().before(crate::input).run_if(in_state(crate::menu::Screen::Battle)).run_if(crate::menu::overlay_closed),
-            restore_pointer.run_if(crate::menu::menu_active),
-        ),
+        ((dev_click, menu, context_cursor, dev_menu).chain().before(crate::input).in_set(crate::battle::BattleActive), restore_pointer.run_if(crate::menu::menu_active)),
     );
 }
 

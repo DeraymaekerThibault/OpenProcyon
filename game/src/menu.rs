@@ -358,8 +358,7 @@ fn button_sounds(
 pub fn plugin(app: &mut App) {
     let maps = skirmish_maps();
     // `--menu lobby --map <id>` opens the lobby for that map.
-    let args: Vec<String> = std::env::args().collect();
-    let asked = args.windows(2).find(|w| w[0] == "--map").and_then(|w| maps.iter().position(|m| m.0 == w[1]));
+    let asked = crate::cli::value("--map").and_then(|id| maps.iter().position(|m| m.0 == id));
     // The original opens on the historical maps (the 'Historical Maps' box ticked).
     let selected = asked.or_else(|| maps.iter().position(|m| !m.2)).unwrap_or(0);
     let historical = !maps.get(selected).is_some_and(|m| m.2);

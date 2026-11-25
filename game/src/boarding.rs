@@ -208,28 +208,11 @@ pub fn plugin(app: &mut App) {
         .init_resource::<Ropes>()
         // Orders only record an order (step 3); fights and the rope's break and reel test are the mission tick (6); the rope's pull is the
         // link keeper (7.1); the computer's decision to board runs after collision (8).
-        .add_systems(
-            FixedUpdate,
-            (handle_messages, set_flags, grapple_orders, board_orders)
-                .chain()
-                .in_set(crate::BattleSet::Commands)
-                .run_if(in_state(crate::menu::Screen::Battle))
-                .run_if(crate::menu::overlay_closed),
-        )
-        .add_systems(
-            FixedUpdate,
-            (hook_flight, winch_upkeep, fights, settled)
-                .chain()
-                .in_set(crate::BattleSet::MissionTick)
-                .run_if(in_state(crate::menu::Screen::Battle))
-                .run_if(crate::menu::overlay_closed),
-        )
-        .add_systems(FixedUpdate, winch_pull.in_set(crate::BattleSet::Forces).run_if(in_state(crate::menu::Screen::Battle)).run_if(crate::menu::overlay_closed))
-        .add_systems(FixedUpdate, ai_boarding.in_set(crate::BattleSet::Ai).run_if(in_state(crate::menu::Screen::Battle)).run_if(crate::menu::overlay_closed))
-        .add_systems(
-            Update,
-            (dev_board, cancel_grapple_order, status, ropes).chain().before(crate::input).run_if(in_state(crate::menu::Screen::Battle)).run_if(crate::menu::overlay_closed),
-        );
+        .add_systems(FixedUpdate, (handle_messages, set_flags, grapple_orders, board_orders).chain().in_set(crate::BattleSet::Commands).in_set(crate::battle::BattleActive))
+        .add_systems(FixedUpdate, (hook_flight, winch_upkeep, fights, settled).chain().in_set(crate::BattleSet::MissionTick).in_set(crate::battle::BattleActive))
+        .add_systems(FixedUpdate, winch_pull.in_set(crate::BattleSet::Forces).in_set(crate::battle::BattleActive))
+        .add_systems(FixedUpdate, ai_boarding.in_set(crate::BattleSet::Ai).in_set(crate::battle::BattleActive))
+        .add_systems(Update, (dev_board, cancel_grapple_order, status, ropes).chain().before(crate::input).in_set(crate::battle::BattleActive));
 }
 
 /// Whether two objects are hostile: by the mission's alliance table (owners), else by skirmish side.

@@ -63,8 +63,7 @@ pub struct StarmapContents {
 pub struct StarmapSet;
 
 pub fn plugin(app: &mut App) {
-    app.init_resource::<StarmapContents>()
-        .add_systems(Update, (toggle, describe).chain().in_set(StarmapSet).run_if(in_state(crate::menu::Screen::Battle)).run_if(crate::menu::overlay_closed));
+    app.init_resource::<StarmapContents>().add_systems(Update, (toggle, describe).chain().in_set(StarmapSet).in_set(crate::battle::BattleActive));
 }
 
 /// Run after `panels::hud_input`: while the map is open every click belongs to it.
@@ -94,7 +93,7 @@ fn toggle(
     }
     *over = hovered;
     // `--starmap` opens the map on the first frame (screenshots).
-    let first = auto.is_none_or(|a| !a) && std::env::args().any(|a| a == "--starmap");
+    let first = auto.is_none_or(|a| !a) && crate::cli::has("--starmap");
     *auto = Some(true);
     let click = mouse.just_pressed(MouseButton::Left);
     if let Ok(root) = open.single() {

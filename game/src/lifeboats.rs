@@ -53,11 +53,10 @@ fn world_sphere(lib: &Library, ship: &Ship, tf: &Transform) -> (Vec3, f32) {
 }
 
 pub fn plugin(app: &mut App) {
-    use crate::menu::Screen;
     app.add_message::<ShipLost>().add_systems(
         FixedUpdate,
         // Consume combat deaths before the next rules tick.
-        lifeboats.in_set(crate::BattleSet::Cleanup).run_if(in_state(Screen::Battle)).run_if(crate::menu::overlay_closed),
+        lifeboats.in_set(crate::BattleSet::Cleanup).in_set(crate::battle::BattleActive),
     );
 }
 

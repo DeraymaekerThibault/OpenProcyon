@@ -9,7 +9,7 @@ use crate::{Library, PlayerShip, Ship};
 
 pub fn plugin(app: &mut App) {
     app.add_systems(PostStartup, spawn_reticle.run_if(resource_exists::<HudData>))
-        .add_systems(Update, navigation.after(crate::camera).before(crate::sky).run_if(in_state(crate::menu::Screen::Battle)).run_if(crate::menu::overlay_closed))
+        .add_systems(Update, navigation.after(crate::camera).before(crate::sky).in_set(crate::battle::BattleActive))
         .add_systems(Update, lob_marker.run_if(in_state(crate::menu::Screen::Battle)).run_if(resource_exists::<crate::combat::LobAim>))
         .add_systems(Update, end_line.run_if(in_state(crate::menu::Screen::Battle)).run_if(resource_exists::<Fonts>))
         .add_systems(Update, loading_cover)
