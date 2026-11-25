@@ -3,25 +3,7 @@ use bevy::prelude::*;
 use serde_json::Value;
 use std::collections::HashMap;
 fn unit(name: &str, owner: &str, pos: Vec3) -> Unit {
-    Unit {
-        e: Entity::PLACEHOLDER,
-        id: -1,
-        name: name.into(),
-        owner: owner.into(),
-        owner_is_named_group: false,
-        groups: vec![],
-        pos,
-        alive: true,
-        visible: true,
-        primary: name == "RLS Comet",
-        damage: 0.0,
-        flag: String::new(),
-        attack: vec![],
-        heading: 0.0,
-        speed: None,
-        cloaked: false,
-        vital: None,
-    }
+    Unit { name: name.into(), owner: owner.into(), primary: name == "RLS Comet", ..Unit::new(Entity::PLACEHOLDER, -1, pos) }
 }
 fn script() -> Script {
     let m = crate::campaign::load();
