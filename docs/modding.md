@@ -356,6 +356,8 @@ Three launch options make those mistakes loud. None of them is retail behaviour 
 At the start of every mission the interpreter also warns, once per rule and name, about a group, volume, path or point set a rule
 names that the mission does not define (`mission rules: rule 'X': group 'Fleat' in field 'Group Name' of 'Group Destroyed' names no group, player or unit of the mission`).
 
+A tool that lays speech or sound out against mission time can ask the engine how long a sound plays: `openprocyon::authoring::sound_duration(path)` returns the length in seconds of an Ogg Vorbis file (what the game plays), decoded with the same decoder the game uses. Vorbis states no length, so the file is decoded to its end and the samples counted: the result is the stream's length plus at most one decoder block (under 0.1 s for the game's sounds), and a long music track takes a moment. A file that cannot be read or played is an `Err` naming it. It needs no window, audio device or assets.
+
 ## Mission rule extensions (engine-added, not retail)
 
 A custom `mission.json` can use a few additions to the retail rule vocabulary. **None of this is in the retail game**: every new Type starts with `OP ` (so it can never clash with a retail name), every new key is optional, and a mission that uses none of it plays exactly as before. The retail rule format is unchanged: a rule is `{"name", "Run Once", "Is Active", "conditions": [...], "actions": [...]}`, its conditions are ANDed, its actions run in order. Boolean fields of the new Types are the retail strings `"TRUE"` / `"FALSE"` (a JSON `true` reads as FALSE, `--check-mission` reports it); only the rule field `"Is Active"` and the task key `required` take JSON booleans.

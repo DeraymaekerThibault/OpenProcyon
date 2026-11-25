@@ -10,6 +10,7 @@
 //!   [`DataError`] that names the file and the mod that provided it.
 //! - [`rule_schema`]: the mission rule vocabulary as JSON, the same document `--dump-rule-schema` writes.
 //! - [`RuleReport`] / [`rule_report_schema`]: the file `--rule-report <file>` writes (what each rule of a mission did in one play), to parse.
+//! - [`sound_duration`]: how long a sound file (Ogg Vorbis) plays, read with the decoder the game plays it with.
 //! - [`schemas`]: JSON Schemas of `ship.json`, `guns.json`, `bullets.json`, `data/crew_nodes.json`, `mod.json` and `maps/<id>/map.json` (`--dump-schemas <dir>`).
 //! - [`extensions`]: the engine's additions to the original (the table of docs/modding.md), as data.
 //! - [`check_mission`] / [`known_names`]: the mission checker behind `--check-mission`, on JSON values in memory.
@@ -45,6 +46,7 @@ mod json;
 #[cfg(test)]
 mod keyed_tests;
 mod rule_report;
+mod sound;
 /// Whether a model's mesh layer is a damage variant (`<A>Damage_<B>`, swapped in when the section `<A>_<B>` is destroyed) rather than
 /// part of the intact hull: true when the name contains `Damage_`. The one rule the game, `--check-mod` and the ship art use, so a tool
 /// listing a model's sections must skip these layers too.
@@ -55,6 +57,7 @@ pub use check_mod::{check_mod, check_mod_with, unknown_key_findings, unknown_key
 pub use extensions::{Extension, ExtensionKind, extensions};
 pub use json::to_json_string;
 pub use rule_report::{RuleReport, RuleReportEntry, RuleReportOutcome, rule_report_schema};
+pub use sound::sound_duration;
 
 pub use crate::data::DataError;
 pub use crate::modding::{MERGED, MergeRule, ModEntry, ModReport, extends_parent, merge_rule};
