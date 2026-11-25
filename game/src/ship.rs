@@ -1030,7 +1030,10 @@ pub fn fleet_follow(world: &mut World) {
             let Some(pilot) = world.get::<FleetPilot>(e).cloned() else { continue };
             let Some(here) = world.get::<Transform>(e).map(|t| t.translation) else { continue };
             let Some(ship) = world.get::<Ship>(e) else { continue };
-            let max = world.get::<Health>(e).map_or(0.0, |h| max_speed(ship, &world.resource::<Library>().classes[ship.class], h));
+            // Retail: a follower's speeds are shares of its own top speed at full throttle, which is its Emergency speed, so it
+            // closes on its slot at Emergency and keeps up with a leader at Emergency (docs/re/fleet-controls.md "Follower speed").
+            let full = world.get::<Health>(e).map_or(0.0, |h| max_speed(ship, &world.resource::<Library>().classes[ship.class], h));
+            let max = full * EngineOrder::Emergency.fraction();
             let (class_index, heading) = (ship.class, ship.heading);
             let leader_velocity = world.get::<Ship>(leader).map_or(Vec3::ZERO, |l| Vec3::new(-l.heading.sin(), 0.0, -l.heading.cos()) * l.speed);
             let dt = world.get_resource::<Time>().map_or(0.0, |t| t.delta_secs());
@@ -1069,8 +1072,14 @@ pub fn fleet_follow(world: &mut World) {
                 if let Some(mut s) = world.get_mut::<Ship>(e) {
                     s.waypoints = if distance > 3.0 { vec![aim] } else { vec![] };
                     s.goal = if pilot.hold { Some((-(tf.rotation * Vec3::NEG_Z).x).atan2(-(tf.rotation * Vec3::NEG_Z).z)) } else { None };
-                    s.order = if wanted < 0.01 { EngineOrder::Stop } else { EngineOrder::Full };
-                    s.throttle = Some(if max > 0.001 { (wanted / max).clamp(0.0, 1.0) } else { 0.0 });
+                    s.order = if wanted < 0.01 {
+                        EngineOrder::Stop
+                    } else if wanted > full {
+                        EngineOrder::Emergency
+                    } else {
+                        EngineOrder::Full
+                    };
+                    s.throttle = Some(if full > 0.001 { (wanted / full).clamp(0.0, EngineOrder::Emergency.fraction()) } else { 0.0 });
                 }
             }
         }
