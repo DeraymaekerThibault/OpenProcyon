@@ -197,9 +197,15 @@ pub(super) fn fights(
     grapples: Query<(Entity, &Grapple)>,
     player: Query<Entity, With<PlayerShip>>,
     mut things: Query<(&Transform, Option<&Ship>, Option<&Drift>, &mut Boardable, Option<&Health>, Option<&MissionShip>, Option<&MissionBase>, Option<&crate::combat::BaseSide>)>,
+    spawn_order: Query<&crate::scenario::SpawnIndex>,
 ) {
     let (dt, me) = (time.delta_secs(), player.single().ok());
-    for (b, mut f) in &mut fighters {
+    // In the boarders' spawn order: every fight draws from the shared `SimRng` (its casualty coin, the crew's lines), and two fights at
+    // once must draw in the same order on every run, not in query order (#369).
+    let order = crate::scenario::in_spawn_order(&spawn_order, fighters.iter().map(|(e, _)| e), |e| *e);
+    let mut walk = fighters.iter_many_mut(&order);
+    while let Some(item) = walk.fetch_next() {
+        let Ok((b, mut f)) = item else { continue };
         let t = f.target;
         let Ok([mut bi, mut ti]) = things.get_many_mut([b, t]) else {
             end_fight(&mut commands, b, &f.fx);
