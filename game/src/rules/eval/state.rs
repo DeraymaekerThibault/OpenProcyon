@@ -97,6 +97,8 @@ pub struct Script {
     pub(in crate::rules) objects: Value,
     pub(in crate::rules) volumes: HashMap<String, Region>,
     pub(in crate::rules) nebulae: Vec<Region>,
+    /// Ships the nebulae acted on last step (`nebula::InNebula`): a trapped ship rides its storm and counts as inside.
+    pub(in crate::rules) in_nebula: HashSet<Entity>,
     pub(in crate::rules) hits: HashMap<Entity, u32>,
     pub(in crate::rules) hits_by: HashMap<(String, Entity), u32>,
     pub(in crate::rules) fired_at: HashMap<Entity, (f32, Entity)>,

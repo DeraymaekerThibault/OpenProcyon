@@ -85,7 +85,11 @@ impl Script {
                 let (a, bb) = (members(w, s(c, "Dockers Group/Unit Name")), members(w, s(c, "Targets Group/Unit Name")));
                 a.iter().any(|x| bb.iter().any(|y| self.docked.contains(&(x.e, y.e))))
             }
-            T::UnitIsWithinAnyNebula => members(w, s(c, "Unit Name")).iter().any(|u| u.alive && self.nebulae.iter().any(|p| in_volume(p, u.pos))),
+            // Retail reads each nebula's inside list, which keeps the ships a trapping nebula holds; a held ship rides the cloud's edge
+            // and can sit a step outside its polygon on this frame's positions, so the ships the nebulae acted on count too.
+            T::UnitIsWithinAnyNebula => {
+                members(w, s(c, "Unit Name")).iter().any(|u| u.alive && (self.in_nebula.contains(&u.e) || self.nebulae.iter().any(|p| in_volume(p, u.pos))))
+            }
             T::AllUnitsFromGroupHaveEnteredTriggerVolumeOnce => {
                 let key = Entered::AllOnce { group: s(c, "Group Name").into(), volume: s(c, "Volume Name").into() };
                 let vol = self.volume(s(c, "Volume Name")).clone();
