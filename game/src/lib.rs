@@ -105,6 +105,17 @@ static FIXED_STEP: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool
 pub fn fixed_step() -> bool {
     FIXED_STEP.load(std::sync::atomic::Ordering::Relaxed)
 }
+/// Whether this launch runs fixed-step: `--fixed-step` or `PROCYON_FIXED_STEP=1` ask for it, and so does `--shot` (a picture must not
+/// depend on the machine's frame times: with the wall-clock step two runs of one command gave different pictures). `PROCYON_FIXED_STEP=0`
+/// switches it off, also for `--shot`. The battle seed needs no such rule: it is `SimRng::DEFAULT_SEED` unless `--seed` / `PROCYON_SEED`
+/// say otherwise, which stay in force under `--shot`.
+pub fn wants_fixed_step(args: &[String], env: Option<&str>) -> bool {
+    match env {
+        Some("0") => false,
+        Some("1") => true,
+        _ => args.iter().skip(1).any(|a| a == "--fixed-step" || a == "--shot"),
+    }
+}
 /// A seed from the clock, or a constant in a fixed-step run.
 pub fn clock_seed() -> u64 {
     if fixed_step() {
@@ -237,10 +248,14 @@ pub fn run(view: fn(&mut App), setup_view: fn(&mut App)) {
     if player && let Some(dir) = base.parent() {
         setup::report_crashes(dir.to_path_buf());
     }
-    let all_mods = modding::installed(bundled_mods_dir().as_deref());
+    // `--only-mod` never even lists the player's installed mods; `mods.json` is read by the normal path only and written by neither.
+    let installed = if args.iter().skip(1).any(|a| a == modding::ONLY_MOD) { vec![] } else { modding::installed(bundled_mods_dir().as_deref()) };
+    let (all_mods, dirs) = modding::pick_mods(&args, installed, mods.clone()).unwrap_or_else(|error| {
+        eprintln!("error: {error}");
+        exit::quit(2)
+    });
     modding::log_warnings(&all_mods, &mods);
-    let installed = all_mods.into_iter().filter(|m| m.enabled).map(|m| m.dir);
-    modding::set_active(installed.chain(mods).collect());
+    modding::set_active(dirs);
     let layers: Vec<PathBuf> = std::iter::once(content_dir()).chain(modding::active().iter().cloned()).collect();
     let (root, report) = modding::overlay_report(&base, &layers, own_overlay());
     report.without(&content_dir()).log();
@@ -255,7 +270,7 @@ pub fn run(view: fn(&mut App), setup_view: fn(&mut App)) {
     }
     let arg = |k: &str| args.iter().position(|a| a == k).and_then(|i| args.get(i + 1)).cloned();
     let shot = arg("--shot");
-    FIXED_STEP.store(args.iter().any(|a| a == "--fixed-step") || std::env::var_os("PROCYON_FIXED_STEP").is_some_and(|v| v == "1"), std::sync::atomic::Ordering::Relaxed);
+    FIXED_STEP.store(wants_fixed_step(&args, std::env::var("PROCYON_FIXED_STEP").ok().as_deref()), std::sync::atomic::Ordering::Relaxed);
     // Debug aids for mission authors: fire named rules at the start (repeatable) and place the primary ship (x,y in game units).
     let at: Option<Vec<f32>> = arg("--start-at").map(|v| v.split(',').filter_map(|x| x.parse().ok()).collect());
     campaign::set_start(args.windows(2).filter(|w| w[0] == "--fire-rule").map(|w| w[1].clone()).collect(), at.and_then(|c| (c.len() == 2).then(|| (c[0], c[1]))));
@@ -747,5 +762,25 @@ mod tests {
         std::fs::create_dir_all(unpacked.join("fonts")).unwrap();
         assert_eq!(content_dir_from(Some(unpacked.clone()), checkout), unpacked);
         std::fs::remove_dir_all(dir).unwrap();
+    }
+}
+
+#[cfg(test)]
+mod fixed_step_tests {
+    use super::wants_fixed_step;
+
+    fn args(a: &[&str]) -> Vec<String> {
+        a.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn a_shot_runs_fixed_step_unless_switched_off() {
+        assert!(!wants_fixed_step(&args(&["game", "--map", "red_rover"]), None), "an interactive run follows the clock");
+        assert!(wants_fixed_step(&args(&["game", "--map", "red_rover", "--shot", "f.png"]), None));
+        assert!(wants_fixed_step(&args(&["game", "--fixed-step"]), None));
+        assert!(wants_fixed_step(&args(&["game"]), Some("1")));
+        assert!(!wants_fixed_step(&args(&["game", "--shot", "f.png"]), Some("0")), "the environment can switch it off");
+        assert!(!wants_fixed_step(&args(&["game", "--fixed-step"]), Some("0")));
+        assert!(wants_fixed_step(&args(&["game", "--shot", "f.png"]), Some("")), "an empty value is no choice");
     }
 }
