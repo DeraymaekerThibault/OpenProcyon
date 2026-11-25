@@ -46,7 +46,7 @@ Git Bash (`GIT_BASH=<path>` if it is not in the default place), and the screensh
    the map's `map.json`. Ships and shells are numbered by creation order (`SpawnIndex`) and `gt` restarts at 0 when a battle restarts,
    so two runs compare row by row. Every battle logs `battle seed N`; `--seed N` or `PROCYON_SEED=N` replays it (`combat::SimRng`,
    docs/re/tick.md).
-   `PROCYON_COMMANDS=<file.jsonl>` records the player's orders (`commands.rs`, so far engine orders and target picks), and
+   `PROCYON_COMMANDS=<file.jsonl>` records the player's orders (`commands.rs`, so far engine orders, target picks, and move, plotted-course and cancel orders), and
    `--replay <file.jsonl>` plays them back with the same scenario arguments, seed and mods (the game names any that differ), also
    from a normal play session: the log keeps each frame's game-time advance and tick count, the replay feeds those to the clock, so
    frame-driven rules and ticks line up as recorded. JSON lines, format 2 (PROVISIONAL; format 1 still reads): a header (format,

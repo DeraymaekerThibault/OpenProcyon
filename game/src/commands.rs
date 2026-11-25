@@ -19,7 +19,7 @@
 //! itself (`--replay <file>` alone, however the lobby was set up); campaign missions started from the menus are still refused. Only
 //! the first battle of a run is recorded; a restart ends the recording.
 //!
-//! Routed so far: engine orders and target picks. The other orders still change the battle directly and are not in a recording yet
+//! Routed so far: engine orders, target picks, and move, course and cancel orders. The other orders still change the battle directly and are not in a recording yet
 //! (later PRs, one group each). PROVISIONAL: the file format (version 2; version 1, without the skirmish setup, still reads).
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
@@ -53,6 +53,15 @@ pub enum Kind {
     /// The ship's target: on the command ship the player's own target and the spot clicked on it (target-local), which also ends panic
     /// fire; on a fleet captain an attack order. `None` clears the command ship's target (C); a captain ignores it.
     Target { ship: Entity, target: Option<Entity>, spot: Option<Vec3> },
+    /// A click on open water (basic movement): the command ship sails there (`append`, Shift held: one more waypoint; light-green
+    /// Full if it was stopped), a captain is ordered there. Either way a dock routine in progress and a hold end.
+    Move { ship: Entity, to: Vec3, append: bool },
+    /// Advanced movement: the plotted course becomes the command ship's (light-green Full if it was stopped). `release`: the click
+    /// that closed the course also ends a dock routine and a hold, as a move does; Enter does not.
+    Course { ship: Entity, points: Vec<Vec3>, release: bool },
+    /// Backspace with no course being plotted: the ship's waypoints and grapple order go, and with them the armed bank and its shot
+    /// (command ship), or the captain's destination, target and hold, and its engines.
+    Cancel { ship: Entity },
 }
 
 /// One player order.
@@ -96,6 +105,7 @@ pub struct Clock {
 /// whose ship is gone does nothing.
 pub fn apply(world: &mut World, kind: &Kind) {
     match *kind {
+        Kind::Move { .. } | Kind::Course { .. } | Kind::Cancel { .. } => apply_movement(world, kind),
         Kind::Engine { ship, engine } => {
             if let Some(mut s) = world.get_mut::<Ship>(ship) {
                 s.throttle = None;
@@ -107,9 +117,7 @@ pub fn apply(world: &mut World, kind: &Kind) {
             }
         }
         Kind::Target { ship, target, spot } => {
-            // Direct control is the fleet's command ship (`Fleets::direct`, what the click handler decided on before).
-            let direct = world.get_resource::<crate::ship::Fleets>().is_some_and(|f| f.primary() == Some(ship));
-            if direct {
+            if direct(world, ship) {
                 if let Some(mut t) = world.get_resource_mut::<crate::combat::Target>() {
                     t.0 = target;
                     t.1 = spot;
@@ -121,6 +129,81 @@ pub fn apply(world: &mut World, kind: &Kind) {
                 p.attack(target);
             }
         }
+    }
+}
+
+/// Direct control is the fleet's command ship (`Fleets::direct`, what the input handlers decided on before).
+fn direct(world: &World, ship: Entity) -> bool {
+    world.get_resource::<crate::ship::Fleets>().is_some_and(|f| f.primary() == Some(ship))
+}
+
+/// A move ends a dock routine in progress and gives control back (original behaviour), and ends a hold (`ship::release_hold`).
+fn release(world: &mut World, ship: Entity) {
+    if let Some(mut msgs) = world.get_resource_mut::<Messages<crate::docking::DockMsg>>() {
+        msgs.write(crate::docking::DockMsg::CancelShip(ship));
+    }
+    if let Ok(mut e) = world.get_entity_mut(ship) {
+        e.remove::<crate::ship::HoldPosition>();
+    }
+}
+
+/// A stopped ship given a course sails at light-green Full, as in the original.
+fn sail_on(ship: &mut Ship) {
+    if ship.order == EngineOrder::Stop || ship.throttle == Some(0.0) {
+        ship.throttle = None;
+        ship.order = EngineOrder::Full;
+    }
+}
+
+/// Move, course and cancel orders.
+fn apply_movement(world: &mut World, kind: &Kind) {
+    match kind {
+        &Kind::Move { ship, to, append } => {
+            release(world, ship);
+            if direct(world, ship) {
+                if let Some(mut s) = world.get_mut::<Ship>(ship) {
+                    if !append {
+                        s.waypoints.clear();
+                    }
+                    s.waypoints.push(to);
+                    sail_on(&mut s);
+                }
+            } else if let Some(mut p) = world.get_mut::<crate::ship::FleetPilot>(ship) {
+                p.move_to(to);
+            }
+        }
+        Kind::Course { ship, points, release: ends } => {
+            if *ends {
+                release(world, *ship);
+            }
+            if let Some(mut s) = world.get_mut::<Ship>(*ship) {
+                s.waypoints.clone_from(points);
+                sail_on(&mut s);
+            }
+        }
+        &Kind::Cancel { ship } => {
+            let direct = direct(world, ship);
+            if let Ok(mut e) = world.get_entity_mut(ship) {
+                e.remove::<crate::boarding::GrappleOrder>();
+            }
+            if let Some(mut s) = world.get_mut::<Ship>(ship) {
+                s.waypoints.clear();
+                if !direct {
+                    s.order = EngineOrder::Stop;
+                }
+            }
+            if direct {
+                if let Some(mut t) = world.get_resource_mut::<crate::combat::Target>() {
+                    t.2.armed = None;
+                    t.2.shot = None;
+                }
+            } else if let Some(mut p) = world.get_mut::<crate::ship::FleetPilot>(ship) {
+                p.destination = None;
+                p.target = None;
+                p.hold = false;
+            }
+        }
+        _ => {}
     }
 }
 
@@ -255,6 +338,9 @@ pub enum At {
 pub enum Saved {
     Engine { ship: NetId, engine: SavedEngine },
     Target { ship: NetId, target: Option<NetId>, spot: Option<[f32; 3]> },
+    Move { ship: NetId, to: [f32; 3], append: bool },
+    Course { ship: NetId, points: Vec<[f32; 3]>, release: bool },
+    Cancel { ship: NetId },
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -351,6 +437,9 @@ impl Saved {
                 },
             },
             Kind::Target { ship, target, spot } => Saved::Target { ship: id(ship)?, target: target.map(id).transpose()?, spot: spot.map(game_axes) },
+            Kind::Move { ship, to, append } => Saved::Move { ship: id(ship)?, to: game_axes(to), append },
+            Kind::Course { ship, ref points, release } => Saved::Course { ship: id(ship)?, points: points.iter().copied().map(game_axes).collect(), release },
+            Kind::Cancel { ship } => Saved::Cancel { ship: id(ship)? },
         })
     }
     /// The command for this world; None when an object it names is gone.
@@ -371,6 +460,9 @@ impl Saved {
                 };
                 Kind::Target { ship: ship.find(world)?, target, spot: spot.map(bevy_axes) }
             }
+            Saved::Move { ship, to, append } => Kind::Move { ship: ship.find(world)?, to: bevy_axes(to), append },
+            Saved::Course { ship, ref points, release } => Kind::Course { ship: ship.find(world)?, points: points.iter().copied().map(bevy_axes).collect(), release },
+            Saved::Cancel { ship } => Kind::Cancel { ship: ship.find(world)? },
         })
     }
 }

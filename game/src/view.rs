@@ -118,13 +118,11 @@ type ObjectQuery<'w, 's> = Query<
 /// A ship as the click picking sees it: entity, transform, ship, destroyed, visible.
 type Clickable = (Entity, Transform, Ship, bool, bool);
 
-/// The selected ship, which this frame's input changes (written back by `input` once, when it differs).
-struct Controlled<'a> {
+/// The selected ship, which this frame's input gives orders to (`commands::Orders`).
+struct Controlled {
     actor: Entity,
     /// The player's own ship under direct control, rather than a captain's order.
     direct: bool,
-    ship: &'a mut Ship,
-    pilot: &'a mut Option<ship::FleetPilot>,
 }
 
 /// What a click on the world looks up.
@@ -139,15 +137,7 @@ struct ClickScene<'a> {
 }
 
 /// Speed, course and order keys of the selected ship.
-fn keyboard_orders(
-    c: &mut Controlled,
-    keys: &ButtonInput<KeyCode>,
-    pointer: &mut Pointer,
-    target: &mut Target,
-    vtime: &mut Time<Virtual>,
-    commands: &mut Commands,
-    orders: &mut Orders,
-) {
+fn keyboard_orders(c: &Controlled, keys: &ButtonInput<KeyCode>, pointer: &mut Pointer, vtime: &mut Time<Virtual>, orders: &mut Orders) {
     let b = &pointer.binds;
     let direct = c.direct;
     // Engine orders: +/- step through All Stop .. Emergency.
@@ -159,13 +149,12 @@ fn keyboard_orders(
     }
     // Advanced movement: Enter accepts the plotted course, Backspace drops it (and nothing else).
     if direct && keys.just_pressed(KeyCode::Enter) && !pointer.plot.pending.is_empty() {
-        commit_plot(c.ship, &mut pointer.plot);
+        orders.send(Kind::Course { ship: c.actor, points: std::mem::take(&mut pointer.plot.pending), release: false });
     }
     if keys.just_pressed(KeyCode::Backspace) && !pointer.plot.pending.is_empty() {
         pointer.plot.pending.clear();
     } else if keys.just_pressed(KeyCode::Backspace) {
-        commands.entity(c.actor).remove::<boarding::GrappleOrder>();
-        cancel_orders(c, target);
+        orders.send(Kind::Cancel { ship: c.actor });
     }
     if direct && keys.just_pressed(KeyCode::KeyC) {
         orders.send(Kind::Target { ship: c.actor, target: None, spot: None });
@@ -173,23 +162,6 @@ fn keyboard_orders(
     // Not retail: the Pause key toggles the pause too, beside the HUD pause button.
     if keys.just_pressed(KeyCode::Pause) {
         toggle_pause(vtime);
-    }
-}
-
-/// Backspace with no plotted course: the ship's waypoints go, and with them an armed bank and shot (direct control), or the
-/// captain's destination, target and hold and the engines (a captain).
-fn cancel_orders(c: &mut Controlled, target: &mut Target) {
-    c.ship.waypoints.clear();
-    if c.direct {
-        target.2.armed = None;
-        target.2.shot = None;
-    } else {
-        if let Some(p) = c.pilot.as_mut() {
-            p.destination = None;
-            p.target = None;
-            p.hold = false;
-        }
-        c.ship.order = EngineOrder::Stop;
     }
 }
 
@@ -219,7 +191,7 @@ fn select_own(ray: Ray3d, scene: &ClickScene, fleets: &mut ship::Fleets, orbit: 
 }
 
 /// A left click that is not a selection: dock, pick a target or give a move order.
-fn left_click(c: &mut Controlled, ray: Ray3d, scene: &ClickScene, pointer: &mut Pointer, docks: &mut docking::Dockees, commands: &mut Commands, orders: &mut Orders) {
+fn left_click(c: &Controlled, ray: Ray3d, scene: &ClickScene, pointer: &mut Pointer, docks: &mut docking::Dockees, orders: &mut Orders) {
     let (actor, direct) = (c.actor, c.direct);
     // Attack Only Mode (held key): a click only picks targets, never a dock or a destination.
     let attack_only = pointer.binds.pressed(scene.keys, Act::AttackOnly);
@@ -249,41 +221,21 @@ fn left_click(c: &mut Controlled, ray: Ray3d, scene: &ClickScene, pointer: &mut 
         return;
     }
     let Some(t) = ray.intersect_plane(Vec3::ZERO, InfinitePlane3d::new(Vec3::Y)) else { return };
-    move_order(c, ray.get_point(t), scene.keys, pointer, docks, commands);
+    move_order(c, ray.get_point(t), scene.keys, pointer, orders);
 }
 
 /// A click on empty water: plot a course point (advanced movement) or order the ship there (Shift appends).
-fn move_order(c: &mut Controlled, p: Vec3, keys: &ButtonInput<KeyCode>, pointer: &mut Pointer, docks: &mut docking::Dockees, commands: &mut Commands) {
-    let (actor, direct) = (c.actor, c.direct);
+fn move_order(c: &Controlled, p: Vec3, keys: &ButtonInput<KeyCode>, pointer: &mut Pointer, orders: &mut Orders) {
+    let (ship, direct) = (c.actor, c.direct);
     if direct && pointer.plot.advanced {
         match pointer.plot.pressed(p) {
-            Some(true) => {
-                docks.cancel_as(actor);
-                ship::release_hold(commands, actor);
-                commit_plot(c.ship, &mut pointer.plot);
-            }
+            Some(true) => orders.send(Kind::Course { ship, points: std::mem::take(&mut pointer.plot.pending), release: true }),
             Some(false) => pointer.plot.pending.clear(),
             None => pointer.plot.pending.push(p),
         }
         return;
     }
-    // A move order cancels a dock routine in progress and gives control back (original behaviour).
-    docks.cancel_as(actor);
-    ship::release_hold(commands, actor);
-    if !direct {
-        if let Some(pilot) = c.pilot.as_mut() {
-            pilot.move_to(p);
-        }
-        return;
-    }
-    if !keys.pressed(KeyCode::ShiftLeft) {
-        c.ship.waypoints.clear();
-    }
-    c.ship.waypoints.push(p);
-    if c.ship.order == EngineOrder::Stop || c.ship.throttle == Some(0.0) {
-        c.ship.throttle = None;
-        c.ship.order = EngineOrder::Full;
-    } // light green 'Full', as in the original
+    orders.send(Kind::Move { ship, to: p, append: direct && keys.pressed(KeyCode::ShiftLeft) });
 }
 
 pub fn input(
@@ -293,7 +245,7 @@ pub fn input(
     window: Single<&Window, With<PrimaryWindow>>,
     cam: Single<(&Camera, &GlobalTransform)>,
     mut orbit: ResMut<Orbit>,
-    ships: Query<(Entity, &Ship, &GlobalTransform, &Health, Option<&campaign::MissionShip>, Option<&ship::FleetPilot>)>,
+    ships: Query<(Entity, &Ship, &GlobalTransform, &Health, Option<&campaign::MissionShip>)>,
     time: Res<Time<Real>>,
     lib: Res<Library>,
     mut target: ResMut<Target>,
@@ -302,22 +254,19 @@ pub fn input(
     mut docks: docking::Dockees,
     (sensors, mission, mut sfx, lob, mut orders): (Res<environment::Sensors>, Option<Res<campaign::Mission>>, MessageWriter<audio::Sfx>, Res<combat::LobAim>, Orders),
     objects: ObjectQuery,
-    mut commands: Commands,
 ) {
     let Some(actor) = pointer.fleets.selected else { return };
     let direct = pointer.fleets.direct();
     let clicking = mouse.just_pressed(MouseButton::Left) && !ui.0;
     let others: Vec<Clickable> =
-        if clicking { ships.iter().map(|(e, s, tf, h, m, _)| (e, tf.compute_transform(), s.clone(), h.destroyed, m.is_none_or(|m| m.visible))).collect() } else { vec![] };
-    let Ok((_, source, player_tf, _, _, source_pilot)) = ships.get(actor) else { return };
-    let mut ship = source.clone();
-    let mut pilot = source_pilot.cloned();
+        if clicking { ships.iter().map(|(e, s, tf, h, m)| (e, tf.compute_transform(), s.clone(), h.destroyed, m.is_none_or(|m| m.visible))).collect() } else { vec![] };
+    let Ok((_, _, player_tf, ..)) = ships.get(actor) else { return };
     if !briefing::active(mission.as_deref()) && !rules::locked(mission.as_deref()) {
-        let mut c = Controlled { actor, direct, ship: &mut ship, pilot: &mut pilot };
+        let c = Controlled { actor, direct };
         // The focus's bounding radius sets the retail zoom limits (collision sphere for the mesh bounds, PROVISIONAL; others 0).
         let radius = orbit.focus.or(Some(actor)).and_then(|e| ships.get(e).ok()).map_or(0.0, |(_, s, ..)| lib.classes[s.class].sphere.1);
         camera_input(&mouse, &keys, &pointer, &mut orbit, time.delta_secs(), radius);
-        keyboard_orders(&mut c, &keys, &mut pointer, &mut target, &mut vtime, &mut commands, &mut orders);
+        keyboard_orders(&c, &keys, &mut pointer, &mut vtime, &mut orders);
         // Left click: an enemy ship selects it as target, otherwise set a destination on the plane (Shift appends).
         if clicking && !docks.menu_swallows_click() {
             let (camera, gt) = *cam;
@@ -325,18 +274,10 @@ pub fn input(
                 let scene =
                     ClickScene { keys: &keys, lib: &lib, sensors: &sensors, mission: mission.as_deref(), others: &others, objects: &objects, player_pos: player_tf.translation() };
                 if !armed_shot(direct, ray, &mut target, &lob, &mut sfx) && !select_own(ray, &scene, &mut pointer.fleets, &mut orbit) {
-                    left_click(&mut c, ray, &scene, &mut pointer, &mut docks, &mut commands, &mut orders);
+                    left_click(&c, ray, &scene, &mut pointer, &mut docks, &mut orders);
                 }
             }
         }
-    }
-    if ship != *source {
-        commands.entity(actor).insert(ship);
-    }
-    if pilot.as_ref() != source_pilot
-        && let Some(pilot) = pilot
-    {
-        commands.entity(actor).insert(pilot);
     }
 }
 
@@ -391,16 +332,6 @@ pub fn fleet_keys(
     }
 }
 
-/// The plotted course becomes the ship's (light-green Full if it was stopped, as a basic click does).
-fn commit_plot(ship: &mut Ship, plot: &mut course::Plot) {
-    ship.waypoints = std::mem::take(&mut plot.pending);
-    if ship.order == EngineOrder::Stop || ship.throttle == Some(0.0) {
-        ship.throttle = None;
-        ship.order = EngineOrder::Full;
-    }
-}
-
-/// Retail 'Take ScreenShot' (Scroll Lock): a PNG in the user folder's `screenshots/`.
 pub fn screenshot_key(keys: Res<ButtonInput<KeyCode>>, binds: Res<bindings::Bindings>, mut commands: Commands) {
     if !binds.just_pressed(&keys, Act::Screenshot) {
         return;
