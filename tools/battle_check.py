@@ -24,8 +24,8 @@ from typing import NamedTuple
 
 from tools import gamelog
 from tools.autoplay import assets_env, build_game, display_wrapper, silent_data_home
+from tools.paths import REPO
 
-REPO = Path(__file__).resolve().parents[1]
 REPORT = re.compile(r"battle report (\{.*\})")
 FLEETS = ["--ship", "Ship_Navy_Cutter", "--allies", "Ship_Navy_Cutter",
           "--enemies", "Ship_Pirate_Barque,Ship_Pirate_Sloop"]  # fmt: skip

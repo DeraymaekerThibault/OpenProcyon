@@ -15,7 +15,8 @@ from pathlib import Path
 import numpy as np
 from PIL import Image
 
-REPO = Path(__file__).resolve().parents[1]
+from tools.paths import REPO
+
 OUT = REPO / "local/visdiff"
 BASE_WT = REPO.parent / "openprocyon-visdiff-base"
 # A channel moving by this much or less is not a change (none is expected in a fixed-step run; this only absorbs dithering).

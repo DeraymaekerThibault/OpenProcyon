@@ -28,9 +28,9 @@ from pathlib import Path
 from tools import importlog
 from tools.gamefs import ci_files
 from tools.jsonio import dump
+from tools.paths import REPO
 from tools.skirmish_ships import SKIRMISH_SHIPS
 
-REPO = Path(__file__).resolve().parents[1]
 # The release download runs this module frozen by PyInstaller (no checkout, no Python install).
 FROZEN = getattr(sys, "frozen", False)
 # Every Ship_*.wot is exported; the curated retail skirmish ships come first (first = default player ship). Hulls that are not combat

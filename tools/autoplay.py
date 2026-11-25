@@ -18,8 +18,7 @@ from pathlib import Path
 
 from tools import gamelog
 from tools.import_assets import find_assets
-
-REPO = Path(__file__).resolve().parents[1]
+from tools.paths import REPO
 
 
 def build_game(profile="fast"):
