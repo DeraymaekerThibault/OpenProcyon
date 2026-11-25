@@ -137,7 +137,7 @@ fn launch(
     for _ in 0..class.lifeboats {
         let (offset, throttle) = drift(rng);
         let to = Vec3::new(offset.x, 0.0, -offset.y);
-        let heading = if to.length_squared() > 1e-6 { (-to.x).atan2(-to.z) } else { ship.heading };
+        let heading = if to.length_squared() > 1e-6 { crate::geom::heading_of(to) } else { ship.heading };
         let id = crate::spawn_ship(commands, assets, lib, fxl, &boat.name, Side::Player, tf.translation, heading, None);
         commands.entity(id).remove::<PlayerShip>().remove::<crate::boarding::Boardable>().insert((
             Lifeboat { owner: ms.owner.clone() },

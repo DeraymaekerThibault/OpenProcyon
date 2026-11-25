@@ -430,7 +430,7 @@ fn a_broadside_attacker_circles_an_idle_ship_on_its_turning_circle() {
             if i as f32 * dt > 120.0 {
                 let d = foe - tf.translation;
                 dists.push(Vec2::new(d.x, d.z).length());
-                beams.push(angdiff((-d.x).atan2(-d.z), ship.heading));
+                beams.push(angdiff(crate::geom::heading_of(d), ship.heading));
             }
         }
         let (lo, hi) = dists.iter().fold((f32::MAX, 0.0f32), |(a, b), d| (a.min(*d), b.max(*d)));

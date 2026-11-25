@@ -175,9 +175,7 @@ pub fn release_hold(commands: &mut Commands, e: Entity) {
 #[derive(Component)]
 pub struct ShipName(pub String);
 
-pub fn angdiff(a: f32, b: f32) -> f32 {
-    (a - b + PI).rem_euclid(TAU) - PI
-}
+pub use crate::geom::angdiff;
 
 pub type CaptainBusy = Or<(With<docking::Docker>, With<docking::Tower>, With<boarding::GrappleOrder>, With<boarding::Grapple>, With<boarding::Boarding>)>;
 
@@ -226,7 +224,7 @@ impl Explore {
 pub fn flee(holes: &[(Vec3, f32)], pos: Vec3) -> Option<f32> {
     holes.iter().find(|(c, r)| Vec2::new(pos.x - c.x, pos.z - c.z).length() < r + HOLE_MARGIN).map(|(c, _)| {
         let d = pos - *c;
-        (-d.x).atan2(-d.z)
+        crate::geom::heading_of(d)
     })
 }
 
@@ -488,7 +486,7 @@ pub fn helm_step(ship: &mut Ship, tf: &mut Transform, class: &combat::Class, hea
                 // The original ship sails straight on past the last marker at the same order and speed.
                 ship.waypoints.remove(0);
             } else {
-                want = Some((-d.x).atan2(-d.z));
+                want = Some(crate::geom::heading_of(d));
             }
         } else if let Some(g) = ship.goal {
             want = Some(g);
@@ -1011,7 +1009,7 @@ pub(crate) fn speed_fraction(speed: f32, top: f32) -> f32 {
 
 /// The bearing error a follower steers out toward `to` (its slot, relative to the ship): 0 within a unit of it.
 pub(crate) fn follow_error(to: Vec3, heading: f32) -> f32 {
-    if to.length_squared() > 1.0 { angdiff((-to.x).atan2(-to.z), heading) } else { 0.0 }
+    if to.length_squared() > 1.0 { angdiff(crate::geom::heading_of(to), heading) } else { 0.0 }
 }
 
 /// How a follower's orders map `wanted` speed onto the helm (`follow_speed` supplies it).
@@ -1109,7 +1107,7 @@ pub fn fleet_follow(world: &mut World) {
                 let heading_error = follow_error(to_goal, heading);
                 let wanted = follow_speed(pilot.hold, distance, speed, max, heading_error);
                 if let Some(mut s) = world.get_mut::<Ship>(e) {
-                    let goal = if pilot.hold { Some((-(tf.rotation * Vec3::NEG_Z).x).atan2(-(tf.rotation * Vec3::NEG_Z).z)) } else { None };
+                    let goal = if pilot.hold { Some(crate::geom::heading_of(tf.rotation * Vec3::NEG_Z)) } else { None };
                     let helm = FollowHelm { top: full, max_share: EngineOrder::Emergency.fraction(), emergency_over_top: true };
                     follow_station(&mut s, aim, distance, goal, wanted, helm);
                 }

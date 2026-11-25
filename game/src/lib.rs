@@ -29,6 +29,7 @@ pub mod exit;
 mod fixed_tests;
 pub mod flag;
 pub mod fx;
+pub mod geom;
 pub mod interpolate;
 pub mod lifeboats;
 pub mod line_of_fire;
@@ -72,7 +73,7 @@ use bevy::input::mouse::{AccumulatedMouseMotion, AccumulatedMouseScroll};
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
 pub use combat::{GunStates, Health, Library, Target, Transient};
-use std::f32::consts::{PI, TAU};
+use std::f32::consts::PI;
 use std::path::PathBuf;
 
 #[derive(Resource)]

@@ -63,7 +63,7 @@ pub fn spawn(commands: &mut Commands, assets: &AssetServer, data: &Value) {
         let group = d["group"].as_str().unwrap_or("Dragons");
         let pos = game_to_bevy(&d["pos"]);
         let forward = crate::scenario::game_rotation(&d["rot"]) * Vec3::NEG_Z;
-        let heading = (-forward.x).atan2(-forward.z);
+        let heading = crate::geom::heading_of(forward);
         let id = d["id"].as_i64().unwrap_or(-1);
         let mut animal = SpaceAnimal::new(group, 9.0, Vec3::ZERO, id.max(0) as u64, true);
         animal.speed = def["physics"]["MaxSpeed"].as_f64().unwrap_or(12.0) as f32;
@@ -242,7 +242,7 @@ fn think(
             d.drive = dir * speed;
             let face = attacking.filter(|_| d.pass.is_none()).map_or(dir, |t| (t.1 - tf.translation).with_y(0.0).normalize_or(dir));
             if face.length_squared() > 0.5 {
-                d.face = Some((-face.x).atan2(-face.z));
+                d.face = Some(crate::geom::heading_of(face));
             }
         }
         // Breath: in range and roughly facing.

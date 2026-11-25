@@ -88,7 +88,7 @@ pub(super) fn guide_torpedo(
     let h = dt / steps as f32;
     for i in 0..steps {
         let speed = velocity.with_y(0.0).length();
-        let mut heading = (-velocity.x).atan2(-velocity.z);
+        let mut heading = crate::geom::heading_of(*velocity);
         let mut rudder = 0.0;
         if age + i as f32 * h >= 0.5
             && let Some((point, target_velocity)) = target
@@ -96,7 +96,7 @@ pub(super) fn guide_torpedo(
             let distance = point.distance(position);
             let aim = point + if distance < 100.0 { target_velocity * (distance / speed.max(0.01)) } else { Vec3::ZERO };
             let delta = aim - position;
-            let want = (-delta.x).atan2(-delta.z);
+            let want = crate::geom::heading_of(delta);
             rudder = (crate::angdiff(want, heading) / 20.0f32.to_radians()).clamp(-1.0, 1.0);
             // Once per tick, a homing torpedo steps its height 0.025 toward the target's when the two
             // differ by more than 0.05, bounded to +/-3 units.

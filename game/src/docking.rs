@@ -475,7 +475,7 @@ pub(crate) fn repair(lib: &Library, ship: &Ship, h: &mut Health, full: bool) {
 /// Bevy heading (as `Ship::heading`) that points the bow from `from` to `to`.
 fn bearing(from: Vec3, to: Vec3) -> f32 {
     let d = to - from;
-    (-d.x).atan2(-d.z)
+    crate::geom::heading_of(d)
 }
 fn flat(a: Vec3, b: Vec3) -> f32 {
     (a - b).with_y(0.0).length()

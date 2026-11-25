@@ -111,7 +111,7 @@ pub(super) fn has_harpoon(lib: &Library, ship: &Ship, health: &Health, guns: Opt
 pub(super) fn harpoon_bears(lib: &Library, ship: &Ship, health: &Health, guns: Option<&crate::combat::GunStates>, tf: &Transform, at: Vec3) -> bool {
     harpoons(lib, ship, health, guns).any(|(m, gun)| {
         let local = (tf.rotation * m.rot).inverse() * (at - tf.transform_point(m.pos));
-        (-local.x).atan2(-local.z).abs() <= m.arc / 2.0 && tf.translation.distance(at) <= lib.guns[gun].range[1]
+        crate::geom::arc_covers(local, m.arc) && tf.translation.distance(at) <= lib.guns[gun].range[1]
     })
 }
 

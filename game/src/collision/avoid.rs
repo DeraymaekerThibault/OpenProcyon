@@ -104,7 +104,7 @@ impl Avoid {
         let reach = t * v;
         let cands: Vec<&Other> =
             others.iter().filter(|o| o.key != me_key && !(me.lifeboat && o.lifeboat) && (o.centre - me.pos).with_y(0.0).length() - me.radius - o.radius < reach).collect();
-        let dest_heading = (-to_dest.x).atan2(-to_dest.z);
+        let dest_heading = crate::geom::heading_of(to_dest);
         if self.detour.is_some() && sweep(me, dest_heading, if shortened { t } else { RELEASE * t }, &cands).is_none() {
             self.detour = None;
         }

@@ -563,7 +563,7 @@ pub fn spawn(commands: &mut Commands, assets: &AssetServer, lib: &Library, fxl: 
         // Jim spawns at his placed position and drives the retail 'Jim Arriving @ Start of Mission' path (rule 1).
         let pos = game_to_bevy(&s["pos"]);
         let forward = crate::scenario::game_rotation(&s["rot"]) * Vec3::NEG_Z;
-        let heading = (-forward.x).atan2(-forward.z);
+        let heading = crate::geom::heading_of(forward);
         let owner: crate::names::Owner = s["group"].as_str().unwrap_or("").into();
         let e = crate::spawn_ship(commands, assets, lib, fxl, s["type"].as_str().unwrap(), Side::Player, pos, heading, None);
         commands.entity(e).insert(crate::ship::FleetMember(owner.clone(), slot));

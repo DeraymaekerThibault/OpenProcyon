@@ -1069,7 +1069,7 @@ fn drive(
                 let to = goal - h.pos;
                 let step = speed * dt;
                 if !h.climbing && to.xz().length() > 0.05 {
-                    h.face = Quat::from_rotation_y((-to.x).atan2(-to.z));
+                    h.face = Quat::from_rotation_y(crate::geom::heading_of(to));
                 }
                 if to.length() <= step {
                     h.pos = goal;
@@ -1229,7 +1229,7 @@ fn drive(
                 for (who, other) in [(e, p), (o, at)] {
                     if let Ok((mut h, _, _)) = hands.get_mut(who) {
                         let d = other - h.pos;
-                        h.face = Quat::from_rotation_y((-d.x).atan2(-d.z));
+                        h.face = Quat::from_rotation_y(crate::geom::heading_of(d));
                         h.chat = secs;
                         h.wait = h.wait.max(secs);
                     }

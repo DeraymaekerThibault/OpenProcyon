@@ -444,7 +444,7 @@ impl SpaceAnimal {
         }
         self.velocity = (tf.translation - before) / dt.max(0.0001);
         if self.velocity.length_squared() > 0.001 {
-            let heading = (-self.velocity.x).atan2(-self.velocity.z);
+            let heading = crate::geom::heading_of(self.velocity);
             tf.rotation = tf.rotation.slerp(Quat::from_rotation_y(heading), 1.0 - (-2.0 * dt).exp());
         }
     }
@@ -523,7 +523,7 @@ pub fn spawn(commands: &mut Commands, assets: &AssetServer, data: &Value, whales
         let centre = group.iter().copied().sum::<Vec3>() / group.len() as f32;
         let id = a["id"].as_u64().unwrap_or(0);
         let forward = crate::scenario::game_rotation(&a["rot"]) * Vec3::NEG_Z;
-        let heading = (-forward.x).atan2(-forward.z);
+        let heading = crate::geom::heading_of(forward);
         let min = game_to_bevy(&whale["min"]);
         let max = game_to_bevy(&whale["max"]);
         commands.spawn((

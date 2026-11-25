@@ -285,7 +285,7 @@ pub(super) fn panic_target(contacts: &[Contact], tf: &Transform, mount: &crate::
     let in_arc = contacts.iter().filter(|c| c.side != Side::Player && c.visible).filter(|c| {
         let offset = c.aim_point - origin;
         let local = to_mount * offset;
-        Vec2::new(offset.x, offset.z).length() <= gun.range[2] && (-local.x).atan2(-local.z).abs() <= mount.arc / 2.0
+        Vec2::new(offset.x, offset.z).length() <= gun.range[2] && crate::geom::arc_covers(local, mount.arc)
     });
     crate::nearest(in_arc, origin, |c| c.aim_point).map(Contact::aim)
 }
@@ -1030,7 +1030,7 @@ fn aim_turret(
             None => aim(to_target, gun.muzzle, gun.shell_gravity()),
         };
         let local = mount_rot.inverse() * dir;
-        let yaw = (-local.x).atan2(-local.z);
+        let yaw = crate::geom::heading_of(local);
         want_yaw = yaw.clamp(-half_arc, half_arc);
         let in_range = Vec2::new(to_target.x, to_target.z).length() <= gun.range[2];
         want_pitch = None; // hold elevation until the base is on target
