@@ -1425,6 +1425,22 @@ mod tests {
     }
 
     #[test]
+    fn a_player_listed_only_in_mission_json_is_defined_and_accepted() {
+        let m = json!({"players": ["Hero", "Raiders"], "ships": [], "rules": []});
+        let map = json!({"players": [{"name": "Rival"}], "teams": []});
+        let d = defined_names(&m, &map, &Value::Null);
+        assert!(d["player"].contains(&"Raiders".to_string()), "{:?}", d["player"]);
+        let a = accepted_names(&m, &map, &Value::Null);
+        for kind in ["player", "group"] {
+            assert!(a[kind].contains(&"Raiders".to_string()) && a[kind].contains(&"Hero".to_string()), "{kind}: {:?}", a[kind]);
+        }
+        let ok = json!({"players": ["Hero", "Raiders"], "ships": [], "rules": [{"name": "R", "Run Once": true, "conditions": [{"Type": "World Initialize"}],
+            "actions": [{"Type": "Set Fleet Hold Fire", "PLAYER FLEET": "Raiders", "HOLD FIRE": "TRUE"}]}]});
+        let found: Vec<String> = check(&ok, &map, &Value::Null).iter().map(ToString::to_string).collect();
+        assert!(!found.iter().any(|f| f.contains("Raiders")), "{found:?}");
+    }
+
+    #[test]
     fn a_repeated_rule_name_is_a_warning() {
         let t = text(json!([rule(json!([]), json!([{"Type": "OP Wait", "Seconds": 1}])), rule(json!([]), json!([{"Type": "OP Wait", "Seconds": 1}]))]));
         assert_eq!(t.matches("another rule has the same name").count(), 1, "{t}");
