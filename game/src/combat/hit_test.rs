@@ -15,6 +15,10 @@ pub fn seg_sphere(a: Vec3, b: Vec3, c: Vec3, r: f32) -> Option<f32> {
     let t = (-qb - disc.sqrt()) / (2.0 * qa);
     (0.0..=1.0).contains(&t).then_some(t)
 }
+/// Distance along a pick `ray` (3000 units long) to the sphere of radius `r` around `c`; the click-targeting reach.
+pub fn ray_sphere(ray: Ray3d, c: Vec3, r: f32) -> Option<f32> {
+    seg_sphere(ray.origin, ray.origin + *ray.direction * 3000.0, c, r).map(|t| t * 3000.0)
+}
 /// Nearest ray hit against a class's triangles in the ship's local frame; used for click-targeting.
 pub fn ray_hit(c: &Class, tf: &Transform, ray: Ray3d) -> Option<f32> {
     let inv = tf.to_matrix().inverse();

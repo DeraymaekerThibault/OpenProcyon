@@ -17,7 +17,7 @@ use std::f32::consts::PI;
 
 use crate::audio::Sfx;
 use crate::campaign::{Mission, MissionBase};
-use crate::combat::{Health, Library, ray_hit, seg_sphere};
+use crate::combat::{Health, Library, ray_hit, ray_sphere};
 use crate::fx::FxLib;
 use crate::{PlayerShip, Ship, Side, assets_dir, game_to_bevy};
 
@@ -978,7 +978,7 @@ impl Dockees<'_, '_> {
                     (None, Ok(hull)) => hull.ray_hit(ray)?,
                     (None, Err(_)) => {
                         let r = d.points.iter().map(|p| p.pos.length()).fold(0.0, f32::max) + 8.0;
-                        seg_sphere(ray.origin, ray.origin + *ray.direction * 3000.0, tf.translation, r)? * 3000.0
+                        ray_sphere(ray, tf.translation, r)?
                     }
                 };
                 Some((e, t, self.can_dock(actor, e)))
