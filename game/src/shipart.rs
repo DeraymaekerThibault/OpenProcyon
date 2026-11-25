@@ -370,13 +370,48 @@ pub fn png(w: usize, h: usize, rgba: &[u8]) -> Vec<u8> {
     out
 }
 
+/// One generated sprite: its pixels, and the reference box and trim its `<skin>.json` sidecar states.
+pub struct Sprite {
+    pub size: [f64; 2],
+    pub trim: [f64; 4],
+    pub w: usize,
+    pub h: usize,
+    pub rgba: Vec<u8>,
+}
+impl Sprite {
+    /// The picture as the PNG file `NoCursor.png` holds.
+    pub fn png(&self) -> Vec<u8> {
+        png(self.w, self.h, &self.rgba)
+    }
+}
+
+/// The command-bar icon sprite of a model's layers.
+pub fn icon_sprite(layers: &[Layer]) -> Option<Sprite> {
+    side_icon(layers).map(|rgba| Sprite { size: ICON_BOX, trim: ICON_TRIM, w: ICON_ART[0], h: ICON_ART[1], rgba })
+}
+
+/// The weapon-panel outline sprite of a model's layers, cropped to what is drawn.
+pub fn panel_sprite(layers: &[Layer]) -> Option<Sprite> {
+    let rgba = outline(layers)?;
+    let (w, h) = (OUTLINE_BOX[0] as usize, OUTLINE_BOX[1] as usize);
+    let [l, t, r, b] = alpha_box(&rgba, w)?;
+    let crop: Vec<u8> = (t..b).flat_map(|y| rgba[(y * w + l) * 4..(y * w + r) * 4].iter().copied()).collect();
+    Some(Sprite { size: OUTLINE_BOX, trim: [l as f64, t as f64, (w - r) as f64, (h - b) as f64], w: r - l, h: b - t, rgba: crop })
+}
+
+/// The model of ship `id` (`ship` is its merged `ship.json`; its `model` key names another ship's model): the layers the art is made from.
+pub fn model_facts(root: &Path, ship: &serde_json::Value, id: &str) -> Option<crate::data::derive::Facts> {
+    let model = ship["model"].as_str().unwrap_or(id);
+    std::fs::read(root.join(format!("ships/{model}/model.glb"))).ok().and_then(|b| crate::data::derive::read(&b))
+}
+
 /// Writes one sprite (`hud/sprites/<name>/<skin>.json` and `<skin>/NoCursor.png`, the same art for every skin as in retail).
-fn write_sprite(root: &Path, name: &str, size: [f64; 2], trim: [f64; 4], w: usize, h: usize, rgba: &[u8]) {
+fn write_sprite(root: &Path, name: &str, sprite: &Sprite) {
     let dir = root.join("hud/sprites").join(name);
-    let sidecar = serde_json::json!({"states": {"NoCursor": {"size": size, "trim": trim}}});
+    let sidecar = serde_json::json!({"states": {"NoCursor": {"size": sprite.size, "trim": sprite.trim}}});
     for skin in ["Navy", "Pirate", "Procyon"] {
         let _ = std::fs::create_dir_all(dir.join(skin));
-        let _ = std::fs::write(dir.join(skin).join("NoCursor.png"), png(w, h, rgba));
+        let _ = std::fs::write(dir.join(skin).join("NoCursor.png"), sprite.png());
         let _ = std::fs::write(dir.join(format!("{skin}.json")), sidecar.to_string());
     }
 }
@@ -397,21 +432,16 @@ pub fn generate(root: &Path, ids: &[String]) {
         if sprites.join(&icon).is_dir() && sprites.join(&panel).is_dir() {
             continue;
         }
-        let model = ship["model"].as_str().unwrap_or(id);
-        let Some(facts) = std::fs::read(root.join(format!("ships/{model}/model.glb"))).ok().and_then(|b| crate::data::derive::read(&b)) else { continue };
+        let Some(facts) = model_facts(root, &ship, id) else { continue };
         if !sprites.join(&icon).is_dir()
-            && let Some(rgba) = side_icon(&facts.layers)
+            && let Some(sprite) = icon_sprite(&facts.layers)
         {
-            write_sprite(root, &icon, ICON_BOX, ICON_TRIM, ICON_ART[0], ICON_ART[1], &rgba);
+            write_sprite(root, &icon, &sprite);
         }
         if !sprites.join(&panel).is_dir()
-            && let Some(rgba) = outline(&facts.layers)
+            && let Some(sprite) = panel_sprite(&facts.layers)
         {
-            let (w, h) = (OUTLINE_BOX[0] as usize, OUTLINE_BOX[1] as usize);
-            if let Some([l, t, r, b]) = alpha_box(&rgba, w) {
-                let crop: Vec<u8> = (t..b).flat_map(|y| rgba[(y * w + l) * 4..(y * w + r) * 4].iter().copied()).collect();
-                write_sprite(root, &panel, OUTLINE_BOX, [l as f64, t as f64, (w - r) as f64, (h - b) as f64], r - l, b - t, &crop);
-            }
+            write_sprite(root, &panel, &sprite);
         }
     }
 }
@@ -507,6 +537,19 @@ mod tests {
         let side: Value = crate::data::try_json(&root.join("hud/sprites/ShipBar_ShipIcon_Mod_Ship/Navy.json")).unwrap();
         assert_eq!(side["states"]["NoCursor"]["size"], serde_json::json!([48.0, 38.0]));
         std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn the_sprites_are_the_pictures_of_the_earlier_generate_path() {
+        let layers = crate::data::derive::read(&crate::data::derive::tests::model()).unwrap().layers;
+        // What `generate` wrote before the sprites were factored out: the picture at its own size, and the outline cropped to its alpha box.
+        assert_eq!(icon_sprite(&layers).unwrap().png(), png(40, 35, &side_icon(&layers).unwrap()));
+        let full = outline(&layers).unwrap();
+        let [l, t, r, b] = alpha_box(&full, 126).unwrap();
+        let crop: Vec<u8> = (t..b).flat_map(|y| full[(y * 126 + l) * 4..(y * 126 + r) * 4].iter().copied()).collect();
+        let panel = panel_sprite(&layers).unwrap();
+        assert_eq!(panel.png(), png(r - l, b - t, &crop));
+        assert_eq!(panel.trim, [l as f64, t as f64, (126 - r) as f64, (230 - b) as f64]);
     }
 
     #[test]

@@ -3,8 +3,8 @@
 A custom mission is a map folder in a mod: `maps/<id>/` with `map.json`, `mission.json` and `media.json` (and `speech/*.ogg`). The
 game plays it with the same rule interpreter as the retail campaign. This page is the guide for writing one; `docs/modding.md` covers
 mods in general (installing, sharing, ships, art) and "Mission rule extensions" there lists the engine-added `OP ` Types;
-`docs/rule-types.md` is the reference of every condition and action. A mission is data you write yourself: do not copy or edit a
-retail mission, which is game content.
+`docs/rule-types.md` is the reference of every condition and action. A mission is data you write yourself: do not copy a retail
+mission, which is game content. A diff over one (`extends` plus the changed keys) is fine, as over a retail ship or a skirmish map.
 
 The worked example, `docs/examples/gate-ambush.mission.json`, is a complete `mission.json` (ours; a unit test keeps it valid). With the
 `map.json` and `media.json` of section 1 it is a playable mission. Section 6 walks through it.

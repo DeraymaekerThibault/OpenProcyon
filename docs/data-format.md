@@ -198,6 +198,22 @@ Gun entries in `data/weapons/guns.json` are retail apart from one engine key, `b
 | `is_lifeboat` | retail | bool | no | `false` |
 | `sphere` | retail | `{center, radius}` | no | from the model |
 
+## Where a missing key comes from
+
+The published ship schema (`authoring::schemas`, `--dump-schemas`) marks each key the engine fills in when `ship.json` leaves it out with
+`"x-default-from"`, on the key and, where the engine fills a part of an entry, on that part (`guns` `pos`, `rot`, `bank`, `parent_layer`;
+`engines` `pos`, `rot`, `fx`, `parent_layer`; `physics` `MinExtents`, ...). One table in `game/src/data/ships.rs` (`SHIP_FILLS`) says
+which, and a test keeps the schema equal to it. Every property of the ship, guns and bullets schemas also has `"x-origin"`, the *Source*
+column above: `retail` or `engine`. The entry of the guns and bullets schemas carries `"x-required-new"`, a list of the fields a new entry must set (dotted: `visual.pivot`); it is an annotation, not JSON Schema `required`, because the entries of a mod are merged key by key and a change to a retail entry needs none.
+
+| `x-default-from` | Meaning | Keys |
+|---|---|---|
+| `model` | derived from the ship's `model.glb` (layers, hardpoint nodes, geometry) | `core_hp`, `sections`, `engines`, `wakes`, `flags`, `sphere`, `physics` extents and centre of mass, a gun's or engine's `pos`, `rot`, `parent_layer` |
+| `race_and_size` | a choice by the hull's race and size | `crew_posts`, `explosion_fx`, `repair_fx`, `engine_snd`, an engine's `fx` |
+| `navy_cutter` | the PROVISIONAL Navy Cutter numbers | `physics` (`Mass`, `MaxThrust`, `MaxSpeed`, `RotationalFriction`, `MaxAngularAcceleration`) |
+| `hull` | the model's node, else the hull's ends or vital centre | `tow`, `homing` |
+| `weapon_panel` | the weapon-panel slot nearest the gun on the generated outline | a gun's `bank` |
+
 ## Silently ignored
 
 The loader never rejects a key it does not know, and nothing is logged for it, so a typo is indistinguishable from a feature that does

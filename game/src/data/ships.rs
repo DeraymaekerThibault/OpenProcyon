@@ -116,6 +116,75 @@ pub(super) struct ShipDoc {
     homing: Option<[f64; 3]>,
 }
 
+/// Where a value comes from when `ship.json` leaves its key out: the vocabulary of `x-default-from` in the published ship schema
+/// (`authoring::schemas`, docs/data-format.md "Where a missing key comes from").
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Fill {
+    /// Derived from the ship's model (`derive::complete`): its layers, hardpoint nodes and geometry.
+    Model,
+    /// A choice by the ship's race and size (engine effects, sounds, crew posts, explosion and repair effects).
+    RaceAndSize,
+    /// The PROVISIONAL Navy Cutter numbers of `ShipPhysics`.
+    NavyCutter,
+    /// The model's node when it has one, else the hull's ends or its vital centre (`tow`, `homing`).
+    Hull,
+    /// The weapon-panel slot nearest the gun on the generated outline (`shipart.rs`).
+    WeaponPanel,
+}
+impl Fill {
+    /// The name in the schema.
+    pub fn name(self) -> &'static str {
+        match self {
+            Fill::Model => "model",
+            Fill::RaceAndSize => "race_and_size",
+            Fill::NavyCutter => "navy_cutter",
+            Fill::Hull => "hull",
+            Fill::WeaponPanel => "weapon_panel",
+        }
+    }
+}
+/// The one table of what the engine fills in when a `ship.json` key is left out, by key (a dotted path reaches into an object or the
+/// entries of `guns` / `engines`); the same words as the "default" column of docs/data-format.md. A key not listed has a fixed default
+/// (`sight`, `ring`, ...) or none. The schema annotations and `authoring::resolved_ship` read it; the filling itself is in
+/// `derive::complete` and `try_load_class`.
+pub const SHIP_FILLS: &[(&str, Fill)] = &[
+    ("core_hp", Fill::Model),
+    ("physics", Fill::NavyCutter),
+    ("physics.Mass", Fill::NavyCutter),
+    ("physics.MaxThrust", Fill::NavyCutter),
+    ("physics.MaxSpeed", Fill::NavyCutter),
+    ("physics.RotationalFriction", Fill::NavyCutter),
+    ("physics.MaxAngularAcceleration", Fill::NavyCutter),
+    ("physics.MinExtents", Fill::Model),
+    ("physics.MaxExtents", Fill::Model),
+    ("physics.CenterOfMass", Fill::Model),
+    ("sections", Fill::Model),
+    ("guns.pos", Fill::Model),
+    ("guns.rot", Fill::Model),
+    ("guns.parent_layer", Fill::Model),
+    ("guns.bank", Fill::WeaponPanel),
+    ("engines", Fill::Model),
+    ("engines.pos", Fill::Model),
+    ("engines.rot", Fill::Model),
+    ("engines.parent_layer", Fill::Model),
+    ("engines.fx", Fill::RaceAndSize),
+    ("wakes", Fill::Model),
+    ("flags", Fill::Model),
+    ("sphere", Fill::Model),
+    ("crew_posts", Fill::RaceAndSize),
+    ("explosion_fx", Fill::RaceAndSize),
+    ("repair_fx", Fill::RaceAndSize),
+    ("engine_snd", Fill::RaceAndSize),
+    ("tow", Fill::Hull),
+    ("homing", Fill::Hull),
+];
+/// What fills `key` (a path of [`SHIP_FILLS`]) when `ship.json` leaves it out.
+pub fn fill_of(key: &str) -> Option<Fill> {
+    SHIP_FILLS.iter().find(|(k, _)| *k == key).map(|(_, f)| *f)
+}
+/// The crew posts of `ship.json`'s `crew_posts`, in the order of `Class::crew` (the boarding order).
+pub const CREW_POSTS: [&str; 8] = ["Gunners", "Captains", "First Mates", "Navigators", "Engineers", "Riggers", "Fighters", "Lookouts"];
+
 /// The schema of `ship.json`.
 pub(super) fn schema() -> Value {
     serde_json::to_value(schemars::SchemaGenerator::default().into_root_schema_for::<ShipDoc>()).expect("schema is JSON")
@@ -290,7 +359,7 @@ pub(super) fn point(v: [f64; 3]) -> Vec3 {
 }
 
 /// A `rot` triple of a gun (or a crew node) as the node's rotation; preserves the rolled frame of inverted mounts.
-pub(super) fn mount_rotation(rot: [f64; 3]) -> Quat {
+pub(crate) fn mount_rotation(rot: [f64; 3]) -> Quat {
     let r = rot.map(|v| v as f32);
     Quat::from_rotation_z(-r[1]) * Quat::from_rotation_y(r[0]) * Quat::from_rotation_x(r[2])
 }
@@ -446,8 +515,7 @@ pub fn try_load_class(root: &Path, name: &str, guns: &HashMap<String, GunDef>) -
         cloak_points,
         points: j.points as u32,
         crew_posts: j.crew_posts.as_ref().map_or(0, |v| v.values().sum::<u64>() as u32),
-        crew: ["Gunners", "Captains", "First Mates", "Navigators", "Engineers", "Riggers", "Fighters", "Lookouts"]
-            .map(|k| j.crew_posts.as_ref().and_then(|v| v.get(k)).map_or(0, |n| *n as u32)),
+        crew: CREW_POSTS.map(|k| j.crew_posts.as_ref().and_then(|v| v.get(k)).map_or(0, |n| *n as u32)),
         crew_nodes,
         boarding_points: facts.iter().flat_map(|f| f.points.iter()).filter(|p| p.kind == "BoardingEffectPoint").map(|p| point(p.pos)).collect(),
         display_name: j.display_name,

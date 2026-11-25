@@ -10,9 +10,10 @@ pub mod crew_nodes;
 mod ships;
 mod weapons;
 pub use crew::{CrewMember, roster};
-pub use ships::{derive, load_class, try_load_class};
+pub(crate) use ships::mount_rotation;
+pub use ships::{CREW_POSTS, Fill, SHIP_FILLS, derive, fill_of, load_class, try_load_class};
 pub(crate) use weapons::lenient;
-pub use weapons::try_load_weapons;
+pub use weapons::{bullet_from_value, gun_from_value, try_load_weapons};
 
 /// The JSON schemas of the files a modder writes, by file name (`ship.schema.json`, ...): `ship.json`, `guns.json`, `bullets.json`,
 /// `data/crew_nodes.json`. `authoring::schemas` adds `mod.json`.

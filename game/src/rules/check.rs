@@ -29,6 +29,9 @@ pub struct Finding {
     pub file: String,
     /// Where in a non-rule file, as a JSON path (`guns.Gun_A.arc_deg`, `sections.Hull.layer`); empty for a rule finding.
     pub path: String,
+    /// The same place as a JSON pointer (RFC 6901: `/guns/Gun_A/arc_deg`, `/engines/0/fx`), which a tool can follow without the
+    /// ambiguity of the dotted `path` (a key may itself hold `.` or `[`, or be made of digits); empty for a rule finding.
+    pub pointer: String,
     /// The rule's name as the printed line shows it: its trimmed name, `#N` for an unnamed rule, `task 'X'`, `(mission)`. Empty for a finding that is not about a mission.
     pub rule: String,
     /// Position of the rule in `rules` (0-based); `None` outside a rule.
@@ -59,6 +62,7 @@ impl Finding {
             level,
             file: String::new(),
             path: String::new(),
+            pointer: String::new(),
             rule: rule.into(),
             rule_index: None,
             rule_name: None,
@@ -71,14 +75,78 @@ impl Finding {
             suggestion: None,
         }
     }
-    /// A finding about a place in a file that is not a mission (a ship, a gun, `mod.json`).
-    pub fn in_file(level: Level, file: impl Into<String>, path: impl Into<String>, message: impl Into<String>) -> Finding {
-        Finding { file: file.into(), path: path.into(), ..Finding::new(level, "", "", "", message) }
+    /// A finding about a place in a file that is not a mission (a ship, a gun, `mod.json`); `path` fills both `path` and `pointer`.
+    pub fn in_file(level: Level, file: impl Into<String>, path: impl Into<JsonPath>, message: impl Into<String>) -> Finding {
+        let path = path.into();
+        Finding { file: file.into(), path: path.dotted(), pointer: path.pointer(), ..Finding::new(level, "", "", "", message) }
+    }
+    /// Sets `path` and `pointer` to `path`.
+    pub fn set_path(&mut self, path: impl Into<JsonPath>) {
+        let path = path.into();
+        (self.path, self.pointer) = (path.dotted(), path.pointer());
     }
     /// The same finding in `file`.
     pub fn with_file(mut self, file: &str) -> Finding {
         self.file = file.into();
         self
+    }
+}
+
+/// A place inside a JSON file as its keys and list positions, built where the place is known so that it is never parsed back from
+/// text: [`JsonPath::dotted`] is the form the printed line shows (`guns.Gun_A.arc_deg`, `engines[0].fx`), [`JsonPath::pointer`] the
+/// JSON pointer a tool follows (`/guns/Gun_A/arc_deg`, `/engines/0/fx`; `~` and `/` in a key escaped as `~0` and `~1`).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct JsonPath(pub Vec<Segment>);
+
+/// One step of a [`JsonPath`].
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Segment {
+    Key(String),
+    Index(usize),
+}
+
+impl JsonPath {
+    /// The path one key further down.
+    pub fn key(mut self, key: impl Into<String>) -> JsonPath {
+        self.0.push(Segment::Key(key.into()));
+        self
+    }
+    /// The path one list position further down.
+    pub fn index(mut self, index: usize) -> JsonPath {
+        self.0.push(Segment::Index(index));
+        self
+    }
+    /// `guns.Gun_A.arc_deg`, `engines[0].fx`; empty for the whole file.
+    pub fn dotted(&self) -> String {
+        let mut out = String::new();
+        for s in &self.0 {
+            match s {
+                Segment::Key(k) if out.is_empty() => out.push_str(k),
+                Segment::Key(k) => {
+                    out.push('.');
+                    out.push_str(k);
+                }
+                Segment::Index(i) => out.push_str(&format!("[{i}]")),
+            }
+        }
+        out
+    }
+    /// `/guns/Gun_A/arc_deg`, `/engines/0/fx`; empty for the whole file.
+    pub fn pointer(&self) -> String {
+        self.0
+            .iter()
+            .map(|s| match s {
+                Segment::Key(k) => format!("/{}", k.replace('~', "~0").replace('/', "~1")),
+                Segment::Index(i) => format!("/{i}"),
+            })
+            .collect()
+    }
+}
+
+/// A single top-level key (`"format"`), or the whole file for `""`.
+impl From<&str> for JsonPath {
+    fn from(key: &str) -> JsonPath {
+        if key.is_empty() { JsonPath::default() } else { JsonPath::default().key(key) }
     }
 }
 
@@ -734,7 +802,7 @@ pub fn unused_definitions(mission: &Value) -> Vec<Finding> {
         for name in names {
             if !used.contains(&(kind, name.clone())) && !elsewhere.contains(name) && !name.is_empty() {
                 let mut f = Finding::new(Level::Warning, "(mission)", format!("{noun} '{name}'"), key, format!("{noun} '{name}' is defined but no rule uses it"));
-                f.path = format!("{key}.{name}");
+                f.set_path(JsonPath::from(key).key(name.as_str()));
                 out.push(f);
             }
         }
@@ -759,12 +827,12 @@ pub fn outside_world(mission: &Value, map: &Value) -> Vec<Finding> {
     let mut out = vec![];
     for (i, s) in mission["ships"].as_array().into_iter().flatten().enumerate().filter(|(_, s)| outside(&s["pos"])) {
         let who = s["name"].as_str().or_else(|| s["type"].as_str()).unwrap_or("ship");
-        out.push(Finding::in_file(Level::Warning, "", format!("ships[{i}].pos"), format!("{who} is at {} , outside world_half {half}", s["pos"])));
+        out.push(Finding::in_file(Level::Warning, "", JsonPath::from("ships").index(i).key("pos"), format!("{who} is at {} , outside world_half {half}", s["pos"])));
     }
     for key in ["objects", "mines"] {
         for (i, o) in map[key].as_array().into_iter().flatten().enumerate().filter(|(_, o)| outside(&o["pos"])) {
             let who = o["type"].as_str().unwrap_or(key);
-            out.push(Finding::in_file(Level::Warning, "map.json", format!("{key}[{i}].pos"), format!("{who} is at {} , outside world_half {half}", o["pos"])));
+            out.push(Finding::in_file(Level::Warning, "map.json", JsonPath::from(key).index(i).key("pos"), format!("{who} is at {} , outside world_half {half}", o["pos"])));
         }
     }
     out
@@ -780,7 +848,7 @@ pub fn missing_scenery(map: &Value, models: &HashSet<String>) -> Vec<Finding> {
         let mut f = Finding::in_file(
             Level::Warning,
             "map.json",
-            format!("objects[{i}].scene"),
+            JsonPath::from("objects").index(i).key("scene"),
             format!("the scenery model '{scene}.glb' is not under models/ of the game or the mods{}", did_you_mean(best)),
         );
         f.suggestion = best.map(String::from);
@@ -1172,5 +1240,14 @@ mod tests {
         let doc = include_str!("../../../docs/rule-types.md");
         let missing: Vec<&str> = RULE_TYPES.iter().map(|t| t.name).filter(|n| !doc.contains(&format!("`{n}`"))).collect();
         assert!(missing.is_empty(), "docs/rule-types.md does not document {missing:?}: run tools/gen_rule_types.py (see its docstring)");
+    }
+
+    #[test]
+    fn a_json_path_prints_dotted_and_as_a_pointer() {
+        let p = JsonPath::from("guns").key("A/b~c").key("pos").index(2);
+        assert_eq!((p.dotted(), p.pointer()), ("guns.A/b~c.pos[2]".to_string(), "/guns/A~1b~0c/pos/2".to_string()));
+        assert_eq!((JsonPath::from("").dotted(), JsonPath::from("").pointer()), (String::new(), String::new()));
+        let f = Finding::in_file(Level::Warning, "x.json", JsonPath::default().key("Gun").index(0), "m");
+        assert_eq!((f.path.as_str(), f.pointer.as_str()), ("Gun[0]", "/Gun/0"));
     }
 }

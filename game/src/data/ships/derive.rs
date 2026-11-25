@@ -14,6 +14,10 @@ pub struct Layer {
     pub aabb: [[f64; 3]; 2],
     pub tris: Vec<f64>,
 }
+/// The `kind` of a [`Point`] that is a crew node of the model (`Crew_<Kind>_...`): where deck crews walk, man guns, stand, work and
+/// climb. Only a render profile's `deckhands` block uses them; tools read them here to show them.
+pub const CREW_NODE: &str = "CrewNode";
+
 /// A hardpoint in game axes; `yaw` is the heading about the up axis, 0 forward and positive to port (the retail `rot_raw[0]`).
 pub struct Point {
     pub kind: String,
@@ -84,10 +88,15 @@ fn walk(doc: &Value, bin: &[u8], i: usize, parent: Mat4, out: &mut Facts, depth:
     }
 }
 
-/// What a non-mesh node is: its `extras.kind`, else a guess from its name. Nodes that are neither stay unused.
+/// What a non-mesh node is: its `extras.kind`, else `CrewNode` for a crew node name (`Crew_Walk_P_0`, see `crew_nodes::crew_kind`),
+/// else a guess from its name. Nodes that are none of these stay unused.
 pub fn point_kind(n: &Value, name: &str) -> Option<String> {
     if let Some(k) = n["extras"]["kind"].as_str() {
         return Some(k.to_string());
+    }
+    // Before the name guesses: `Crew_Work_Engine` is a crew place, not an engine port.
+    if crate::data::crew_nodes::crew_kind(name).is_some() {
+        return Some(CREW_NODE.into());
     }
     let l = name.to_lowercase();
     let kind = if l.contains("mount") || l.contains("lancer") || l.contains("turret") {
