@@ -10,15 +10,14 @@ fn rule_keys_latch_until_a_tick_and_opening_skip_is_not_queued_twice() {
     let skip = binds.key(crate::bindings::Act::SkipSpeech);
     app.insert_resource(mission).insert_resource(binds).init_resource::<ButtonInput<KeyCode>>().init_resource::<RuleInput>().add_systems(Update, capture_input);
     app.world_mut().resource_mut::<ButtonInput<KeyCode>>().press(skip);
-    app.world_mut().resource_mut::<ButtonInput<KeyCode>>().press(KeyCode::KeyD);
     app.update();
     app.world_mut().resource_mut::<ButtonInput<KeyCode>>().clear();
     app.update();
     let pending = std::mem::take(&mut *app.world_mut().resource_mut::<RuleInput>());
-    assert!(pending.skip_speech && pending.dock, "commands survive frames without a simulation tick");
+    assert!(pending.skip_speech, "commands survive frames without a simulation tick");
     app.update();
     let pending = app.world().resource::<RuleInput>();
-    assert!(!pending.skip_speech && !pending.dock, "consumed commands are not repeated");
+    assert!(!pending.skip_speech, "consumed commands are not repeated");
     app.world_mut().resource_mut::<Mission>().opening = Some(default());
     app.world_mut().resource_mut::<ButtonInput<KeyCode>>().reset(skip);
     app.world_mut().resource_mut::<ButtonInput<KeyCode>>().press(skip);

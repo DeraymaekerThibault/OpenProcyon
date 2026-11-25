@@ -1,9 +1,7 @@
 //! Drawing the live particles: camera-facing quads batched into one dynamic mesh per (texture, blend). The simulation is in
 //! `sim.rs`; this only reads it. The quads are built through the shared `QuadBatch`.
 
-use bevy::asset::RenderAssetUsages;
 use bevy::camera::visibility::NoFrustumCulling;
-use bevy::mesh::PrimitiveTopology;
 use bevy::prelude::*;
 use std::collections::HashMap;
 
@@ -138,7 +136,7 @@ pub(super) fn render_fx(
         let entry = groups.0.entry(key).or_insert_with(|| {
             // Filled before the entity exists and spawned hidden: an empty mesh (no position attribute) must never be drawn, it
             // fails pipeline validation and Bevy quits (seen when a new effect texture first appeared, a ship's death).
-            let mesh = meshes.add(Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::default()));
+            let mesh = meshes.add(crate::fx::placeholder_mesh());
             let shown = batch.upload(&mut meshes, &mesh);
             let mut entity = commands.spawn((Mesh3d(mesh.clone()), Transform::default(), NoFrustumCulling, shown, ParticleGroup { additive: key.1 == Blend::Add }));
             // Every ONE/ONE texture, flares included: several (flare, cannon-ball pseudo) have an all-zero alpha channel, which

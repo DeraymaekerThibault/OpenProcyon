@@ -142,16 +142,16 @@ mod fire_tests {
     fn the_scripted_percent_hit_takes_sections_through_the_hit_routine_and_leaves_the_core() {
         let lib = Library::load(crate::assets_dir());
         let class = &lib.classes[lib.index("Ship_Navy_Cutter")];
-        let lost = |victim: Side, p: f32| {
+        let lost = |human: bool, p: f32| {
             let mut hp = Health::new(class);
-            fraction_hit(class, &mut hp, p, victim, 0.0, crate::scenario::Difficulty::default().0);
+            fraction_hit(class, &mut hp, p, human, 0.0, crate::scenario::Difficulty::default().0);
             (class.sections.iter().map(|s| s.hp).sum::<f32>() - hp.sections.iter().sum::<f32>(), hp.core)
         };
-        let (enemy, core) = lost(Side::Enemy, 0.5);
+        let (enemy, core) = lost(false, 0.5);
         assert_eq!(core, class.core_hp, "half of every section leaves the core whole");
         assert!(enemy > 0.0);
-        assert!(lost(Side::Player, 0.5).0 < enemy, "the human's ship takes the difficulty factor, computer ships do not");
-        assert!(lost(Side::Enemy, 1.0).1 <= 0.0, "every section hit for all its hit points takes the core down through the vital ones");
+        assert!(lost(true, 0.5).0 < enemy, "the human's ship takes the difficulty factor, computer ships do not");
+        assert!(lost(false, 1.0).1 <= 0.0, "every section hit for all its hit points takes the core down through the vital ones");
     }
 
     #[test]

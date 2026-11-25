@@ -555,6 +555,7 @@ fn ships_lean_into_turns_except_at_emergency_speed() {
     };
     assert!(roll(EngineOrder::Full) > 0.05, "Ahead Full leans: {}", roll(EngineOrder::Full));
     assert!(roll(EngineOrder::Emergency) < 1e-4, "Emergency Speed stays level: {}", roll(EngineOrder::Emergency));
+    assert!(roll(EngineOrder::Stop) < 1e-4, "a stopped ship stays level though its rudder is over: {}", roll(EngineOrder::Stop));
 }
 
 /// Border Dispute with every slot filled: allied computer fleets share the human's side but must still go for the enemy base,

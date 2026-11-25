@@ -370,3 +370,22 @@ fn navigation_actions_move_only_the_choice() {
     assert_eq!(c.ship, 2, "a picked ship is clamped to the fleet");
     assert!(!navigate(&mut c, &Action::Sort, 3, 4), "other actions are not navigation");
 }
+
+/// Campaign: Jim and Onyx stand alone at the command ship's captain and first-mate posts whatever was saved; the ship they left goes
+/// back to its default captain and first mate, and the rest of every fit carries over.
+#[test]
+fn the_command_ship_is_always_captained_by_jim_with_onyx_as_first_mate() {
+    let mut saved = Outfit { hired: vec!["Crew_Navy_BenH".into()], ..default() };
+    saved.ships.entry("old".into()).or_default().crew[1] = vec!["Crew_Navy_JimHawkins".into()];
+    saved.ships.entry("old".into()).or_default().crew[2] = vec!["Crew_Navy_Onyx".into()];
+    saved.ships.entry("old".into()).or_default().crew[0] = vec!["Crew_Navy_BenH".into()];
+    saved.ships.entry("new".into()).or_default().crew[1] = vec!["Crew_Navy_BenH".into()];
+    let pinned = saved.pinned(Some("new"));
+    assert_eq!(pinned.ships["new"].crew[1], ["Crew_Navy_JimHawkins"], "Jim captains, Ben goes to the reserve");
+    assert_eq!(pinned.ships["new"].crew[2], ["Crew_Navy_Onyx"]);
+    assert!(pinned.ships["old"].crew[1].is_empty() && pinned.ships["old"].crew[2].is_empty(), "the old command ship gets its default officers");
+    assert_eq!(pinned.ships["old"].crew[0], ["Crew_Navy_BenH"], "other posts carry over");
+    assert!(pinned.hired.iter().any(|c| c == "Crew_Navy_JimHawkins") && pinned.hired.iter().any(|c| c == "Crew_Navy_Onyx"));
+    assert_eq!(pinned.pinned(Some("new")), pinned, "pinning twice changes nothing");
+    assert!(!saved.pinned(None).ships.values().any(|f| f.crew.iter().flatten().any(|c| is_command_crew(c))), "no command ship: neither serves");
+}

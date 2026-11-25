@@ -79,7 +79,8 @@ fn draw(
                 idx.extend([k - 2, k - 1, k, k - 1, k + 1, k]);
             }
             pos.extend([p - side * half, p + side * half]);
-            uv.extend([[u, 0.0], [u, 1.0]]);
+            // rope.tga's strands run down the picture: its height is along the line, repeated every segment length, its width across.
+            uv.extend([[0.0, u], [1.0, u]]);
         }
     }
     let mut new_mesh = Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::default());
@@ -95,7 +96,7 @@ fn draw(
         let texture = assets
             .load_builder()
             .with_settings(|s: &mut ImageLoaderSettings| {
-                s.sampler = ImageSampler::Descriptor(ImageSamplerDescriptor { address_mode_u: ImageAddressMode::Repeat, ..ImageSamplerDescriptor::linear() });
+                s.sampler = ImageSampler::Descriptor(ImageSamplerDescriptor { address_mode_v: ImageAddressMode::Repeat, ..ImageSamplerDescriptor::linear() });
             })
             .load("fx/tex/rope.png");
         let mat = mats.add(StandardMaterial { base_color_texture: Some(texture), unlit: true, double_sided: true, cull_mode: None, alpha_mode: AlphaMode::Blend, ..default() });
@@ -134,6 +135,29 @@ mod tests {
         world.resource_mut::<Ropes>().0.push((Vec3::ZERO, Vec3::Z, 0.0));
         app.update();
         assert_eq!(*app.world_mut().query_filtered::<&Visibility, With<RopeMesh>>().single(app.world()).unwrap(), Visibility::Inherited);
+    }
+
+    /// rope.tga's strands run down the picture, so its height (V) runs along the line and its width (U) across it.
+    #[test]
+    fn the_rope_texture_runs_along_the_line() {
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, AssetPlugin::default()))
+            .init_asset::<Mesh>()
+            .init_asset::<Image>()
+            .init_asset::<StandardMaterial>()
+            .init_resource::<Ropes>()
+            .add_systems(Update, draw);
+        app.world_mut().spawn((crate::MainCamera, Camera3d::default(), GlobalTransform::from_xyz(0.0, 50.0, 0.0)));
+        app.world_mut().resource_mut::<Ropes>().0.push((Vec3::ZERO, Vec3::X * 10.0, 0.0));
+        app.update();
+        let world = app.world_mut();
+        let handle = world.query_filtered::<&Mesh3d, With<RopeMesh>>().single(world).unwrap().0.clone();
+        let Some(bevy::mesh::VertexAttributeValues::Float32x2(uv)) = world.resource::<Assets<Mesh>>().get(&handle).unwrap().attribute(Mesh::ATTRIBUTE_UV_0).cloned() else {
+            panic!()
+        };
+        assert_eq!((uv[0][0], uv[1][0]), (0.0, 1.0), "across the line: the picture's width");
+        let last = uv[uv.len() - 1][1];
+        assert!((last - 10.0 / shape().1).abs() < 1e-3, "along it: one picture height per segment length, {last}");
     }
 
     #[test]

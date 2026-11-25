@@ -85,12 +85,39 @@ pub fn set_ribbons(
     mesh.insert_indices(bevy::mesh::Indices::U32(idx));
 }
 
+/// A mesh with nothing to draw that Bevy can still build pipelines for: one zero-area triangle. Meshes filled later start as this.
+/// A mesh with no position attribute fails pipeline validation and Bevy quits: the shadow pass specializes even blended meshes, so
+/// it struck once a look added a shadow-casting sun (a ship's death, lifeboats, a mission start). A mesh with no vertices at all
+/// makes Bevy warn. It carries only positions and UVs, which every writer of these meshes replaces (an attribute left behind with
+/// another vertex count would cut the next content down to it).
+pub fn placeholder_mesh() -> Mesh {
+    let (pos, uv, _, idx) = placeholder_ribbon();
+    Mesh::new(bevy::mesh::PrimitiveTopology::TriangleList, bevy::asset::RenderAssetUsages::default())
+        .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, pos)
+        .with_inserted_attribute(Mesh::ATTRIBUTE_UV_0, uv)
+        .with_inserted_indices(bevy::mesh::Indices::U32(idx))
+}
+
+type Ribbon = (Vec<[f32; 3]>, Vec<[f32; 2]>, Vec<[f32; 4]>, Vec<u32>);
+
+/// The vertex data of `placeholder_mesh`, which an empty ribbon is written as.
+fn placeholder_ribbon() -> Ribbon {
+    (vec![[0.0; 3]; 3], vec![[0.0; 2]; 3], vec![[0.0; 4]; 3], vec![0, 1, 2])
+}
+
 /// `set_ribbons` on the mesh `handle` names, except that nothing is written when the mesh already holds exactly this (the asset is
-/// not touched, so Bevy does not re-extract and re-upload it). That covers a mesh that is still empty (rewriting it with nothing
-/// makes Bevy warn "no vertices") and a ribbon whose inputs did not change since the last frame.
+/// not touched, so Bevy does not re-extract and re-upload it), which covers a ribbon whose inputs did not change since the last
+/// frame. An empty ribbon is written as `placeholder_mesh`, so the mesh keeps its attributes.
 pub fn set_ribbons_if_changed(meshes: &mut Assets<Mesh>, handle: &Handle<Mesh>, pos: Vec<[f32; 3]>, uv: Vec<[f32; 2]>, col: Vec<[f32; 4]>, idx: Vec<u32>) {
     use bevy::mesh::VertexAttributeValues as V;
+    let empty = pos.is_empty();
+    let (pos, uv, col, idx) = if empty { placeholder_ribbon() } else { (pos, uv, col, idx) };
     let Some(old) = meshes.get(handle) else { return };
+    let placeholder =
+        matches!(old.attribute(Mesh::ATTRIBUTE_POSITION), Some(V::Float32x3(v)) if *v == pos) && matches!(old.indices(), Some(bevy::mesh::Indices::U32(v)) if *v == idx);
+    if empty && placeholder {
+        return; // still (or again) nothing to draw
+    }
     let same = (matches!(old.attribute(Mesh::ATTRIBUTE_POSITION), Some(V::Float32x3(v)) if *v == pos) || (pos.is_empty() && old.attribute(Mesh::ATTRIBUTE_POSITION).is_none()))
         && (matches!(old.attribute(Mesh::ATTRIBUTE_UV_0), Some(V::Float32x2(v)) if *v == uv) || (uv.is_empty() && old.attribute(Mesh::ATTRIBUTE_UV_0).is_none()))
         && (matches!(old.attribute(Mesh::ATTRIBUTE_COLOR), Some(V::Float32x4(v)) if *v == col) || (col.is_empty() && old.attribute(Mesh::ATTRIBUTE_COLOR).is_none()))
@@ -320,14 +347,31 @@ mod tests {
         assert_eq!(write(&mut app, 0.0), 0, "same content: the asset is not touched");
         assert_eq!(write(&mut app, 0.0), 0);
         assert_eq!(write(&mut app, 2.0), 1, "changed content is written");
-        let none = |app: &mut App| {
-            let mut empty = Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::default());
-            empty.insert_attribute(Mesh::ATTRIBUTE_POSITION, Vec::<[f32; 3]>::new());
-            let h = app.world_mut().resource_mut::<Assets<Mesh>>().add(empty);
-            set_ribbons_if_changed(&mut app.world_mut().resource_mut::<Assets<Mesh>>(), &h, vec![], vec![], vec![], vec![]);
+        let h = app.world_mut().resource_mut::<Assets<Mesh>>().add(placeholder_mesh());
+        let none = |app: &mut App, h: &Handle<Mesh>| {
+            set_ribbons_if_changed(&mut app.world_mut().resource_mut::<Assets<Mesh>>(), h, vec![], vec![], vec![], vec![]);
             app.update();
             app.world_mut().resource_mut::<Messages<AssetEvent<Mesh>>>().drain().filter(|e| matches!(e, AssetEvent::Modified { .. })).count()
         };
-        assert_eq!(none(&mut app), 0, "an empty mesh is not rewritten with nothing");
+        app.update();
+        app.world_mut().resource_mut::<Messages<AssetEvent<Mesh>>>().drain().count();
+        assert_eq!(none(&mut app, &h), 0, "a placeholder is not rewritten with nothing");
+        assert_eq!(none(&mut app, &handle), 1, "a ribbon that empties becomes the placeholder");
+        assert_eq!(none(&mut app, &handle), 0);
+    }
+
+    /// Bevy quits when it builds a pipeline (the shadow pass does, even for blended meshes) for a mesh with no position attribute:
+    /// a mesh that starts or becomes empty always keeps one, with vertices so Bevy does not warn.
+    #[test]
+    fn an_empty_effect_mesh_keeps_its_positions() {
+        let mut meshes = Assets::<Mesh>::default();
+        let h = meshes.add(placeholder_mesh());
+        assert!(meshes.get(&h).unwrap().attribute(Mesh::ATTRIBUTE_POSITION).is_some_and(|p| p.len() == 3));
+        set_ribbons_if_changed(&mut meshes, &h, vec![[1.0; 3]; 3], vec![[0.0; 2]; 3], vec![[1.0; 4]; 3], vec![0, 1, 2]);
+        set_ribbons_if_changed(&mut meshes, &h, vec![], vec![], vec![], vec![]);
+        let m = meshes.get(&h).unwrap();
+        assert!(m.attribute(Mesh::ATTRIBUTE_POSITION).is_some_and(|p| p.len() == 3) && m.indices().is_some_and(|i| i.len() == 3));
+        assert!(m.attributes().all(|(_, v)| v.len() == 3), "no attribute is left with another vertex count");
+        assert!(placeholder_mesh().attributes().all(|(a, _)| a.id == Mesh::ATTRIBUTE_POSITION.id || a.id == Mesh::ATTRIBUTE_UV_0.id), "only what every writer replaces");
     }
 }

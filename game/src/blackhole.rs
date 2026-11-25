@@ -3,9 +3,7 @@
 //! (point spawn and update, trail segment init and update).
 //! Everything ticks at the engine's 30 Hz. PROVISIONAL: ribbon texture mapping/blend and the point-effect orientation's
 //! normalisation (unknown). Pull (`Magnitude`) and the core kill: see `pull` below, from retail measurements (docs/re/effects.md).
-use bevy::asset::RenderAssetUsages;
 use bevy::camera::visibility::NoFrustumCulling;
-use bevy::mesh::PrimitiveTopology;
 use bevy::prelude::*;
 
 use crate::docking::Docker;
@@ -339,7 +337,7 @@ pub fn update(
 ) {
     for (e, mut h) in &mut holes {
         if h.mesh.is_none() {
-            let m = meshes.add(Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::default()));
+            let m = meshes.add(crate::fx::placeholder_mesh());
             let mat = mats.add(StandardMaterial {
                 base_color_texture: Some(assets.load("fx/tex/fireblackhole.png")),
                 unlit: true,

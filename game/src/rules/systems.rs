@@ -78,12 +78,10 @@ pub struct RuleWorld(pub Vec<Unit>);
 #[derive(Resource, Default)]
 struct RuleInput {
     skip_speech: bool,
-    dock: bool,
 }
 
 fn capture_input(keys: Res<ButtonInput<KeyCode>>, binds: Res<crate::bindings::Bindings>, mission: Res<Mission>, mut input: ResMut<RuleInput>) {
     input.skip_speech |= mission.opening.is_none() && binds.just_pressed(&keys, crate::bindings::Act::SkipSpeech);
-    input.dock |= keys.just_pressed(KeyCode::KeyD);
 }
 
 pub fn plugin(app: &mut App) {
@@ -256,16 +254,13 @@ fn update(
     {
         handed_on.commit(&mission.id, values);
     }
-    // Mission 1's refit task: a hint while the weapons tender is in range (docking itself is docking.rs; D is a keyboard shortcut).
-    // `world` is last frame-start's snapshot: good enough for a hint and the dev autopilot.
+    // Mission 1's refit task: the scripted smokes dock with the weapons tender once it is in range (docking itself is docking.rs).
+    // `world` is last frame-start's snapshot: good enough for this and the dev autopilot.
     mission.script.hint.clear();
     if let (Some(p), Some(t)) = (world.iter().find(|u| u.primary && u.alive), world.iter().find(|u| u.name == "RLS Bounty")) {
         let wants = mission.script.task_active("Dock With Tender");
         let near = extra.sensors.in_sight(p.e, t.e, Some(mission)) && !mission.script.docked.contains(&(p.e, t.e));
-        if wants && near {
-            mission.script.hint = "Left-click RLS Bounty (or press D) to dock".into();
-        }
-        if near && wants && (input.dock || matches!(cfg.script.as_deref(), Some("mission" | "dock"))) {
+        if near && wants && matches!(cfg.script.as_deref(), Some("mission" | "dock")) {
             extra.dock.write(DockMsg::Dock { docker: None, dockee: t.e });
         }
     }

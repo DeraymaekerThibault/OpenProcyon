@@ -2,11 +2,9 @@
 //! (`swap`), draws added light like the retail ONE/ONE effects (`additive`, `additive_base`) or stays behind the world without
 //! writing depth (`no_depth_write`). New blocks use these instead of their own copies.
 
-use bevy::asset::RenderAssetUsages;
 use bevy::camera::visibility::NoFrustumCulling;
 use bevy::ecs::system::EntityCommands;
 use bevy::light::NotShadowCaster;
-use bevy::mesh::PrimitiveTopology;
 use bevy::prelude::*;
 use bevy::render::render_resource::{BlendComponent, BlendFactor, BlendOperation, BlendState, RenderPipelineDescriptor};
 
@@ -56,7 +54,7 @@ pub fn spawn_batch_mesh<M: Material>(commands: &mut Commands, meshes: &mut Asset
     commands.spawn((
         crate::Scenario,
         marker,
-        Mesh3d(meshes.add(Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::default()))),
+        Mesh3d(meshes.add(crate::fx::placeholder_mesh())),
         MeshMaterial3d(material),
         Transform::default(),
         Visibility::Hidden,

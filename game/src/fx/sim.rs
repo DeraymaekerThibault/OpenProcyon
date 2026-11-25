@@ -1,9 +1,8 @@
 //! The retail particle simulation: emission, movement and attraction at the engine's 30 Hz tick, and the morphing effect
 //! meshes. Nothing here draws a particle (see `draw.rs`).
 
-use bevy::asset::RenderAssetUsages;
 use bevy::camera::visibility::NoFrustumCulling;
-use bevy::mesh::{Indices, PrimitiveTopology};
+use bevy::mesh::Indices;
 use bevy::prelude::*;
 use std::collections::HashMap;
 
@@ -206,7 +205,7 @@ pub(super) fn render_mesh_fx(
             }
             let scale = fx.size_scale;
             let entry = fx.meshes[i].get_or_insert_with(|| {
-                let mesh = meshes.add(Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::default()));
+                let mesh = meshes.add(crate::fx::placeholder_mesh());
                 let material = materials.add(StandardMaterial {
                     base_color_texture: Some(assets.load(GltfAssetLabel::Texture(0).from_asset(def.model.clone()))),
                     unlit: true,

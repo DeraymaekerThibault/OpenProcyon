@@ -55,6 +55,36 @@ impl Outfit {
     }
 }
 
+/// Campaign: Jim Hawkins captains the command ship and Mister Onyx is its first mate, always (posts by `ROLES` index). Neither serves
+/// on another ship, and a ship that stops being the command ship goes back to its default captain and first mate; other posts and
+/// guns carry over between missions. From play (the retail Crew & Arms screen shows the two fixed on the command ship).
+pub const COMMAND_CREW: [(usize, &str); 2] = [(1, "Crew_Navy_JimHawkins"), (2, "Crew_Navy_Onyx")];
+
+impl Outfit {
+    /// This outfit with the command crew on the ship `command` names (`ship_key`), alone at their posts, and on no other ship.
+    pub fn pinned(&self, command: Option<&str>) -> Outfit {
+        let mut out = self.clone();
+        for fit in out.ships.values_mut() {
+            for slot in &mut fit.crew {
+                slot.retain(|c| !is_command_crew(c));
+            }
+        }
+        let Some(key) = command else { return out };
+        for (role, id) in COMMAND_CREW {
+            out.ships.entry(key.into()).or_default().crew[role] = vec![id.into()];
+            if !out.hired.iter().any(|c| c == id) {
+                out.hired.push(id.into());
+            }
+        }
+        out
+    }
+}
+
+/// Whether `id` is one of the command ship's fixed crew.
+pub fn is_command_crew(id: &str) -> bool {
+    COMMAND_CREW.iter().any(|(_, c)| *c == id)
+}
+
 /// Ship identity, not ECS IDs: survives mission restart/save, without applying one hull's mounts to another hull.
 pub(super) fn ship_key(class: &crate::data::Class, mission: &crate::campaign::MissionShip) -> String {
     format!("{}:{}", class.name, if mission.name.is_empty() { mission.id.to_string() } else { mission.name.clone() })
@@ -239,23 +269,33 @@ pub(super) fn apply_outfit(
         &mut crate::boarding::Boardable,
         Option<&CrewPosts>,
     )>,
+    command: Query<(), With<crate::PlayerShip>>,
+    new_command: Query<(), Added<crate::PlayerShip>>,
 ) {
     let Some(mission) = mission else { return };
-    // The outfit only changes with the saved points or the mission; otherwise only ships that just spawned need fitting.
-    let dirty = points.is_changed() || mission.is_changed();
+    // The outfit only changes with the saved points, the mission or the command ship; otherwise only ships that just spawned need fitting.
+    let dirty = points.is_changed() || mission.is_changed() || !new_command.is_empty();
+    if !dirty && !ships.iter().any(|(.., ms, _, _, _)| ms.is_added()) {
+        return;
+    }
+    let command_key = ships
+        .iter()
+        .find(|(e, _, h, ms, ..)| command.contains(*e) && !h.destroyed && ms.owner == mission.script.player())
+        .map(|(_, ship, _, ms, ..)| ship_key(&lib.classes[ship.class], &ms));
+    let outfit = points.outfit.pinned(command_key.as_deref());
     for (e, mut ship, health, ms, mut guns, mut boarding, posts) in &mut ships {
         if health.destroyed || !(dirty || ms.is_added()) {
             continue;
         }
         let class = &lib.classes[ship.class];
-        let fit = (ms.owner == mission.script.player()).then(|| points.outfit.ships.get(&ship_key(class, &ms))).flatten();
+        let fit = (ms.owner == mission.script.player()).then(|| outfit.ships.get(&ship_key(class, &ms))).flatten();
         let wanted = fit.map(|fit| {
             let mut crew: [Vec<String>; 8] = default();
             let mut used = std::collections::HashSet::new();
             for (role, slot) in crew.iter_mut().enumerate() {
                 *slot = fit.crew[role]
                     .iter()
-                    .filter(|id| points.outfit.hired.contains(id) && crew_data()[id.as_str()].is_object() && used.insert((*id).clone()))
+                    .filter(|id| outfit.hired.contains(id) && crew_data()[id.as_str()].is_object() && used.insert((*id).clone()))
                     .take(crate::boarding::counts(&class.name)[role] as usize)
                     .cloned()
                     .collect();

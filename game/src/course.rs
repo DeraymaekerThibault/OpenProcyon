@@ -1,8 +1,7 @@
 //! Predicted course of the player ship, drawn like the original with HUD_Waypointline2 (an additive 64x128 dash texture) laid
 //! along the path as one quad per dash. PROVISIONAL: dash width/length, colour fade and the end marker are tuned by eye.
-use bevy::asset::RenderAssetUsages;
 use bevy::camera::visibility::NoFrustumCulling;
-use bevy::mesh::{Indices, PrimitiveTopology};
+use bevy::mesh::Indices;
 use bevy::prelude::*;
 
 use crate::{
@@ -72,7 +71,7 @@ pub fn update(
     mut odo: Local<(Vec3, f32)>, // (last ship position, distance travelled)
 ) {
     let Ok(mesh) = course.single() else {
-        let mesh = meshes.add(Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::default()));
+        let mesh = meshes.add(crate::fx::placeholder_mesh());
         let mat = mats.add(StandardMaterial {
             base_color_texture: Some(assets.load("hud/tex/hud_waypointline2.png")),
             unlit: true,
@@ -83,7 +82,7 @@ pub fn update(
         });
         commands.spawn((Scenario, Course, Mesh3d(mesh), MeshMaterial3d(mat), Transform::default(), Visibility::default(), NoFrustumCulling));
         for (k, tex) in ["hud_waypoint_accept", "hud_waypoint_donothing", "hud_waypoint_decline"].into_iter().enumerate() {
-            let mesh = meshes.add(Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::default()));
+            let mesh = meshes.add(crate::fx::placeholder_mesh());
             let mat = mats.add(StandardMaterial {
                 base_color_texture: Some(assets.load(format!("hud/tex/{tex}.png"))),
                 unlit: true,

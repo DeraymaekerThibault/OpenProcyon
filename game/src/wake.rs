@@ -1,8 +1,6 @@
 //! Ship wakes (docs/re/effects.md "Wakes"): a Trail primitive attached to the ship's wake placement.
 //! Segments are laid in world space every 15 engine ticks and then drift on their own; the newest one follows the stern.
-use bevy::asset::RenderAssetUsages;
 use bevy::camera::visibility::NoFrustumCulling;
-use bevy::mesh::PrimitiveTopology;
 use bevy::prelude::*;
 
 use crate::{Scenario, Ship};
@@ -180,7 +178,7 @@ pub fn update(
             if wakes.iter().any(|(_, w, _, _)| w.ship == s && w.idx == idx) {
                 continue;
             }
-            let mesh = meshes.add(Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::default()));
+            let mesh = meshes.add(crate::fx::placeholder_mesh());
             let mut material = crate::fx::additive_material(assets.load("fx/tex/wake.png"));
             if let Some([r, g, b]) = wake_tint(&class.race) {
                 material.base.base_color = Color::LinearRgba(LinearRgba::new(r, g, b, 1.0));

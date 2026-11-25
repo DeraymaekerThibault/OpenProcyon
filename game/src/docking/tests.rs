@@ -258,7 +258,9 @@ fn player_docks_repairs_and_leaves_its_slot_free() {
     let wp = app.world().get::<Ship>(me).unwrap().waypoints.clone();
     assert_eq!(wp.len(), 1, "one approach point, no route");
     for mesh in [&line, &marks] {
-        assert_eq!(app.world().resource::<Assets<Mesh>>().get(mesh).unwrap().count_vertices(), 0, "automatic docking paths are hidden");
+        // hidden: no vertices, or the zero-area placeholder (`fx::placeholder_mesh`), which draws nothing
+        let pos = app.world().resource::<Assets<Mesh>>().get(mesh).unwrap().attribute(Mesh::ATTRIBUTE_POSITION).and_then(|p| p.as_float3()).map(<[_]>::to_vec).unwrap_or_default();
+        assert!(pos.windows(2).all(|w| w[0] == w[1]), "automatic docking paths are hidden: {pos:?}");
     }
     assert!((wp[0] - Vec3::new(80.0, 0.0, lib.classes[lib.index("Ship_Navy_Cutter")].length)).length() < 0.01, "{wp:?}");
     // the movement system is not part of this test: put the ship on the dock point
