@@ -11,8 +11,17 @@ type Key = [f32; 8];
 #[derive(Clone, Debug, Default)]
 pub struct Clip {
     pub duration: f32,
-    /// Per animated element name: six channels (x, y, z in game axes, then yaw, pitch, roll in radians).
-    motions: HashMap<String, [Vec<Key>; 6]>,
+    /// Per animated element name.
+    motions: HashMap<String, Motion>,
+}
+
+/// Six channels (x, y, z in game axes, then yaw, pitch, roll in radians). A mesh layer also has its pivot (Bevy axes, where the
+/// layer's mesh holds its turning point) and rest yaw, pitch, roll; other elements have neither.
+#[derive(Clone, Debug, Default)]
+struct Motion {
+    channels: [Vec<Key>; 6],
+    pivot: Vec3,
+    rot: [f32; 3],
 }
 
 /// Every scene's clips by scene name, as in `data/animations.json`.
@@ -29,7 +38,10 @@ pub fn load(root: &std::path::Path) -> Clips {
                 let motions = c["motions"].as_array().into_iter().flatten().filter_map(|m| {
                     let ch = m["channels"].as_array()?;
                     let keys = |i: usize| ch.get(i)?.as_array().map(|k| k.iter().map(|k| std::array::from_fn(|j| num(&k[j]))).collect::<Vec<Key>>());
-                    Some((m["target"].as_str()?.to_string(), [keys(0)?, keys(1)?, keys(2)?, keys(3)?, keys(4)?, keys(5)?]))
+                    let three = |v: &Value| -> [f32; 3] { std::array::from_fn(|i| num(&v[i])) };
+                    let [px, py, pz] = three(&m["pivot"]);
+                    let motion = Motion { channels: [keys(0)?, keys(1)?, keys(2)?, keys(3)?, keys(4)?, keys(5)?], pivot: crate::data::conv(px, py, pz), rot: three(&m["rot"]) };
+                    Some((m["target"].as_str()?.to_string(), motion))
                 });
                 (c["name"].as_str().unwrap_or("").to_string(), Clip { duration: num(&c["duration"]), motions: motions.collect() })
             });
@@ -75,16 +87,21 @@ impl Clip {
     #[cfg(test)]
     pub fn slide(target: &str, duration: f32, x: f32) -> Clip {
         let line = |v: f32| vec![[0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0], [duration, v, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]];
-        Clip { duration, motions: HashMap::from([(target.to_string(), [line(x), line(0.0), line(0.0), line(0.0), line(0.0), line(0.0)])]) }
+        let channels = [line(x), line(0.0), line(0.0), line(0.0), line(0.0), line(0.0)];
+        Clip { duration, motions: HashMap::from([(target.to_string(), Motion { channels, ..default() })]) }
     }
-    /// The pose of element `name` at clip time `t` as its rest transform plus the clip's offsets (position added, yaw about up then
-    /// pitch about starboard then roll about forward added to the rest angles, here composed after the rest rotation), in Bevy
-    /// axes. None if the clip does not animate it.
+    /// The pose of element `name` at clip time `t`, in Bevy axes: the clip's offsets added to the rest position and to the rest
+    /// yaw, pitch, roll, the rotation rebuilt from those angles (yaw about up, then pitch about starboard, then roll about forward)
+    /// and applied about the element's pivot. `rest` is the node as placed without its rest angles (a mesh layer sits at its
+    /// position minus its pivot); its own rotation is kept underneath. None if the clip does not animate it.
     pub fn pose(&self, name: &str, t: f32, rest: Transform) -> Option<Transform> {
-        let ch = self.motions.get(name)?;
-        let v: [f32; 6] = std::array::from_fn(|i| sample(&ch[i], t));
-        let turn = Quat::from_rotation_y(v[3]) * Quat::from_rotation_x(v[4]) * Quat::from_rotation_z(-v[5]);
-        Some(Transform { translation: rest.translation + crate::data::conv(v[0], v[1], v[2]), rotation: rest.rotation * turn, scale: rest.scale })
+        let m = self.motions.get(name)?;
+        let v: [f32; 6] = std::array::from_fn(|i| sample(&m.channels[i], t));
+        let [yaw, pitch, roll] = [m.rot[0] + v[3], m.rot[1] + v[4], m.rot[2] + v[5]];
+        let turn = Quat::from_rotation_y(yaw) * Quat::from_rotation_x(pitch) * Quat::from_rotation_z(-roll);
+        let rotation = rest.rotation * turn;
+        let about_pivot = rest.rotation * m.pivot - rotation * m.pivot;
+        Some(Transform { translation: rest.translation + crate::data::conv(v[0], v[1], v[2]) + about_pivot, rotation, scale: rest.scale })
     }
     /// Whether the clip animates `name`.
     pub fn animates(&self, name: &str) -> bool {
@@ -142,7 +159,7 @@ mod tests {
     use super::*;
 
     fn clip(keys: [Vec<Key>; 6]) -> Clip {
-        Clip { duration: 2.0, motions: HashMap::from([("n".to_string(), keys)]) }
+        Clip { duration: 2.0, motions: HashMap::from([("n".to_string(), Motion { channels: keys, ..default() })]) }
     }
 
     #[test]
@@ -156,5 +173,43 @@ mod tests {
         assert!((p.rotation.angle_between(Quat::from_rotation_y(0.5))) < 1e-5);
         assert!(c.pose("other", 1.0, rest).is_none());
         assert_eq!(c.pose("n", 9.0, rest).unwrap().translation, Vec3::new(14.0, 0.0, -2.0), "held after the last key");
+    }
+
+    #[test]
+    fn a_layer_turns_about_its_pivot_at_its_rest_angles_plus_the_clip() {
+        // Norville's windmill (BaseSafetytown): blades modelled about a hub 13.19 up (pivot), rest yaw -0.569, the clip one full
+        // pitch turn over 16.67 s. The hub stays put and the blade axis is the rest-yawed starboard axis.
+        let pivot = crate::data::conv(0.0, 0.0, 13.19);
+        let turn = vec![[0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0], [16.67, -std::f32::consts::TAU, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]];
+        let channels = [vec![], vec![], vec![], vec![], turn, vec![]];
+        let c = Clip { duration: 16.67, motions: HashMap::from([("w".to_string(), Motion { channels, pivot, rot: [-0.569, 0.0, 0.0] })]) };
+        let rest = Transform::from_translation(crate::data::conv(-76.7, 26.8, 25.0));
+        let hub = rest.translation + pivot;
+        for t in [0.0, 2.0, 5.0, 8.335, 12.0] {
+            let p = c.pose("w", t, rest).unwrap();
+            assert!((p.transform_point(pivot) - hub).length() < 1e-4, "hub moved at t {t}");
+            let axis = p.rotation * Vec3::X;
+            let want = crate::data::conv((-0.569f32).cos(), (-0.569f32).sin(), 0.0);
+            assert!((axis - want).length() < 1e-4, "spin axis {axis:?} at t {t}");
+        }
+        let half = c.pose("w", 8.335, rest).unwrap();
+        assert!((half.transform_point(pivot + Vec3::Y) - (hub - Vec3::Y)).length() < 1e-3, "half a turn puts the top blade at the bottom");
+    }
+
+    #[test]
+    #[ignore = "needs imported assets"]
+    fn norvilles_windmill_turns_about_its_hub_once_per_16_7_seconds() {
+        let clips = load(crate::assets_dir());
+        let c = find(&clips, "BaseSafetytown", "ENVIRONMENT").expect("Norville's windmill clip");
+        assert!((c.duration - 16.667).abs() < 1e-3);
+        let m = &c.motions["WindMill_Layer2"];
+        assert!((m.pivot - crate::data::conv(0.0, -0.038, 13.192)).length() < 1e-3, "pivot {:?}; re-import for the pivot", m.pivot);
+        assert!((m.rot[0] + 0.569).abs() < 1e-3);
+        let rest = Transform::from_xyz(1.0, 2.0, 3.0);
+        let quarter = c.pose("WindMill_Layer2", c.duration / 4.0, rest).unwrap();
+        assert!((quarter.transform_point(m.pivot) - (rest.translation + m.pivot)).length() < 1e-3, "hub fixed");
+        let axis = crate::data::conv((-0.569f32).cos(), (-0.569f32).sin(), 0.0);
+        let (spin, angle) = (quarter.rotation * Quat::from_rotation_y(0.569)).to_axis_angle();
+        assert!((spin.dot(axis).abs() - 1.0).abs() < 1e-3 && (angle - std::f32::consts::FRAC_PI_2).abs() < 1e-3, "a quarter turn about the yawed axis");
     }
 }
