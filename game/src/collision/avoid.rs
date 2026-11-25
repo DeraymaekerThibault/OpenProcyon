@@ -20,11 +20,10 @@ const STUCK_SPEED: f32 = 0.1 / 0.033;
 /// Priority a moving ship of the human's gets on top of its speed: computer ships give way to it.
 pub(super) const HUMAN_PRIORITY: f32 = 50.0;
 
-/// What an obstacle is, for the same-obstacle count.
+/// What an obstacle is, for the same-obstacle count: its entity (ships, islands, rocks).
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum Key {
     Entity(Entity),
-    Rock(usize),
 }
 
 /// One obstacle as the avoider sees it.
