@@ -166,10 +166,10 @@ fn keyboard_orders(c: &Controlled, keys: &ButtonInput<KeyCode>, pointer: &mut Po
 }
 
 /// An armed indirect bank takes this click as its shot target (a click with no ground point under it keeps the bank armed).
-fn armed_shot(direct: bool, ray: Ray3d, target: &mut Target, lob: &combat::LobAim, sfx: &mut MessageWriter<audio::Sfx>) -> bool {
-    let (true, Some(bank), Some(t)) = (direct, target.2.armed, ray.intersect_plane(Vec3::ZERO, InfinitePlane3d::new(Vec3::Y))) else { return false };
+fn armed_shot(c: &Controlled, ray: Ray3d, target: &mut Target, lob: &combat::LobAim, sfx: &mut MessageWriter<audio::Sfx>, orders: &mut Orders) -> bool {
+    let (true, Some(bank), Some(t)) = (c.direct, target.2.armed, ray.intersect_plane(Vec3::ZERO, InfinitePlane3d::new(Vec3::Y))) else { return false };
     target.2.armed = None;
-    target.2.shot = Some((bank, ray.get_point(t)));
+    orders.send(Kind::Lob { ship: c.actor, shot: Some((bank, ray.get_point(t))) });
     // Retail plays a sound only for gravity charges (PROVISIONAL: star/nova silent as decoded, unconfirmed in play)
     if let Some(a) = lob.0.filter(|a| a.kind == crate::combat::LobKind::GravCharge) {
         sfx.write(audio::Sfx::ui(if a.solution { "HUD_LobWeapon_Accept" } else { "HUD_LobWeapon_Reject" }));
@@ -273,7 +273,7 @@ pub fn input(
             if let Some(ray) = window.cursor_position().and_then(|cursor| camera.viewport_to_world(gt, cursor).ok()) {
                 let scene =
                     ClickScene { keys: &keys, lib: &lib, sensors: &sensors, mission: mission.as_deref(), others: &others, objects: &objects, player_pos: player_tf.translation() };
-                if !armed_shot(direct, ray, &mut target, &lob, &mut sfx) && !select_own(ray, &scene, &mut pointer.fleets, &mut orbit) {
+                if !armed_shot(&c, ray, &mut target, &lob, &mut sfx, &mut orders) && !select_own(ray, &scene, &mut pointer.fleets, &mut orbit) {
                     left_click(&c, ray, &scene, &mut pointer, &docks, &mut orders);
                 }
             }

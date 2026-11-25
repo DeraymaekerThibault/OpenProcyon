@@ -70,6 +70,7 @@ pub fn orders(
         18 if due(68.0) => Some(Kind::CeaseFire),
         19 if due(70.0) => Some(Kind::Target { ship: me, target: enemy(), spot: None }),
         20 if due(71.0) => Some(Kind::FleetAttack),
+        21 if due(76.0) => Some(Kind::PanicFire { ship: me }),
         _ => return,
     };
     if p.step == 3 && order.is_none() {

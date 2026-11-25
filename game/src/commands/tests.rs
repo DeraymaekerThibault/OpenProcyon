@@ -237,6 +237,27 @@ fn dock_tow_board_and_grapple_orders_send_what_the_menu_sent() {
     assert!(app.world().get::<crate::boarding::GrappleOrder>(me).is_none());
 }
 
+/// Panic fire and indirect shots act on the command ship's own gunnery state only.
+#[test]
+fn panic_fire_and_lob_shots_are_the_command_ships() {
+    let mut app = battle();
+    let (me, captain, _) = fleet(&mut app);
+    loaded(&mut app);
+    send(&mut app, Kind::PanicFire { ship: captain });
+    send(&mut app, Kind::Lob { ship: captain, shot: Some((2, Vec3::X)) });
+    frame(&mut app, 40);
+    let t = app.world().resource::<crate::combat::Target>();
+    assert_eq!((t.2.panic, t.2.shot), (false, None), "a captain has no panic button or armed bank");
+    send(&mut app, Kind::PanicFire { ship: me });
+    send(&mut app, Kind::Lob { ship: me, shot: Some((2, Vec3::X)) });
+    frame(&mut app, 40);
+    let t = app.world().resource::<crate::combat::Target>();
+    assert_eq!((t.2.panic, t.2.shot), (true, Some((2, Vec3::X))));
+    send(&mut app, Kind::Lob { ship: me, shot: None });
+    frame(&mut app, 40);
+    assert_eq!(app.world().resource::<crate::combat::Target>().2.shot, None, "a gun-bank click drops a shot not fired yet");
+}
+
 #[test]
 fn a_command_keeps_its_meaning_through_the_file() {
     let mut app = battle();
@@ -262,6 +283,9 @@ fn a_command_keeps_its_meaning_through_the_file() {
         Kind::FleetAttack,
         Kind::CeaseFire,
         Kind::Promote { ship: me },
+        Kind::PanicFire { ship: me },
+        Kind::Lob { ship: me, shot: Some((3, Vec3::new(5.0, 0.0, -7.0))) },
+        Kind::Lob { ship: me, shot: None },
     ];
     for kind in kinds {
         let saved = Saved::save(app.world(), &kind).unwrap();
