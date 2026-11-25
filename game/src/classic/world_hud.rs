@@ -354,7 +354,7 @@ fn place_labels(
 ) {
     let s = hud_scale(&window);
     let (camera, ctf) = *cam;
-    let project = |g: &GlobalTransform, up: f32| camera.world_to_viewport(ctf, g.translation() + Vec3::Y * up).ok();
+    let project = |g: &GlobalTransform, up: f32| crate::view::project(camera, ctf, g.translation() + Vec3::Y * up);
     for (e, mut label, mut node, mut vis, kids) in &mut labels {
         let Ok((g, _, sh, ms, owner)) = ships.get(label.ship) else {
             commands.entity(e).despawn();
@@ -400,7 +400,7 @@ fn place_labels(
         };
         let p = project(g, 0.0)?;
         // Chevrons stand on the diagonals just outside the target's projected radius.
-        let edge = camera.world_to_viewport(ctf, g.translation() + ctf.right() * r).ok().map_or(0.0, |q| (q - p).length());
+        let edge = crate::view::project(camera, ctf, g.translation() + ctf.right() * r).map_or(0.0, |q| (q - p).length());
         Some((p, edge))
     })();
     for (Reticle(i), mut node, mut vis) in &mut reticle {

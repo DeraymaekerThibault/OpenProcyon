@@ -509,7 +509,7 @@ fn menu(
         }
     }
     let (camera, gt) = *cam;
-    let Ok(ray) = camera.viewport_to_world(gt, cursor) else { return };
+    let Some(ray) = crate::view::cursor_ray(camera, gt, cursor) else { return };
     let Some((target, kind, can_dock)) = pick_target(&scene, &docks, ray, actor, player.1.class, player.2, bar_target) else { return };
     // The player's ship already towing this one gets Stop; any other ship gets Start, enabled for ships when a tow can be made.
     let tow = if docks.towee_of(player.0) == Some(target) { Tow::Stop } else { Tow::Start(docks.can_tow() && docks.towable(target) && scene.ships.get(target).is_ok()) };
@@ -577,12 +577,12 @@ fn dev_click(
     };
     let Some((target, tf, _)) = tender.iter().find(|t| t.2.name == "RLS Bounty") else { return };
     let (camera, gt) = *cam;
-    let on_target = camera.world_to_viewport(gt, tf.translation).ok();
+    let on_target = crate::view::project(camera, gt, tf.translation);
     let button = if menu { MouseButton::Right } else { MouseButton::Left };
     match *step {
         0 => {
             orbit.focus = Some(target);
-            let ready = on_target.and_then(|p| docks.under(camera.viewport_to_world(gt, p).ok()?, *player));
+            let ready = on_target.and_then(|p| docks.under(crate::view::cursor_ray(camera, gt, p)?, *player));
             if ready == Some((target, true)) {
                 *step = 1;
             }
@@ -660,13 +660,13 @@ fn context_cursor(
         }
         let cursor = window.cursor_position()?;
         let (camera, gt) = *cam;
-        let ray = camera.viewport_to_world(gt, cursor).ok()?;
+        let ray = crate::view::cursor_ray(camera, gt, cursor)?;
         let actor = fleets.selected?;
         // Armed lob bank: its cursor shows over everything (ships, bases, sea) while the pointer is on the sea plane.
         if let (true, Some(bank), Ok((_, tf, sh, health)), Ok(g)) = (fleets.direct(), target.2.armed, ships.get(actor), guns.get(actor)) {
             let class = &lib.classes[sh.class];
             let kind = class.mounts.iter().enumerate().find(|(_, m)| m.bank == bank).and_then(|(i, _)| crate::combat::lob_kind(lib.guns[g.gun(i)].bullet_family));
-            let point = ray.intersect_plane(Vec3::ZERO, InfinitePlane3d::new(Vec3::Y)).map(|t| ray.get_point(t));
+            let point = crate::view::ray_on_sea(ray);
             if let (Some(kind), Some(point)) = (kind, point) {
                 let a = crate::combat::LobAimed { kind, solution: crate::combat::lob_solution(&lib, class, health, g, tf, bank, point), point };
                 aim = Some(a);
