@@ -258,6 +258,10 @@ fn a_command_keeps_its_meaning_through_the_file() {
         Kind::Grapple { ship: me, target: None },
         Kind::CancelDock { ship: me },
         Kind::DropGrapple { ship: me },
+        Kind::Formation { formation: crate::ship::Formation::EchelonLeft, hold: true },
+        Kind::FleetAttack,
+        Kind::CeaseFire,
+        Kind::Promote { ship: me },
     ];
     for kind in kinds {
         let saved = Saved::save(app.world(), &kind).unwrap();

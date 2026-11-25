@@ -545,7 +545,9 @@ pub fn approach_speed(speed: f32, target: f32, rate: f32, dt: f32) -> f32 {
 #[derive(Component, Clone)]
 pub struct FleetMember(pub crate::names::Owner, pub usize);
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+/// A fleet's formation. Named in command logs (`commands.rs`) in snake case.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum Formation {
     #[default]
     None,
