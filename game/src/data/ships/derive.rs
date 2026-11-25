@@ -330,12 +330,12 @@ pub(super) fn complete(j: &mut ShipDoc, facts: &Facts, root: &Path) {
         } else {
             "Wake_Heavy"
         };
-        let mut wakes: Vec<WakeDoc> = points(facts, "WakePlacement").map(|p| WakeDoc { pos: p.pos, fx: fx.into() }).collect();
+        let mut wakes: Vec<WakeDoc> = points(facts, "WakePlacement").map(|p| WakeDoc { pos: p.pos, fx: fx.into(), label: None, rot: None }).collect();
         if wakes.is_empty() && !intact.is_empty() {
             // PROVISIONAL: a wake at the stern's waterline when the model has no wake node.
             let low = intact.iter().map(|l| l.aabb[0][2]).fold(f64::MAX, f64::min);
             let back = intact.iter().map(|l| l.aabb[0][1]).fold(f64::MAX, f64::min);
-            wakes.push(WakeDoc { pos: [0.0, back, low + 0.5], fx: fx.into() });
+            wakes.push(WakeDoc { pos: [0.0, back, low + 0.5], fx: fx.into(), label: None, rot: None });
         }
         j.wakes = Some(wakes);
     }
