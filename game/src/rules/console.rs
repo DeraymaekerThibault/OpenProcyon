@@ -890,7 +890,7 @@ impl Script {
                     if rule.once {
                         self.fired[i] = true;
                     }
-                    self.ran[i] = true;
+                    self.mark_ran(i);
                     info!("t={:.1} rule #{i} fired from the console: {}", self.time, rule.name.trim());
                     self.run_from(i, &rule, 0, w, out);
                     o.lines.push(format!("fired '{}' ({} action(s))", rule.name.trim(), rule.acts.len()));
@@ -985,8 +985,11 @@ impl Script {
     /// Each condition of rule `i` with whether it holds now, and whether the rule already ran.
     fn why(&mut self, i: usize, w: &[Unit]) -> Vec<String> {
         let (name, once, conds) = (self.rules[i].name.trim().to_string(), self.rules[i].once, self.rules[i].conds.clone());
-        let mut lines =
-            vec![format!("{name}: {}{}", if self.ran[i] { "has run" } else { "has not run" }, if once && self.fired[i] { " (run-once: it will not run again)" } else { "" })];
+        let mut lines = vec![format!(
+            "{name}: {}{}",
+            if self.runs[i].count > 0 { "has run" } else { "has not run" },
+            if once && self.fired[i] { " (run-once: it will not run again)" } else { "" }
+        )];
         if !self.ext.is_active(i) {
             lines.push("  inactive (\"Is Active\" is false or OP Set Rule Active turned it off): its conditions are not evaluated; OP Set Rule Active turns it on".into());
         }

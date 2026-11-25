@@ -1,6 +1,6 @@
 //! The mission-authoring command line flags that run without starting a battle (`docs/modding.md`, "Authoring missions"):
 //! `--dump-rule-schema [path]` and `--check-mission <map id | all>`; and `--rule-trace` / `--why "<rule>"`, which only configure the
-//! interpreter's trace for the battle that follows.
+//! interpreter's trace for the battle that follows; and `--rule-report <file>`, which names the file the battle's rule report goes to.
 
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -37,6 +37,13 @@ pub fn dump_schema(args: &[String]) -> Option<i32> {
 /// Reads the trace flags, then runs `--check-mission` if asked (returning the exit status). Call once the `--mod` overlay is set, so
 /// a mod's missions are found like in a normal launch.
 pub fn apply(args: &[String]) -> Option<i32> {
+    match super::report_path_arg(args) {
+        Ok(path) => path.into_iter().for_each(super::set_report_path),
+        Err(message) => {
+            eprintln!("{message}");
+            return Some(2);
+        }
+    }
     set_trace(TraceOptions { all: args.iter().any(|a| a == "--rule-trace"), why: args.windows(2).filter(|w| w[0] == "--why").map(|w| w[1].clone()).collect() });
     let id = args.iter().position(|a| a == "--check-mission").map(|i| args.get(i + 1).filter(|a| !a.starts_with("--")))?;
     let Some(id) = id else {

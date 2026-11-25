@@ -166,7 +166,7 @@ impl Script {
                         "waiting"
                     } else if self.fired[i] {
                         "fired"
-                    } else if self.ran[i] {
+                    } else if self.runs[i].count > 0 {
                         "ran"
                     } else {
                         "never fired"
