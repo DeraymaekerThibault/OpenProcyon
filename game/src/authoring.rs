@@ -27,8 +27,6 @@
 //!   `resolved_ship`; both are kept until the maintainer picks one.
 //! - [`ship_art`]: the command-bar icon and weapon-panel outline (PNG bytes) and each gun's bank the engine generates for a ship from a
 //!   model, with nothing written.
-//! - [`game_content_in`]: the files of a mod that are equal in meaning to the player's import ([`ContentMatch`], [`MatchKind`]):
-//!   game content a mod must not ship (what `tools/compare_assets.py` does by meaning; PROVISIONAL limits in `authoring/content.rs`).
 //! - [`crew_kind`] / [`CREW_KINDS`] / [`CREW_NODE`]: crew node names, and the kind of a model's crew nodes in `data::derive::Facts`.
 //!
 //! Shared code: no UI and no view imports.
@@ -40,7 +38,6 @@ use serde_json::Value;
 mod annotate;
 mod art;
 mod check_mod;
-mod content;
 mod extensions;
 mod json;
 #[cfg(test)]
@@ -52,7 +49,6 @@ mod resolved;
 pub use crate::data::derive::is_damage_layer;
 pub use art::{GunBank, ShipArt, ship_art};
 pub use check_mod::{check_mod, check_mod_with, unknown_key_findings, unknown_keys};
-pub use content::{ContentMatch, MatchKind, game_content_in};
 pub use extensions::{Extension, ExtensionKind, extensions};
 pub use json::to_json_string;
 pub use resolved::{ResolvedEngine, ResolvedFlag, ResolvedGun, ResolvedPost, ResolvedSection, ResolvedShip, ResolvedWake, Source, resolved_ship};
