@@ -234,10 +234,7 @@ pub fn plugin(app: &mut App) {
 
 /// Whether two objects are hostile: by the mission's alliance table (owners), else by skirmish side.
 fn hostile_pair(mission: Option<&Mission>, a: (Option<&str>, Option<Side>), b: (Option<&str>, Option<Side>)) -> bool {
-    if let (Some(m), Some(x), Some(y)) = (mission, a.0, b.0) {
-        return m.script.hostile(x, y);
-    }
-    matches!((a.1, b.1), (Some(x), Some(y)) if x != y)
+    crate::alliance::hostility::pair(mission, a, b)
 }
 /// Whether two ships are allied (same side or allied players) and not hostile; the line-of-fire hold treats such ships as friends.
 pub(crate) fn allied_pair(mission: Option<&Mission>, a: (Option<&str>, Option<Side>), b: (Option<&str>, Option<Side>)) -> bool {
