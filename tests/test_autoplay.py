@@ -31,11 +31,11 @@ class AssetsEnv(unittest.TestCase):
         import os
         from unittest import mock
 
-        from tools import autoplay
+        from tools import rungame
 
         with mock.patch.dict(os.environ, {}, clear=False):
             os.environ.pop("PROCYON_OVERLAY", None)
-            env = autoplay.assets_env()
+            env = rungame.assets_env()
         self.assertEqual(
-            env["PROCYON_OVERLAY"], str(autoplay.REPO / "local/tool-overlay")
+            env["PROCYON_OVERLAY"], str(rungame.REPO / "local/tool-overlay")
         )
