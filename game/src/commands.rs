@@ -79,6 +79,7 @@ pub enum Kind {
     /// The menu's Cloak Start / Stop, for a ship that can cloak (`cloak::Cloak`).
     Cloak { ship: Entity, on: bool },
     /// Dock with `dockee` (a left click on it, or the menu's Dock). `release`: the menu's Dock also ends a hold; the click does not.
+    /// PROVISIONAL: kept as the engine did it; whether the original's left-click dock also ends a hold is not observed.
     Dock { ship: Entity, dockee: Entity, release: bool },
     /// The menu's Tow Start (`Some`, which ends a hold) and Tow Stop (`None`). Tows are made in campaign missions only.
     Tow { ship: Entity, towee: Option<Entity> },
