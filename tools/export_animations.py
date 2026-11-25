@@ -3,7 +3,8 @@
 and yaw, pitch, roll (radians); a keyframe is [time, value, smoothing, tension, continuity, bias, in tangent, out tangent].
 Retail: 61 scenes, 65 clips. Ships carry one break-apart clip (ANIMATION00, 2-20 s, plays once), bases a looping windmill spin
 (ENVIRONMENT) or crane motion (CRANES), the three animals a swim cycle on their bones. Whether values are offsets from the rest
-pose or absolute poses is not settled (docs/re/effects.md). usage: python -m tools.export_animations <game_root> <assets_dir>"""
+pose: offsets (docs/re/effects.md). A motion on a mesh layer also carries the layer's `pivot` and rest `rot` (yaw, pitch, roll): the
+layer turns about its pivot, at its rest angles plus the clip's (only for a lone leaf layer under unrotated parents, see `export`). usage: python -m tools.export_animations <game_root> <assets_dir>"""
 
 import struct
 from pathlib import Path
@@ -14,7 +15,7 @@ from tools.jsonio import dump
 from tools.msb import parse_scene
 
 
-def rounded(clip, names):
+def rounded(clip, names, layers):
     return dict(
         name=clip["name"],
         duration=round(clip["duration"], 5),
@@ -22,6 +23,14 @@ def rounded(clip, names):
             dict(
                 node=m["node"],
                 target=names.get(m["node"]),
+                **(
+                    dict(
+                        pivot=[round(v, 5) for v in layers[m["node"]]["pivot"]],
+                        rot=[round(v, 5) for v in layers[m["node"]]["rot"]],
+                    )
+                    if m["node"] in layers
+                    else {}
+                ),
                 channels=[
                     [
                         [round(v, 5) if isinstance(v, float) else v for v in key]
@@ -33,6 +42,27 @@ def rounded(clip, names):
             for m in clip["motions"]
         ],
     )
+
+
+def lone_leaf_layers(scene):
+    """{id: element} of the mesh layers whose pivot and rest angles are exported: no layer under them, no rotated parent, a name
+    used once. ponytail: the remake places layers flat (no parent hierarchy) and by name, so crane arms and repeated names keep
+    the rest-less pose until the scene hierarchy is built."""
+    elements = {e["id"]: e for g in ("nodes", "meshes") for e in scene[g]}
+
+    def turned(i):
+        e = elements.get(elements[i]["parent"])
+        return bool(e) and (any(abs(v) > 1e-6 for v in e["rot"]) or turned(e["id"]))
+
+    names = [e["name"] for e in scene["meshes"]]
+    parents = {e["parent"] for e in scene["meshes"]}
+    return {
+        e["id"]: e
+        for e in scene["meshes"]
+        if not turned(e["id"])
+        and e["id"] not in parents
+        and names.count(e["name"]) == 1
+    }
 
 
 def export(root, out):
@@ -51,7 +81,8 @@ def export(root, out):
                 for g in ("nodes", "meshes", "bones")
                 for e in scene[g]
             }
-            scenes[msb.stem] = [rounded(c, names) for c in scene["animations"]]
+            layers = lone_leaf_layers(scene)
+            scenes[msb.stem] = [rounded(c, names, layers) for c in scene["animations"]]
     (Path(out) / "data").mkdir(exist_ok=True)
     (Path(out) / "data/animations.json").write_text(dump(scenes), encoding="utf-8")
     print(

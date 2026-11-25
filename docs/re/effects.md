@@ -327,9 +327,17 @@ zero the core and go through the same path. Classes without a clip hold 1 s.
 
 ### Break-apart animation clips (mesh scene animations)
 `data/animations.json` holds every clip (`tools/export_animations.py`). Values are offsets added to the node's rest position and rest
-yaw/pitch/roll. No ship clip returns to its start (0 of 41). Other scenes: the animals' swim cycles are rotations of their bones
+yaw/pitch/roll; the rotation is rebuilt from the summed angles (yaw about up, then pitch about starboard, then roll about forward).
+Every pose of a mesh layer, the clip's included, is placed as its position minus its pivot turned by that rotation: a layer's mesh is
+modelled around its pivot, so the layer turns about the point its position names. Norville's windmill: the blades are modelled about
+a hub 13.2 units above the layer origin, the layer's rest yaw is -0.57 rad (blades facing out from the tower), and the clip is one
+full pitch turn (-2 pi) about that yawed starboard axis every 16.7 s, the hub fixed. Remake (`clips::Clip::pose`): applied to a
+layer that has no layer under it, no rotated parent and a name used once in its scene. PROVISIONAL: other layers (crane arms, whose
+parents are rotated; the Iron-clad mines and Whocaresville scenes, which repeat a layer name three times; the remake draws one) keep
+the pose without pivot and rest angles until scene hierarchies are built; whether a parent's position minus pivot also shifts its
+children (it would lower Norville's windmill by 6.5) is not settled. No ship clip returns to its start (0 of 41). Other scenes: the animals' swim cycles are rotations of their bones
 (whale up to 0.6 rad, manta 1.0, dragon 1.4 plus up to one unit of translation); base windmills (clip `ENVIRONMENT`, also some mine
-and shipyard machinery) loop from spawn, one full yaw (-2 pi) over 10-16.7 s (`clips::play_loops`); base cranes (`CRANES`, or `CRANES01`-`04` for the dock point of that number) run 10 s from their first frame while a ship sits docked at a matching point and stop on their end pose (`docking::play_cranes`). PROVISIONAL: that docking starts them is the owner's reading (the clips are matched to dock points by name); the exact start/stop moments in the dock routine are not measured. The smoothing value of a key picks the curve
+and shipyard machinery) loop from spawn, one full turn (-2 pi) over 10-16.7 s (`clips::play_loops`); base cranes (`CRANES`, or `CRANES01`-`04` for the dock point of that number) run 10 s from their first frame while a ship sits docked at a matching point and stop on their end pose (`docking::play_cranes`). PROVISIONAL: that docking starts them is the owner's reading (the clips are matched to dock points by name); the exact start/stop moments in the dock routine are not measured. The smoothing value of a key picks the curve
 (see "Animal skeletons").
 
 ### Animal skeletons (space dragon, whale)
