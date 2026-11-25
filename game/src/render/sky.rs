@@ -137,7 +137,7 @@ pub struct Sheet {
 
 /// A game-axes vector (x starboard, y forward, z up) in Bevy's.
 fn game_vec(v: &Value) -> Option<Vec3> {
-    rgb(v).map(|d| Vec3::new(d.x, d.z, -d.y))
+    rgb(v).map(|d| crate::data::conv(d.x, d.y, d.z))
 }
 
 // What a profile's sky keys fall back to when it leaves them out. All PROVISIONAL.

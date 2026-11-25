@@ -1011,6 +1011,12 @@ pub(crate) fn steer_round(from: Vec3, goal: Vec3, leader: Vec3, clearance: f32) 
     (leader + side * clearance * 1.2).with_y(goal.y)
 }
 
+/// What the presentation (sail billow, flag, deck rules) reads as "how fast the ship goes": |speed| over the class's full speed,
+/// 0..1. Distinct from `speed_fraction` (top speed passed in, 0 below 0.001, no floor on a zero class speed here).
+pub fn speed_share(speed: f32, class: &combat::Class) -> f32 {
+    (speed.abs() / full_speed(class).max(1e-3)).clamp(0.0, 1.0)
+}
+
 /// A ship's speed as a fraction of its top speed `top` (0..1; 0 when it has none): the path-end and install-primary throttle.
 pub(crate) fn speed_fraction(speed: f32, top: f32) -> f32 {
     if top > 0.001 { (speed.abs() / top).clamp(0.0, 1.0) } else { 0.0 }

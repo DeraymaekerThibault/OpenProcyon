@@ -271,7 +271,7 @@ fn motion(
     made.wind.retain(|e, _| ships.contains(*e));
     if let Some(lib) = lib {
         for (e, sh) in &ships {
-            let share = (sh.speed.abs() / crate::ship::full_speed(&lib.classes[sh.class]).max(1e-3)).clamp(0.0, 1.0);
+            let share = crate::ship::speed_share(sh.speed, &lib.classes[sh.class]);
             let wind = made.wind.entry(e).or_insert(share);
             *wind += (share - *wind) * (dt * 1.2).min(1.0);
         }
