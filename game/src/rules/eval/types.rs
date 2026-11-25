@@ -416,7 +416,8 @@ impl Region {
         }
         let edge = |i: usize| {
             let (a, b) = (self.0[i], self.0[(i + 1) % self.0.len()]);
-            crate::geom::nearest_on_segment_floored_2d(from, a, b, 1e-6)
+            let t = ((from - a).dot(b - a) / (b - a).length_squared().max(1e-6)).clamp(0.0, 1.0);
+            a + (b - a) * t
         };
         let near = (0..self.0.len()).map(edge).min_by(|x, y| x.distance_squared(from).total_cmp(&y.distance_squared(from)))?;
         Some(near + (c - near).normalize_or_zero() * 15.0_f32.min(near.distance(c)))

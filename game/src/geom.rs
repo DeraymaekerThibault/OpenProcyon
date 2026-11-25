@@ -39,10 +39,3 @@ pub fn nearest_on_segment_floored(p: Vec3, a: Vec3, b: Vec3, floor: f32) -> Vec3
     let along = ((p - a).dot(span) / span.length_squared().max(floor)).clamp(0.0, 1.0);
     a + span * along
 }
-
-/// `nearest_on_segment_floored` in the plane.
-pub fn nearest_on_segment_floored_2d(p: Vec2, a: Vec2, b: Vec2, floor: f32) -> Vec2 {
-    let ab = b - a;
-    let t = ((p - a).dot(ab) / ab.length_squared().max(floor)).clamp(0.0, 1.0);
-    a + ab * t
-}

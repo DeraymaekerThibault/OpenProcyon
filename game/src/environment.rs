@@ -587,7 +587,8 @@ impl Current {
             .filter_map(|w| {
                 let (a, b) = (flat(w[0]), flat(w[1]));
                 let ab = b - a;
-                let d = q.distance(crate::geom::nearest_on_segment_floored_2d(q, a, b, 1e-6));
+                let t = ((q - a).dot(ab) / ab.length_squared().max(1e-6)).clamp(0.0, 1.0);
+                let d = q.distance(a + ab * t);
                 (d < self.radius).then_some((d, ab.normalize_or_zero()))
             })
             .min_by(|a, b| a.0.total_cmp(&b.0))
