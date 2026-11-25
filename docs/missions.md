@@ -260,7 +260,7 @@ Observed while building larger missions and re-read against `game/src/rules/eval
 - **Following and "stopped alongside"**: `OP Follow Group` keeps a ship on a station beside, ahead of or behind another (a campaign
   mission's AI carries it out); `OP Group Speed` with `Fastest` `Less Than` a small number is "the whole group has stopped".
 - **Throttle caps**: `Set Group Throttle Percent` sets the current speed, `Set Max Throttle Percent (Max user settable)` caps what the
-  player may choose; `Speed 0` on the human's ship stops it without capping it.
+  player may choose; `Speed 0` on the human's ships (the command ship and the rest of the human's fleet) stops them without capping them.
 - **Time**: timers wait out only the retail mission 1's opening briefing, so a custom mission has no such pause. Whether rule time keeps
   running while the game is paused is unverified (PROVISIONAL).
 - **A `Run Once` rule is spent when it fires**, even if one of its actions was a no-op because a name did not resolve: run

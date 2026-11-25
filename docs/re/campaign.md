@@ -334,7 +334,9 @@ Still missing (warned at runtime, ignored), with the missions they block:
   limited to boardable bases. Mission 1 and 2 pickup/fallback paths are exercised by scripted smoke only, not yet by a normal-combat replay.
 - (done) mission 9 specials (`If Mortar explodes within Area`, Dark Matter explosion, Teleport Longboat): the autoplay bot completes
   mission 9 with them (#68). A ship handed to the human in the same rule as `Set Group Throttle Percent` is stopped, not capped:
-  the hand-off is applied after the rule's other actions, and a cap of 0 left mission 9's Longboat unable to move.
+  the hand-off is applied after the rule's other actions, and a cap of 0 left mission 9's Longboat unable to move. The human's other
+  fleet ships are treated the same way: mission 4 stops 'Player0 Group' at each cutscene and never sets it back, and as a cap that froze
+  the RLS Beans (and the RLS Swiftsure once it joins) for the rest of the mission.
 - dragons (`Dragon - Set AI Stance/Damage Threshold`; dragons are not spawned): missions 6-8 dragon encounters.
 - (done, provisional) Etherium currents (`*State Init* Setup Etherium Current`, missions 3, 4, 10): planar push plus two flowing textured river ribbons
   on each available path; one mission 10 setup references missing `ebend`. Weather damage now uses the separate retail nebula tables instead of weapon bullets
