@@ -95,6 +95,62 @@ fn a_target_is_the_players_own_on_the_command_ship_and_an_attack_order_on_a_capt
     assert_eq!(app.world().get::<crate::ship::FleetPilot>(captain).unwrap().target, Some(enemy), "a captain keeps its attack order");
 }
 
+/// A click on water: the command ship sails there (Shift appends, a stopped ship goes to light-green Full), a captain is ordered
+/// there; both end a hold and a dock routine. Backspace drops the course, and the armed shot or the captain's orders.
+#[test]
+fn move_course_and_cancel_orders_do_what_the_clicks_and_keys_did() {
+    let mut app = battle();
+    app.add_message::<crate::docking::DockMsg>();
+    let (me, captain, enemy) = fleet(&mut app);
+    loaded(&mut app);
+    app.world_mut().entity_mut(me).insert(crate::ship::HoldPosition);
+    app.world_mut().entity_mut(captain).insert(crate::ship::HoldPosition);
+    let (a, b, c) = (Vec3::X, Vec3::Z, Vec3::NEG_X);
+    send(&mut app, Kind::Move { ship: me, to: a, append: false });
+    send(&mut app, Kind::Move { ship: me, to: b, append: true });
+    send(&mut app, Kind::Move { ship: captain, to: c, append: false });
+    frame(&mut app, 40);
+    let ship = |app: &App, e| app.world().get::<Ship>(e).unwrap().clone();
+    assert_eq!((ship(&app, me).waypoints, ship(&app, me).order), (vec![a, b], EngineOrder::Full));
+    assert_eq!(app.world().get::<crate::ship::FleetPilot>(captain).unwrap().destination, Some(c));
+    assert!(ship(&app, captain).waypoints.is_empty(), "a captain's move is an order, not the command ship's course");
+    for e in [me, captain] {
+        assert!(app.world().get::<crate::ship::HoldPosition>(e).is_none(), "a move ends a hold");
+    }
+    let cancels: Vec<_> = app.world_mut().resource_mut::<Messages<crate::docking::DockMsg>>().drain().collect();
+    assert_eq!(cancels.iter().filter(|m| matches!(m, crate::docking::DockMsg::CancelShip(_))).count(), 3, "each move ends a dock routine");
+    send(&mut app, Kind::Move { ship: me, to: c, append: false });
+    frame(&mut app, 40);
+    assert_eq!(ship(&app, me).waypoints, vec![c], "without Shift the course starts again");
+    // A plotted course replaces the course; only the click that closes it ends a hold.
+    app.world_mut().entity_mut(me).insert(crate::ship::HoldPosition);
+    app.world_mut().get_mut::<Ship>(me).unwrap().order = EngineOrder::Stop;
+    send(&mut app, Kind::Course { ship: me, points: vec![b, a], release: false });
+    frame(&mut app, 40);
+    assert_eq!((ship(&app, me).waypoints, ship(&app, me).order), (vec![b, a], EngineOrder::Full));
+    assert!(app.world().get::<crate::ship::HoldPosition>(me).is_some(), "Enter keeps the hold");
+    send(&mut app, Kind::Course { ship: me, points: vec![a], release: true });
+    frame(&mut app, 40);
+    assert!(app.world().get::<crate::ship::HoldPosition>(me).is_none(), "the closing click ends it");
+    // Backspace: the command ship keeps its engines and loses the armed shot; a captain stops and forgets its orders.
+    {
+        let mut t = app.world_mut().resource_mut::<crate::combat::Target>();
+        t.2.armed = Some(1);
+        t.2.shot = Some((1, Vec3::ONE));
+    }
+    app.world_mut().get_mut::<crate::ship::FleetPilot>(captain).unwrap().attack(enemy);
+    app.world_mut().get_mut::<crate::ship::FleetPilot>(captain).unwrap().hold = true;
+    app.world_mut().get_mut::<Ship>(captain).unwrap().order = EngineOrder::Full;
+    send(&mut app, Kind::Cancel { ship: me });
+    send(&mut app, Kind::Cancel { ship: captain });
+    frame(&mut app, 40);
+    let t = app.world().resource::<crate::combat::Target>();
+    assert_eq!((t.2.armed, t.2.shot), (None, None));
+    assert_eq!((ship(&app, me).waypoints.len(), ship(&app, me).order), (0, EngineOrder::Full));
+    let p = app.world().get::<crate::ship::FleetPilot>(captain).unwrap();
+    assert_eq!((p.destination, p.target, p.hold, ship(&app, captain).order), (None, None, false, EngineOrder::Stop));
+}
+
 #[test]
 fn a_command_keeps_its_meaning_through_the_file() {
     let mut app = battle();
@@ -104,6 +160,9 @@ fn a_command_keeps_its_meaning_through_the_file() {
         Kind::Engine { ship: me, engine: Engine::To(EngineOrder::Emergency) },
         Kind::Target { ship: me, target: Some(enemy), spot: Some(Vec3::new(0.25, -1.5, 3.0)) },
         Kind::Target { ship: me, target: None, spot: None },
+        Kind::Move { ship: me, to: Vec3::new(10.0, 0.0, -20.5), append: true },
+        Kind::Course { ship: me, points: vec![Vec3::new(1.0, 0.0, 2.0), Vec3::new(-3.0, 0.0, 4.0)], release: false },
+        Kind::Cancel { ship: me },
     ];
     for kind in kinds {
         let saved = Saved::save(app.world(), &kind).unwrap();

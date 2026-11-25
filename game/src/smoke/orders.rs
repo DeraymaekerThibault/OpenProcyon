@@ -58,6 +58,9 @@ pub fn orders(
         6 if due(20.0) => Some(Kind::Engine { ship: me, engine: Engine::Faster }),
         7 if due(26.0) => Some(Kind::Target { ship: me, target: None, spot: None }),
         8 if due(32.0) => Some(Kind::Target { ship: me, target: enemy(), spot: None }),
+        9 if due(36.0) => Some(Kind::Move { ship: me, to: at.translation + at.forward() * 300.0, append: false }),
+        10 if due(38.0) => Some(Kind::Move { ship: me, to: at.translation + at.right() * 300.0, append: true }),
+        11 if due(44.0) => Some(Kind::Cancel { ship: me }),
         _ => return,
     };
     if p.step == 3 && order.is_none() {
