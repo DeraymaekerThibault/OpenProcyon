@@ -56,7 +56,14 @@ Each nebula keeps, from its `Terrain_Nebula` state: centre, radius,
 - **Membership**: on the update timer the nebula scans world objects of selected types (a small type list that includes ships, see the type
   filter in the function) and puts an object in the *inside* list when its 3-D distance to the centre is less than the radius **and** its (x,y)
   is inside the nebula's polygon (the original calls its polygon test with x,y). Objects that left are dropped from the list unless `IsTrapping`
-  is set, in which case they stay inside ("trap objects" action).
+  is set, in which case they stay inside ("trap objects" action). The update timer is 1.5 s.
+- **'Unit is Within any Nebula'** takes the first unit of the named group and is true when that unit is on the inside list of any nebula:
+  it reads the list, it does not test the polygon itself. So the condition turns true at the first list update after the unit enters
+  (up to 1.5 s later) and stays true while a trapping nebula holds it. Mission 3's storm cutscene ("Start NIS 2") therefore starts as soon as
+  the travelling storm has caught the ship: with the ship waiting at (600, -1050) the storm (50 units/s along its path from its own position)
+  covers it 20.3 s after the trigger. Remake: the condition also counts every ship a nebula acted on in the last step (`nebula::InNebula`);
+  before, a ship the storm carried rode the polygon's edge one step outside it on the rules' positions, and the cutscene came 5 s late.
+  PROVISIONAL: the remake updates membership every step, not every 1.5 s, and checks every unit of the group, not only the first.
 - **Slow-down factor**: every frame, each inside *ship* gets `Nebula Slow Down Factor = clamp(1 - distance_to_centre / radius, 0, 1)`; ships not in
   the list are reset to 0. The value is a ship field saved in the TWT (`Nebula Slow Down Factor`; observed non-zero saves 0.25-0.56) and the sail
   update copies it into the sail/movement state (the same step that raises crew sail-strength announcements at 25/50/75/100 %).

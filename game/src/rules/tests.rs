@@ -152,7 +152,10 @@ fn mission_three_nebula_entry_tracks_the_travelling_storm() {
     sc.nebulae = crate::nebula::polygons(&m.data, &shift);
     assert!(sc.cond(&cond, &[player.clone()], false), "storm moved over the ship");
     player.pos.x -= 1300.0;
-    assert!(!sc.cond(&cond, &[player], false), "original boundary must no longer count");
+    assert!(!sc.cond(&cond, &[player.clone()], false), "original boundary must no longer count");
+    // A ship the storm holds rides the cloud's edge and can sit a step outside the polygon: it still counts (retail inside list).
+    sc.in_nebula.insert(player.e);
+    assert!(sc.cond(&cond, &[player], false), "a ship the storm holds is within it");
 }
 
 #[test]

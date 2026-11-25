@@ -258,6 +258,11 @@ struct WeatherDamage(HashMap<String, HashMap<String, [f32; 5]>>);
 #[derive(Resource, Default)]
 pub struct StormShift(pub HashMap<String, (Vec3, Vec3)>);
 
+/// The ships inside a nebula's polygon on the last storm step (those a trapping storm carries included), for 'Unit is Within any
+/// Nebula'. PROVISIONAL: retail refreshes its inside lists every 1.5 s; this is every step.
+#[derive(Resource, Default)]
+pub struct InNebula(pub std::collections::HashSet<Entity>);
+
 fn move_meteors(
     time: Res<Time>,
     plans: Res<MeteorPlans>,
@@ -341,7 +346,9 @@ fn storms(
     mut flashes: MessageWriter<StormFlash>,
     mut timers: Local<HashMap<(String, u8), f32>>,
     mut rng: ResMut<crate::combat::SimRng>,
+    mut inside: ResMut<InNebula>,
 ) {
+    inside.0.clear();
     let (Some(map), Some(damage)) = (setups, damage) else { return };
     if map.is_changed() {
         timers.clear();
@@ -364,6 +371,7 @@ fn storms(
             if h.destroyed || ms.is_some_and(|m| !m.visible) || !crate::rules::in_game_volume(poly, tf.translation.x - offset.x, -(tf.translation.z - offset.z)) {
                 continue;
             }
+            inside.0.insert(e);
             if trap {
                 tf.translation += step;
             }
@@ -643,6 +651,7 @@ pub fn plugin(app: &mut App) {
         .add_message::<StormFlash>()
         .init_resource::<MeteorPlans>()
         .init_resource::<StormShift>()
+        .init_resource::<InNebula>()
         .add_systems(Update, update.run_if(in_state(crate::menu::Screen::Battle)))
         .add_systems(FixedUpdate, (route_meteors, move_meteors, storms, slowdown).chain().in_set(crate::BattleSet::Forces).run_if(in_state(crate::menu::Screen::Battle)));
 }

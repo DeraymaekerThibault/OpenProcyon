@@ -113,6 +113,7 @@ impl Script {
             objects: data["objects"].clone(),
             volumes: data["volumes"].as_object().into_iter().flatten().map(|(name, v)| (name.clone(), Region::from_json(v))).collect(),
             nebulae: crate::nebula::polygons(data, &crate::nebula::StormShift::default()),
+            in_nebula: HashSet::new(),
             hits: HashMap::new(),
             hits_by: HashMap::new(),
             fired_at: HashMap::new(),

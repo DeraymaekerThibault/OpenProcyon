@@ -54,6 +54,7 @@ struct Extra<'w, 's> {
     asteroids: MessageWriter<'w, crate::combat::AsteroidSetup>,
     meteors: MessageWriter<'w, crate::nebula::MeteorRoute>,
     storm_shift: Res<'w, crate::nebula::StormShift>,
+    in_nebula: Option<Res<'w, crate::nebula::InNebula>>,
     campaign_points: ResMut<'w, crate::campaign::CampaignPoints>,
     /// Not retail: what a won custom mission hands on to the next one (`OP Set Campaign Counter`).
     campaign_values: Option<ResMut<'w, crate::campaign::CampaignValues>>,
@@ -239,6 +240,7 @@ fn update(
         }
     }
     script.nebulae = crate::nebula::polygons(&mission.data, &extra.storm_shift);
+    script.in_nebula = extra.in_nebula.as_ref().map(|n| n.0.clone()).unwrap_or_default();
     let (fxs, voice) = script.step(&world, dt, opening);
     if let Some(file) = voice {
         commands.spawn((
