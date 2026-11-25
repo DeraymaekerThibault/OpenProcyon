@@ -14,6 +14,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use crate::audio::Sfx;
 use crate::boarding::BoardMsg;
 use crate::combat::{Health, Library, ray_hit, seg_sphere};
+use crate::commands::{Kind as CommandKind, Orders};
 use crate::docking::Dockees;
 use crate::panels::REF_H;
 use crate::sprites::{HudData, offset, size_of};
@@ -239,12 +240,12 @@ fn is_tap(press: (Vec2, f32), cursor: Vec2, now: f32) -> bool {
 }
 
 /// The sound of a left click on slot `act` and the boarding message it sends, after doing what the slot says for ship `actor`
-/// (`player` is its ship state). A Focus slot the ship cannot see the target for comes in as `Unavailable`.
+/// (Stop, Hold and Cloak are `commands` orders). A Focus slot the ship cannot see the target for comes in as `Unavailable`.
 fn run_slot(
     act: Option<Act>,
     target: Entity,
     actor: Entity,
-    player: &mut Ship,
+    orders: &mut Orders,
     commands: &mut Commands,
     orbit: &mut Orbit,
     docks: &mut Dockees,
@@ -256,42 +257,20 @@ fn run_slot(
             "HUD_Options_Focus"
         }
         Some(Act::Stop) => {
-            player.stand_still();
-            commands.entity(actor).insert(player.clone());
-            commands.queue(move |w: &mut World| {
-                if let Some(mut p) = w.get_mut::<crate::ship::FleetPilot>(actor) {
-                    p.cancel_actions();
-                }
-            });
-            docks.cancel_as(actor);
+            orders.send(CommandKind::Stop { ship: actor });
             "HUD_Options_Stop"
         }
         Some(Act::HoldOn) => {
-            player.stand_still();
-            commands.entity(actor).insert((player.clone(), crate::ship::HoldPosition));
-            commands.queue(move |w: &mut World| {
-                if let Some(mut p) = w.get_mut::<crate::ship::FleetPilot>(actor) {
-                    p.hold_position();
-                }
-            });
+            orders.send(CommandKind::Hold { ship: actor, on: true });
             "HUD_Options_Select"
         }
         Some(Act::HoldOff) => {
-            commands.entity(actor).remove::<crate::ship::HoldPosition>();
+            orders.send(CommandKind::Hold { ship: actor, on: false });
             "HUD_Options_Select"
         }
         Some(a @ (Act::CloakStart | Act::CloakStop)) => {
             let on = a == Act::CloakStart;
-            commands.queue(move |w: &mut World| {
-                let side = w.get::<Ship>(actor).map(|s| s.side);
-                if let (Some(mut c), Some(side)) = (w.get_mut::<crate::cloak::Cloak>(actor), side) {
-                    if on {
-                        c.start(side);
-                    } else {
-                        c.stop();
-                    }
-                }
-            });
+            orders.send(CommandKind::Cloak { ship: actor, on });
             if on { "HUD_Options_CloakStart" } else { "HUD_Options_CloakStop" }
         }
         Some(Act::BoardStart) => {
@@ -413,11 +392,12 @@ fn menu(
     mut orbit: ResMut<Orbit>,
     mut docks: Dockees,
     mut sfx: MessageWriter<Sfx>,
+    mut orders: Orders,
 ) {
     let mission = scene.mission.as_deref();
     let Some(actor) = scene.fleets.selected else { return };
     let Ok((e, source, tf)) = scene.actors.get(actor) else { return };
-    let mut player = (e, source.clone(), tf);
+    let player = (e, source, tf);
     let Local2 { open: open_menu, press, hover } = &mut *local;
     if open_menu.as_ref().is_some_and(|o| o.actor != actor || commands.get_entity(o.root).is_err() || !scene.sensors.player_sees(o.target, mission)) {
         if let Some(o) = open_menu.take()
@@ -463,7 +443,7 @@ fn menu(
             Some(Act::Focus) if open.target != actor && !scene.sensors.in_sight(actor, open.target, mission) => Some(Act::Unavailable),
             act => act,
         };
-        let (sound, msg) = run_slot(act, open.target, actor, &mut player.1, &mut commands, &mut orbit, &mut docks);
+        let (sound, msg) = run_slot(act, open.target, actor, &mut orders, &mut commands, &mut orbit, &mut docks);
         if let Some(msg) = msg {
             boarding.board.write(msg);
         }

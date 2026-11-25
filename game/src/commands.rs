@@ -19,7 +19,7 @@
 //! itself (`--replay <file>` alone, however the lobby was set up); campaign missions started from the menus are still refused. Only
 //! the first battle of a run is recorded; a restart ends the recording.
 //!
-//! Routed so far: engine orders, target picks, and move, course and cancel orders. The other orders still change the battle directly and are not in a recording yet
+//! Routed so far: engine orders, target picks, move, course and cancel orders, and the right-click menu's Stop, Hold and Cloak. The other orders still change the battle directly and are not in a recording yet
 //! (later PRs, one group each). PROVISIONAL: the file format (version 2; version 1, without the skirmish setup, still reads).
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
@@ -62,6 +62,13 @@ pub enum Kind {
     /// Backspace with no course being plotted: the ship's waypoints and grapple order go, and with them the armed bank and its shot
     /// (command ship), or the captain's destination, target and hold, and its engines.
     Cancel { ship: Entity },
+    /// The right-click menu's Stop: the ship's course, heading goal and engines end (`Ship::stand_still`), a captain's destination
+    /// and target too (the formation hold and hold fire stay), and so does a dock routine in progress.
+    Stop { ship: Entity },
+    /// The menu's Hold (`on`) and its release: a held ship stands still where it is and keeps firing (`ship::HoldPosition`).
+    Hold { ship: Entity, on: bool },
+    /// The menu's Cloak Start / Stop, for a ship that can cloak (`cloak::Cloak`).
+    Cloak { ship: Entity, on: bool },
 }
 
 /// One player order.
@@ -106,6 +113,7 @@ pub struct Clock {
 pub fn apply(world: &mut World, kind: &Kind) {
     match *kind {
         Kind::Move { .. } | Kind::Course { .. } | Kind::Cancel { .. } => apply_movement(world, kind),
+        Kind::Stop { .. } | Kind::Hold { .. } | Kind::Cloak { .. } => apply_menu(world, kind),
         Kind::Engine { ship, engine } => {
             if let Some(mut s) = world.get_mut::<Ship>(ship) {
                 s.throttle = None;
@@ -201,6 +209,49 @@ fn apply_movement(world: &mut World, kind: &Kind) {
                 p.destination = None;
                 p.target = None;
                 p.hold = false;
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Stop, hold and cloak orders (the right-click menu).
+fn apply_menu(world: &mut World, kind: &Kind) {
+    match *kind {
+        Kind::Stop { ship } => {
+            if let Some(mut s) = world.get_mut::<Ship>(ship) {
+                s.stand_still();
+            }
+            if let Some(mut p) = world.get_mut::<crate::ship::FleetPilot>(ship) {
+                p.cancel_actions();
+            }
+            if let Some(mut msgs) = world.get_resource_mut::<Messages<crate::docking::DockMsg>>() {
+                msgs.write(crate::docking::DockMsg::CancelShip(ship));
+            }
+        }
+        Kind::Hold { ship, on: true } => {
+            let Ok(mut e) = world.get_entity_mut(ship) else { return };
+            e.insert(crate::ship::HoldPosition);
+            if let Some(mut s) = e.get_mut::<Ship>() {
+                s.stand_still();
+            }
+            if let Some(mut p) = e.get_mut::<crate::ship::FleetPilot>() {
+                p.hold_position();
+            }
+        }
+        Kind::Hold { ship, on: false } => {
+            if let Ok(mut e) = world.get_entity_mut(ship) {
+                e.remove::<crate::ship::HoldPosition>();
+            }
+        }
+        Kind::Cloak { ship, on } => {
+            let side = world.get::<Ship>(ship).map(|s| s.side);
+            if let (Some(mut c), Some(side)) = (world.get_mut::<crate::cloak::Cloak>(ship), side) {
+                if on {
+                    c.start(side);
+                } else {
+                    c.stop();
+                }
             }
         }
         _ => {}
@@ -341,6 +392,9 @@ pub enum Saved {
     Move { ship: NetId, to: [f32; 3], append: bool },
     Course { ship: NetId, points: Vec<[f32; 3]>, release: bool },
     Cancel { ship: NetId },
+    Stop { ship: NetId },
+    Hold { ship: NetId, on: bool },
+    Cloak { ship: NetId, on: bool },
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -440,6 +494,9 @@ impl Saved {
             Kind::Move { ship, to, append } => Saved::Move { ship: id(ship)?, to: game_axes(to), append },
             Kind::Course { ship, ref points, release } => Saved::Course { ship: id(ship)?, points: points.iter().copied().map(game_axes).collect(), release },
             Kind::Cancel { ship } => Saved::Cancel { ship: id(ship)? },
+            Kind::Stop { ship } => Saved::Stop { ship: id(ship)? },
+            Kind::Hold { ship, on } => Saved::Hold { ship: id(ship)?, on },
+            Kind::Cloak { ship, on } => Saved::Cloak { ship: id(ship)?, on },
         })
     }
     /// The command for this world; None when an object it names is gone.
@@ -463,6 +520,9 @@ impl Saved {
             Saved::Move { ship, to, append } => Kind::Move { ship: ship.find(world)?, to: bevy_axes(to), append },
             Saved::Course { ship, ref points, release } => Kind::Course { ship: ship.find(world)?, points: points.iter().copied().map(bevy_axes).collect(), release },
             Saved::Cancel { ship } => Kind::Cancel { ship: ship.find(world)? },
+            Saved::Stop { ship } => Kind::Stop { ship: ship.find(world)? },
+            Saved::Hold { ship, on } => Kind::Hold { ship: ship.find(world)?, on },
+            Saved::Cloak { ship, on } => Kind::Cloak { ship: ship.find(world)?, on },
         })
     }
 }
