@@ -509,8 +509,7 @@ fn breakup(
             let mut found = vec![];
             for d in children.iter_descendants(e) {
                 let Ok((name, ntf, _)) = nodes.get(d) else { continue };
-                let base = crate::data::derive::damaged_layer(name.as_str()).unwrap_or_else(|| name.as_str().to_string());
-                if let Some(i) = class.sections.iter().position(|s| s.layer.eq_ignore_ascii_case(&base)) {
+                if let (Some(i), _) = damage::section_of_node(class, name.as_str(), false) {
                     found.push((d, i, *ntf, false));
                 }
             }
