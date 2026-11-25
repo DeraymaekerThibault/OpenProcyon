@@ -330,7 +330,11 @@ pub(in crate::rules) fn apply(
                 });
             }
             Fx::Damage(u, p) => {
-                each_ship(ships, u, |s| crate::combat::fraction_hit(&env.lib.classes[s.ship.class], &mut s.health, p, s.ship.side, s.mission.invuln, env.difficulty))
+                each_ship(ships, u, |s| {
+                    // only the human's own ships take the difficulty factor: an allied computer ship (mission 2's SS Coventry) takes it whole
+                    let human = s.ship.side == Side::Player && s.mission.owner == env.script.player();
+                    crate::combat::fraction_hit(&env.lib.classes[s.ship.class], &mut s.health, p, human, s.mission.invuln, env.difficulty)
+                })
             }
             // A skirmish's 'Hold position' is the captain's lock (the right-click menu's Hold): the ship stays where it is and still
             // fires; releasing hands it back to its captain or to the next order the script gives.

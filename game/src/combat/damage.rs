@@ -250,7 +250,8 @@ pub fn damage_fx(
 /// round(its current hit points x `fraction`) through the normal hit routine (spill into neighbours of a section left at 0, core bleed
 /// through dead vital sections, the human's ships taking the difficulty factor: the hit carries no attacker, so computer ships take
 /// none). The core is never scaled directly: a fraction below 1 leaves it whole unless vital sections die.
-pub fn fraction_hit(class: &Class, hp: &mut Health, fraction: f32, victim: Side, invuln: f32, difficulty: u8) {
+pub fn fraction_hit(class: &Class, hp: &mut Health, fraction: f32, humans_own_ship: bool, invuln: f32, difficulty: u8) {
+    let victim = if humans_own_ship { Side::Player } else { Side::Enemy };
     let scale = super::shells::side_damage_scale(Side::Enemy, victim, difficulty, false);
     let mut rng = Rng::default();
     for k in 0..hp.sections.len() {

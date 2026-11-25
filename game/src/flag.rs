@@ -123,12 +123,13 @@ fn snap(
                 continue;
             }
             let Some(m) = meshes.get(&mesh.0) else { continue 'flags };
-            let Some(bevy::mesh::VertexAttributeValues::Float32x3(pos)) = m.attribute(Mesh::ATTRIBUTE_POSITION) else { continue };
+            // a mesh that lives on the GPU only (the remaster's deck crews) has no positions here: reading them would panic
+            let Ok(Some(bevy::mesh::VertexAttributeValues::Float32x3(pos))) = m.try_attribute_option(Mesh::ATTRIBUTE_POSITION) else { continue };
             let local = to_ship * at.affine();
             let pos: Vec<[f32; 3]> = pos.iter().map(|p| local.transform_point3(Vec3::from(*p)).to_array()).collect();
-            let tris = match m.indices() {
-                Some(i) => i.iter().collect::<Vec<_>>().as_chunks::<3>().0.to_vec(),
-                None => (0..pos.len() / 3).map(|t| [3 * t, 3 * t + 1, 3 * t + 2]).collect(),
+            let tris = match m.try_indices_option() {
+                Ok(Some(i)) => i.iter().collect::<Vec<_>>().as_chunks::<3>().0.to_vec(),
+                _ => (0..pos.len() / 3).map(|t| [3 * t, 3 * t + 1, 3 * t + 2]).collect(),
             };
             pieces.push((pos, tris));
         }
@@ -308,6 +309,33 @@ mod tests {
         let (top, bottom) = onto_staff(&pieces, Vec3::new(0.0, 3.0, 0.0), Vec3::new(0.0, 1.0, 0.0), 3.0).unwrap();
         assert!(top.distance(Vec3::new(0.0, 3.0, 2.3)) < 0.11 && bottom.distance(Vec3::new(0.0, 1.0, 2.1)) < 0.11, "{top} {bottom}");
         assert!(onto_staff(&pieces, Vec3::new(0.0, 3.0, 0.0), Vec3::new(0.0, 1.0, 0.0), 1.0).is_none(), "out of reach: retail points kept");
+    }
+
+    /// A mesh already handed to the GPU (the remaster's deck crews ride the ship) is skipped, not read: reading it panicked at a
+    /// mission start. The flag still snaps by the ship's other meshes.
+    #[test]
+    fn a_gpu_only_mesh_on_the_ship_is_skipped_when_snapping() {
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, AssetPlugin::default())).init_asset::<Mesh>().add_systems(Update, snap);
+        let mut gone = Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::RENDER_WORLD);
+        gone.insert_attribute(Mesh::ATTRIBUTE_POSITION, vec![[0.0f32; 3]; 3]);
+        let _ = gone.take_gpu_data();
+        let staff = Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::default())
+            .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, vec![[-0.1f32, 0.0, 2.0], [0.1, 0.0, 2.0], [-0.1, 4.0, 2.4], [0.1, 4.0, 2.4]])
+            .with_inserted_indices(Indices::U32(vec![0, 1, 2, 1, 3, 2]));
+        let (gone, staff) = {
+            let mut meshes = app.world_mut().resource_mut::<Assets<Mesh>>();
+            (meshes.add(gone), meshes.add(staff))
+        };
+        let ship = app.world_mut().spawn(GlobalTransform::IDENTITY).id();
+        for m in [gone, staff] {
+            app.world_mut().spawn((Mesh3d(m), GlobalTransform::IDENTITY, ChildOf(ship)));
+        }
+        let flag = Flag { top: Vec3::new(0.0, 3.0, 0.0), bottom: Vec3::new(0.0, 1.0, 0.0), phase: 0.0, clock: 0.0, wind: 0.0, drawn: 0.0 };
+        let f = app.world_mut().spawn((flag, Unsnapped, ChildOf(ship))).id();
+        app.update();
+        assert!(!app.world().entity(f).contains::<Unsnapped>(), "snapped");
+        assert!(app.world().get::<Flag>(f).unwrap().top.z > 2.0, "onto the staff");
     }
 
     #[test]

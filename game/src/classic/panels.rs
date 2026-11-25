@@ -101,6 +101,8 @@ struct BarButton {
     states: States,
     /// The same for the paused game, on the PAUSE button.
     paused: Option<States>,
+    /// The same for the advanced (waypoint-plotting) movement type, on the movement-type button: shown, always, while it is chosen.
+    advanced: Option<States>,
     /// The part's box in reference pixels (art past its right edge is not part of the layout).
     region: Rect,
 }
@@ -499,11 +501,12 @@ fn spawn_part(commands: &mut Commands, c: &Ctx, class: &combat::Class, parent: E
     // Retail art without hover or pressed variants (the gauge troughs) is only a box.
     let states = c.states(name).filter(|st| st.art[1].image != st.art[0].image || st.art[2].image != st.art[0].image);
     let paused = (name == "MAINBAR_IS_NOT_PAUSED_BUTTON").then(|| c.states("MAINBAR_IS_PAUSED_BUTTON")).flatten();
+    let advanced = (name == "MainBar_BeginnerMovementTypeButton").then(|| c.states("MainBar_AdvancedMovementTypeButton")).flatten();
     let mut img = art.image_node();
     img.color = Color::NONE;
     let part_entity = commands.spawn((node, ChildOf(parent), Solid, Interaction::None, FocusPolicy::Block)).id();
     if let Some(states) = states {
-        commands.entity(part_entity).insert((img, BarButton { states, paused, region: Rect::from_corners(Vec2::ZERO, size) }));
+        commands.entity(part_entity).insert((img, BarButton { states, paused, advanced, region: Rect::from_corners(Vec2::ZERO, size) }));
     }
     if name == "MAINBAR_IS_NOT_PAUSED_BUTTON" {
         commands.entity(part_entity).insert(PauseButton);
@@ -670,15 +673,18 @@ fn update_guns(
     }
 }
 
-/// Bar buttons draw their hover and pressed art over the composed bar (PAUSE: the paused art, always, while the game is paused).
+/// Bar buttons draw their hover and pressed art over the composed bar (PAUSE: the paused art, always, while the game is paused;
+/// the movement-type button: the advanced art, always, while waypoint plotting is chosen).
 /// PROVISIONAL: the retail hourglass art is swapped; any retail restrictions while paused are not decoded.
 #[allow(deprecated)] // Interaction, see pointer.rs
-fn bar_button_art(vtime: Res<Time<Virtual>>, mut q: Query<(&BarButton, &Interaction, &mut ImageNode, &mut Node)>) {
+fn bar_button_art(vtime: Res<Time<Virtual>>, plot: Option<Res<crate::course::Plot>>, mut q: Query<(&BarButton, &Interaction, &mut ImageNode, &mut Node)>) {
+    let advanced = plot.is_some_and(|p| p.advanced);
     for (button, interaction, mut img, mut node) in &mut q {
         let at = state_index(interaction);
-        let art = match (&button.paused, vtime.is_paused(), at) {
-            (Some(paused), true, _) => Some(&paused.art[at]),
-            (_, _, 0) => None,
+        let art = match (&button.paused, vtime.is_paused(), &button.advanced, at) {
+            (Some(paused), true, _, _) => Some(&paused.art[at]),
+            (_, _, Some(alt), _) if advanced => Some(&alt.art[at]),
+            (_, _, _, 0) => None,
             _ => Some(&button.states.art[at]),
         };
         let color = if art.is_some() { Color::WHITE } else { Color::NONE };
@@ -694,6 +700,12 @@ fn bar_button_art(vtime: Res<Time<Virtual>>, mut q: Query<(&BarButton, &Interact
 /// Reference-px height above the screen bottom where the ship bar starts (top of the toggle button + the data's gap).
 #[derive(Resource)]
 struct ShipBarAnchor(f32);
+
+/// The ship bar's distance from the screen bottom, in window px: centred on a `window_h` screen, or `lowest` when centring would
+/// bring it lower (a tall bar on a short screen).
+fn ship_bar_bottom(window_h: f32, bar_h: f32, lowest: f32) -> f32 {
+    ((window_h - bar_h) / 2.0).max(lowest)
+}
 /// Ship-bar slot parts, by row index.
 #[derive(Component)]
 struct FleetIcon(usize);
@@ -890,7 +902,10 @@ fn fleet_art(
         let (top, mid, bottom) = (c.size_of("ShipBar_TopDetail"), c.size_of("ShipBar_StretchedCenter"), c.size_of("ShipBar_BottomDetail"));
         let rows = n.div_ceil(2).max(1);
         let h = top.y + (rows - 1) as f32 * mid.y + bottom.y;
-        let node = Node { right: Val::Px(0.0), bottom: px(anchor.0, s), left: Val::Auto, top: Val::Auto, ..c.abs(0.0, 0.0, Vec2::new(top.x, h)) };
+        // Vertically centred on the right edge like the weapon panel, and never lower than just above its toggle.
+        // PROVISIONAL: from play (the retail bar stands about halfway up the screen); the data's offset only places it above the toggle.
+        let lift = ship_bar_bottom(window.height(), h * s, anchor.0 * s);
+        let node = Node { right: Val::Px(0.0), bottom: Val::Px(lift), left: Val::Auto, top: Val::Auto, ..c.abs(0.0, 0.0, Vec2::new(top.x, h)) };
         let bar = commands.spawn((FleetWindow(true), node, Visibility::Hidden, ChildOf(root))).id();
         let mut y = 0.0;
         for (name, size, count) in [("ShipBar_TopDetail", top, 1), ("ShipBar_StretchedCenter", mid, rows - 1), ("ShipBar_BottomDetail", bottom, 1)] {
@@ -1166,7 +1181,8 @@ mod tests {
             (art(bevy::asset::uuid_handle!("00000000-0000-0000-0000-000000000001"), 0.0), art(bevy::asset::uuid_handle!("00000000-0000-0000-0000-000000000002"), 4.0));
         let node = Node { width: Val::Px(20.0), height: Val::Px(20.0), ..default() };
         let region = Rect::from_corners(Vec2::ZERO, Vec2::splat(20.0));
-        let button = app.world_mut().spawn((BarButton { states: states(&idle), paused: Some(states(&paused)), region }, Interaction::None, idle.image_node(), node)).id();
+        let button =
+            app.world_mut().spawn((BarButton { states: states(&idle), paused: Some(states(&paused)), advanced: None, region }, Interaction::None, idle.image_node(), node)).id();
         app.update();
         // Idle and running: the composed bar shows the button, the node draws nothing.
         assert_eq!(app.world().get::<ImageNode>(button).unwrap().color, Color::NONE);
@@ -1183,6 +1199,35 @@ mod tests {
         app.world_mut().resource_mut::<Time<Virtual>>().unpause();
         app.update();
         assert_eq!(app.world().get::<ImageNode>(button).unwrap().color, Color::NONE);
+    }
+
+    #[test]
+    fn the_ship_bar_is_centred_but_stays_above_its_toggle() {
+        assert_eq!(ship_bar_bottom(720.0, 120.0, 200.0), 300.0, "a short bar: centred");
+        assert_eq!(ship_bar_bottom(720.0, 500.0, 200.0), 200.0, "a tall one: just above the toggle");
+    }
+
+    /// The movement-type button keeps the advanced art while waypoint plotting is chosen, not only while the mouse is down.
+    #[test]
+    #[allow(deprecated)] // Interaction, see pointer.rs
+    fn the_movement_button_shows_the_chosen_type() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins).add_systems(Update, bar_button_art).init_resource::<crate::course::Plot>();
+        let art = |image: Handle<Image>| Sprite { image, size: Vec2::new(20.0, 20.0), trim: default(), scale: 1.0 };
+        let states = |a: &Sprite| States { art: [a.clone(), a.clone(), a.clone()], s: 1.0 };
+        let (beginner, advanced) = (art(bevy::asset::uuid_handle!("00000000-0000-0000-0000-000000000003")), art(bevy::asset::uuid_handle!("00000000-0000-0000-0000-000000000004")));
+        let node = Node { width: Val::Px(20.0), height: Val::Px(20.0), ..default() };
+        let region = Rect::from_corners(Vec2::ZERO, Vec2::splat(20.0));
+        let button = app
+            .world_mut()
+            .spawn((BarButton { states: states(&beginner), paused: None, advanced: Some(states(&advanced)), region }, Interaction::None, beginner.image_node(), node))
+            .id();
+        app.update();
+        assert_eq!(app.world().get::<ImageNode>(button).unwrap().color, Color::NONE, "basic: the composed bar shows it");
+        app.world_mut().resource_mut::<crate::course::Plot>().advanced = true;
+        app.update();
+        let img = app.world().get::<ImageNode>(button).unwrap();
+        assert_eq!((img.color, img.image.clone()), (Color::WHITE, advanced.image.clone()), "advanced, with the mouse up");
     }
 
     #[test]

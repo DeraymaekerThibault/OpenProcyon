@@ -37,10 +37,33 @@ const ENGINE_MAX: f32 = 300.0;
 const ENGINE_VOL: f32 = 0.25; // PROVISIONAL mix: quieter rumble leaves speech and weapon impacts audible.
 pub const MUSIC_VOL: f32 = 0.35;
 
+/// Battle speech: mission voice lines and crew lines.
+type Speech = Or<(With<crate::panels::CrewSpeech>, (With<crate::briefing::Voice>, With<crate::Scenario>))>;
+
+/// Speech holds while the game is paused and goes on where it stopped when play resumes; only the lines this held are resumed.
+/// PROVISIONAL: from play (the original's speech is believed to stop with the game); whether the original stops or finishes a line is not checked.
+fn hold_speech(vtime: Res<Time<Virtual>>, speech: Query<(Entity, &AudioSink), Speech>, mut held: Local<Vec<Entity>>) {
+    use bevy::audio::AudioSinkPlayback;
+    if vtime.is_paused() {
+        for (e, sink) in &speech {
+            if !sink.is_paused() {
+                sink.pause();
+                held.push(e);
+            }
+        }
+    } else {
+        for e in held.drain(..) {
+            if let Ok((_, sink)) = speech.get(e) {
+                sink.play();
+            }
+        }
+    }
+}
+
 pub fn plugin(app: &mut App) {
     app.add_plugins(crate::crew::plugin)
         .add_message::<Sfx>()
-        .add_systems(PostUpdate, (play, (engines, hud_sounds, helmsman, travel, ambience, ui_sounds).run_if(in_state(Screen::Battle))));
+        .add_systems(PostUpdate, (play, (engines, hud_sounds, helmsman, travel, ambience, ui_sounds, hold_speech).run_if(in_state(Screen::Battle))));
 }
 
 /// A shell's looping flight sound (bullet 'Travel Sound', its volume and short max distance). The loop only exists while the

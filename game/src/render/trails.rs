@@ -345,7 +345,7 @@ fn wakes(
         });
         // the wake's ribbon stops drawing; its tubes draw instead
         commands.entity(e).try_remove::<MeshMaterial3d<EffectMaterial>>();
-        let tube = meshes.add(Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::default()));
+        let tube = meshes.add(crate::fx::placeholder_mesh());
         commands.spawn((
             crate::Scenario,
             WakeTube { wake: e, ribbon: ribbon.0.clone() },

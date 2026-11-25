@@ -417,7 +417,7 @@ piece's material and the effect and sound hooks at the end; the 5 / 7 draws only
 - Scripted damage ("Damage Group/Unit by X percent", a fraction 0.4-0.6 in missions 1 and 3 and `locusts`). Read from the original's
   code, not yet measured: every section in order takes one hit of round(its current hit points × fraction) through the ordinary
   hit routine (spill into the neighbours of a section left at 0, core bleed through dead vital sections, the human's ships taking
-  the difficulty factor and computer ships none, since the hit carries no attacker). The core is never scaled directly, so a
+  the difficulty factor and computer ships none, allied ones included, since the hit carries no attacker). The core is never scaled directly, so a
   fraction below 1 leaves it whole and a ship dies only when its vital sections do. Sections are hit in order with their
   hit points re-read each time, so spill from one lowers what the next loses.
 - Effect FireOnShip, its rate/length multipliers = intensity / 20 clamped to [0.1, 1].

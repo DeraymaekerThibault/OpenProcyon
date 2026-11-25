@@ -5,10 +5,8 @@
 //! lightning, wind and meteor hazards (partly provisional; docs/re/nebula-landmark.md). Each meteor emitter belongs to the group named after its
 //! nebula and follows that group's `Group to follow path` / `Set Group Space Objects velocity` rules along the shared waypoint
 //! follower (`combat::follow_path`, as asteroid belts do). PROVISIONAL: emitters, not meteor objects, travel the path.
-use bevy::asset::RenderAssetUsages;
 use bevy::audio::Volume;
 use bevy::camera::visibility::NoFrustumCulling;
-use bevy::mesh::PrimitiveTopology;
 use bevy::prelude::*;
 use serde_json::Value;
 
@@ -662,7 +660,7 @@ fn update(
     let cam = cam.translation();
     for (e, mut c, gt, sink) in &mut clouds {
         if c.mesh.is_none() {
-            let m = meshes.add(Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::default()));
+            let m = meshes.add(crate::fx::placeholder_mesh());
             let mat = mats.add(fx::additive_material(assets.load(GltfAssetLabel::Texture(0).from_asset(c.model.clone()))));
             commands.entity(e).insert((Mesh3d(m.clone()), MeshMaterial3d(mat), NoFrustumCulling));
             c.mesh = Some(m);

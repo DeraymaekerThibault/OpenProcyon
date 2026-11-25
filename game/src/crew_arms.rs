@@ -9,8 +9,8 @@ use crate::{campaign::CampaignPoints, combat::Library};
 mod fitting;
 mod posts;
 mod view;
+pub use fitting::{COMMAND_CREW, Outfit, ShipFit, SkirmishCrew, WeaponFit, bank_compatible, bank_cost, fitting_delta, is_command_crew};
 use fitting::{Carry, apply_outfit, apply_skirmish_crew, apply_skirmish_weapons, bank_delta, banks_for, fit_guns, fit_message, ship_key, signed, upgrade};
-pub use fitting::{Outfit, ShipFit, SkirmishCrew, WeaponFit, bank_compatible, bank_cost, fitting_delta};
 pub use posts::{
     CrewPosts, ability, accuracy, auto_post, best, crew_points, fallback_posts, generic_posts, leadership_bonus, portrait, post_skill_name, skill_factor, sort_for_post, species,
 };
@@ -20,6 +20,8 @@ use view::{campaign_screen_model, skirmish_screen_model};
 pub const ROLES: [&str; 8] = ["Gunners", "Captains", "First mates", "Navigators", "Engineers", "Riggers", "Fighters", "Lookouts"];
 const SKILLS: [&str; 8] = ["gunnery", "leadership", "leadership", "navigation", "engineering", "rigging", "combat", "spotting"];
 const PAGE: usize = 6;
+/// Why a campaign Crew & Arms change to the command ship's fixed captain or first mate is refused.
+const FIXED: &str = "Jim Hawkins and Mister Onyx always captain the command ship.";
 
 /// The skill of a rating-1 hand (the default crewman, and what an empty slot holds), on the 0..1 scale.
 pub const DEFAULT_HAND: f32 = 0.1;
@@ -113,6 +115,7 @@ fn screen(
     mut vtime: ResMut<Time<Virtual>>,
     mut model: ResMut<ScreenModel>,
     ships: Query<(Entity, &crate::Ship, &crate::combat::Health, &crate::campaign::MissionShip)>,
+    command: Query<(), With<crate::PlayerShip>>,
     buttons: Query<(&Action, &Interaction), Changed<Interaction>>,
     mut choice: Local<Choice>,
     loading: Option<Res<crate::loading::Loading>>,
@@ -140,6 +143,15 @@ fn screen(
     let mut fleet: Vec<_> = ships.iter().filter(|(_, _, h, m)| !h.destroyed && m.owner == mission.script.player()).collect();
     fleet.sort_by_key(|(_, _, _, m)| m.id);
     choice.ship = choice.ship.min(fleet.len().saturating_sub(1));
+    // Jim Hawkins and Mister Onyx stand on the command ship whatever was saved (a new command ship takes them from the old one)
+    let command_key = fleet.iter().find(|(e, ..)| command.contains(*e)).map(|(_, s, _, ms)| ship_key(&lib.classes[s.class], ms));
+    let pinned = points.outfit.pinned(command_key.as_deref());
+    if pinned != points.outfit {
+        points.outfit = pinned;
+        if let Err(error) = points.persist() {
+            choice.message = error;
+        }
+    }
     let action = if keys.just_pressed(KeyCode::Enter) {
         Some(Action::Close)
     } else if mouse.just_pressed(MouseButton::Left) {
@@ -161,7 +173,7 @@ fn screen(
     if let Some(action) = action {
         let old_outfit = points.outfit.clone();
         let old_total = points.total;
-        let result = campaign_action(action, &mut points, &lib, &fleet, &mut choice);
+        let result = campaign_action(action, &mut points, &lib, &fleet, command_key.as_deref(), &mut choice);
         let changed = points.outfit != old_outfit || points.total != old_total;
         let result = result.and_then(|()| if changed { points.persist() } else { Ok(()) });
         if let Err(error) = result {
@@ -184,6 +196,7 @@ fn campaign_action(
     points: &mut CampaignPoints,
     lib: &Library,
     fleet: &[(Entity, &crate::Ship, &crate::combat::Health, &crate::campaign::MissionShip)],
+    command: Option<&str>,
     choice: &mut Choice,
 ) -> Result<(), String> {
     match action {
@@ -222,7 +235,10 @@ fn campaign_action(
             if let Some((_, ship, _, ms)) = fleet.get(choice.ship) {
                 let class = &lib.classes[ship.class];
                 let key = ship_key(class, ms);
+                let fixed = |role: usize| Some(key.as_str()) == command && COMMAND_CREW.iter().any(|(r, _)| *r == role);
                 match action {
+                    Action::Assign(id) | Action::Reserve(id) if is_command_crew(&id) => Err(FIXED.into()),
+                    Action::Assign(_) if fixed(choice.post) => Err(FIXED.into()),
                     Action::Recruit(id) => recruit(points, &id, &class.race),
                     Action::Assign(id) => points.outfit.assign(&key, choice.post, crate::boarding::counts(&class.name)[choice.post], &id),
                     Action::Reserve(id) => {

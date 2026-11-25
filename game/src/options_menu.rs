@@ -13,7 +13,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use crate::audio::Sfx;
 use crate::boarding::BoardMsg;
-use crate::combat::{Health, Library, ray_hit};
+use crate::combat::{Health, Library, ray_hit, seg_sphere};
 use crate::docking::Dockees;
 use crate::panels::REF_H;
 use crate::sprites::{HudData, offset, size_of};
@@ -197,6 +197,32 @@ struct MenuScene<'w, 's> {
     actors: Query<'w, 's, (Entity, &'static Ship, &'static Transform)>,
     ships: Query<'w, 's, (Entity, &'static Transform, &'static Ship, &'static Health)>,
     flags: Query<'w, 's, (Has<crate::ship::HoldPosition>, Option<&'static crate::cloak::Cloak>)>,
+    scenery: Query<'w, 's, ScenerySpot, (Without<Ship>, Or<(With<crate::combat::Asteroid>, With<crate::environment::SpaceAnimal>, With<crate::collision::Obstacle>)>)>,
+}
+
+/// Scenery a right click can open the menu on: an asteroid, a space animal or an island (its collision hull).
+type ScenerySpot =
+    (Entity, &'static Transform, Option<&'static crate::combat::Asteroid>, Option<&'static crate::environment::SpaceAnimal>, Option<&'static crate::collision::Obstacle>);
+
+/// The nearest asteroid, space animal or island under `ray` (entity, distance) among the ones `sees` keeps.
+fn scenery_hit<'a>(
+    spots: impl Iterator<Item = (Entity, &'a Transform, Option<&'a crate::combat::Asteroid>, Option<&'a crate::environment::SpaceAnimal>, Option<&'a crate::collision::Obstacle>)>,
+    sees: impl Fn(Entity) -> bool,
+    ray: Ray3d,
+) -> Option<(Entity, f32)> {
+    spots
+        .filter(|(e, ..)| sees(*e))
+        .filter_map(|(e, tf, rock, animal, hull)| {
+            let sphere = |r: f32| seg_sphere(ray.origin, ray.origin + *ray.direction * 3000.0, tf.translation, r).map(|t| t * 3000.0);
+            let t = match (animal, rock, hull) {
+                (Some(a), ..) => sphere(a.radius),
+                (_, _, Some(hull)) => hull.ray_hit(ray),
+                (_, Some(r), None) => sphere(r.radius),
+                _ => None,
+            }?;
+            Some((e, t))
+        })
+        .min_by(|a, b| a.1.total_cmp(&b.1))
 }
 
 /// Boarding and grappling: the tests for the slots and the messages the slots send.
@@ -339,7 +365,13 @@ fn pick_target(
         Some((e, Kind::Friendly, false)) // any other friendly ship: Focus, Tow and a greyed Dock
     } else {
         let hostile = [enemy, docks.hostile_base_hit(ray, player_at.translation).map(|(e, t, _)| (e, t))].into_iter().flatten().min_by(|a, b| a.1.total_cmp(&b.1));
-        hostile.map(|(e, _)| (e, Kind::Enemy, false)) // an enemy ship or a hostile base: same menu
+        // An asteroid, space animal or island in front of any enemy: the friendly variant, Focus with Tow and Dock greyed.
+        // PROVISIONAL: from play (the original opens a menu on them); which variant and slots it shows for scenery is not decoded.
+        match (hostile, scenery_hit(scene.scenery.iter(), |e| scene.sensors.player_sees(e, mission), ray)) {
+            (Some(h), Some(s)) if s.1 < h.1 && s.0 != h.0 => Some((s.0, Kind::Friendly, false)),
+            (Some((e, _)), _) => Some((e, Kind::Enemy, false)), // an enemy ship or a hostile base: same menu
+            (None, s) => s.map(|(e, _)| (e, Kind::Friendly, false)),
+        }
     }
 }
 
@@ -733,5 +765,20 @@ mod tests {
         assert_eq!(enabled(&linked, Act::TowStop), Some(true));
         assert_eq!(enabled(&linked, Act::Dock), Some(true));
         assert_eq!(enabled(&items(Kind::Friendly, false, Tow::Start(false), Hooks::default()), Act::TowStart), Some(false), "not towable: greyed");
+    }
+
+    /// A right click on an island or a space animal finds it by its hull or its sphere; one the player does not see is passed over.
+    #[test]
+    fn a_right_click_finds_islands_and_animals_the_player_sees() {
+        let island = crate::collision::Obstacle::from_triangles(&[[Vec3::new(-10.0, 0.0, -10.0), Vec3::new(10.0, 0.0, -10.0), Vec3::new(0.0, 0.0, 10.0)]]);
+        let whale = crate::environment::SpaceAnimal::new("Whale", 3.0, Vec3::ZERO, 1, true);
+        let (at_island, at_whale) = (Transform::default(), Transform::from_xyz(40.0, 0.0, 0.0));
+        let (e_island, e_whale) = (Entity::from_raw_u32(1).unwrap(), Entity::from_raw_u32(2).unwrap());
+        let spots = || [(e_island, &at_island, None, None, Some(&island)), (e_whale, &at_whale, None, Some(&whale), None)].into_iter();
+        let down = |x: f32| Ray3d::new(Vec3::new(x, 50.0, 0.0), Dir3::NEG_Y);
+        assert_eq!(scenery_hit(spots(), |_| true, down(0.0)).map(|h| h.0), Some(e_island));
+        assert_eq!(scenery_hit(spots(), |_| true, down(40.0)).map(|h| h.0), Some(e_whale));
+        assert_eq!(scenery_hit(spots(), |e| e != e_whale, down(40.0)), None, "unseen");
+        assert_eq!(scenery_hit(spots(), |_| true, down(80.0)), None, "open space");
     }
 }

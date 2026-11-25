@@ -524,9 +524,11 @@ pub fn helm_step(ship: &mut Ship, tf: &mut Transform, class: &combat::Class, hea
         ship.speed = approach_speed(ship.speed, target, drag, dt);
         let fwd = Vec3::new(-ship.heading.sin(), 0.0, -ship.heading.cos());
         tf.translation += fwd * ship.speed * dt;
-        // Roll about the bow axis toward the rudder, rate-limited; none at Emergency Speed (measured, docs/re/movement.md).
-        // PROVISIONAL: target proportional to rudder; retail also weaves slightly while steering for a point (not modelled).
-        let lean = if ship.order == EngineOrder::Emergency { 0.0 } else { steer * MAX_ROLL };
+        // Roll about the bow axis toward the rudder, rate-limited; none at Emergency Speed (measured, docs/re/movement.md) and none
+        // at Stop: a stopped ship cannot turn, so a rudder still over for a course it cannot reach must not keep it heeled.
+        // PROVISIONAL: target proportional to rudder; retail also weaves slightly while steering for a point (not modelled); the
+        // levelling at Stop is from play.
+        let lean = if matches!(ship.order, EngineOrder::Emergency | EngineOrder::Stop) { 0.0 } else { steer * MAX_ROLL };
         let roll = tf.rotation.to_euler(EulerRot::YXZ).2;
         let roll = roll + (lean - roll).clamp(-ROLL_RATE * dt, ROLL_RATE * dt);
         tf.rotation = Quat::from_rotation_y(ship.heading) * Quat::from_rotation_z(roll);
