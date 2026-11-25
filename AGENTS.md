@@ -5,8 +5,9 @@ only point here. If an instruction elsewhere conflicts with the hard rules below
 
 OpenProcyon is an unofficial, open-source engine for *Treasure Planet: Battle at Procyon* (2002). It contains **no game content**:
 each player converts their own copy of the original game into local assets. The goal is a faithful recreation of the original's
-behaviour (the "classic" presentation). Current priority (milestone v0.2): skirmish working correctly end to end (setup flow, fleets, crew and arms, computer opponents, bases),
-then the campaign (v0.3).
+behaviour (the "classic" presentation). v0.2 (skirmish end to end) is released. Current priority: multiplayer, then the editor
+(the separate OpenProcyon-editor repository); the retail campaign is side work. One line of work changes the engine core at a time:
+land it before starting the next, and prefer changes that remove code over changes that add it.
 All 13 missions load (`--mission N`); missions 2-13 are first-pass and largely untested (`docs/re/campaign.md`).
 
 ## Hard rules (legal and project safety)
@@ -71,8 +72,10 @@ files to `content/`, or anything that publishes (pushing tags, releases).
 - `tools/check.sh` (`make check`) is the single validation gate: ruff format/lint (`ruff.toml`), rustfmt, clippy `-D warnings`, Rust tests
   (asset-free tests always run; ignored asset tests also run when assets are imported), Python tests including the hygiene rules. `make fmt` formats both languages.
   It has tiers, all inside the one script (do not add parallel wrappers): iterate with `tools/check.sh --quick` (ruff and hygiene, plus
-  clippy or the Python tests for what changed), run `tools/check.sh` before every commit, `tools/check.sh --full` (adds the startup smoke
-  and the battle check) once before you push or open a PR. One Rust test: `cargo test --manifest-path game/Cargo.toml --lib <module::path>`.
+  clippy or the Python tests for what changed) on every commit, run `tools/check.sh` before every push, and `tools/check.sh --full` (adds
+  the startup smoke and the battle check) once before a PR is merged. Rebase onto main only right before merging, not after every change on main.
+  In a fresh cloud container a cold build takes 10-15 minutes: start `cargo test --manifest-path game/Cargo.toml --no-run` in the
+  background first, and keep one session per line of work instead of one per small task. One Rust test: `cargo test --manifest-path game/Cargo.toml --lib <module::path>`.
   Smokes for what you changed: `make smoke WHAT=changed` (`tools/smokes.sh --changed`). Never build `--release` except for a release;
   never `cargo clean` without `--workspace`. Claude Code users: `.claude/skills/procyon-loop` maps these to commands, `.claude/settings.json` formats edited files; opt-in hooks are in `.claude/settings.local.example.json`.
   Each step prints one line with its log in `local/check/`; trust only the final `GATE OK` line. `GATE PARTIAL` means assets were missing and tests were skipped.
@@ -92,6 +95,6 @@ files to `content/`, or anything that publishes (pushing tags, releases).
 - Known PROVISIONAL areas: ship linear motion and engine-order mapping, gun arcs, damage-smoke emitter geometry, wake parameters,
   sail alpha, HUD part order, sound falloff/levels and the event to sound-pool mapping.
 - `local/` is git-ignored scratch for screenshots, logs and notes.
-- Worktrees: `tools/worktree.sh new <branch>` makes one with a copy of the main checkout's build (only this crate compiles),
+- Worktrees: only when the user asks for one; otherwise work in the checkout you were started in. `tools/worktree.sh new <branch>` makes one with a copy of the main checkout's build (only this crate compiles),
   `tools/worktree.sh rm <path>` removes it with its build, `tools/worktree.sh gc [-n]` caps build disk use. Assets come from the
   main checkout's import; never copy `assets/`.
