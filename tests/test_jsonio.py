@@ -24,7 +24,8 @@ class JsonIoTest(unittest.TestCase):
             for kwargs in ({}, {"sort_keys": True}):
                 path = Path(tmp) / "x/y/z.json"
                 write(path, v, **kwargs)
-                self.assertEqual(path.read_bytes(), dump(v, **kwargs).encode("utf-8"))
+                # write_text writes the platform's line endings (CRLF on Windows), as the call sites it replaced did.
+                self.assertEqual(path.read_text(encoding="utf-8"), dump(v, **kwargs))
 
 
 if __name__ == "__main__":
