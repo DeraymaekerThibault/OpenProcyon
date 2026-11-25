@@ -98,6 +98,13 @@ pub fn reset_sim(world: &mut World) {
     world.insert_resource(difficulty);
     world.insert_resource(fx::DetailScale(menu::detail_scale()));
     world.get_resource_or_insert_with(BattleEpoch::default).0 += 1;
+    // Per-battle state no other start path clears: a restart (R, N, `restart`) never re-enters the Battle screen, so the summary
+    // counts started over only on the first battle; a mission sets no lobby roster or end rules, so a skirmish's stayed; the
+    // nebula module only replaces what the next map has (meteor plans and the in-nebula set were kept).
+    world.insert_resource(crate::stats::GameStats::default());
+    world.remove_resource::<crate::alliance::Roster>();
+    world.remove_resource::<crate::victory::Victory>();
+    crate::nebula::reset(world);
 }
 
 /// A fleet type, as the TWT numbers it: 0 Navy, 2 Pirate, 3 Procyon; 4 (and any other number) is no fleet type chosen or known.

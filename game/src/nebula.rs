@@ -573,6 +573,15 @@ pub fn polygons(mission: &Value, shift: &StormShift) -> Vec<crate::rules::Region
         .collect()
 }
 
+/// Forgets the last battle's nebula state at a battle start (`scenario::reset_sim`); `spawn` then sets up the new map's.
+pub fn reset(world: &mut World) {
+    world.remove_resource::<Storms>();
+    world.remove_resource::<WeatherDamage>();
+    world.insert_resource(StormShift::default());
+    world.insert_resource(MeteorPlans::default());
+    world.insert_resource(InNebula::default());
+}
+
 /// Spawns every nebula setup of a map (`map["nebulae"]`, tools/export_nebulae.py).
 pub fn spawn(commands: &mut Commands, assets: &AssetServer, fxl: &fx::FxLib, map: &Value) {
     commands.insert_resource(Storms(map["nebulae"].clone()));
