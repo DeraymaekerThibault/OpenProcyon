@@ -162,7 +162,7 @@ pub(super) fn hook_flight(
     mut sfx: MessageWriter<Sfx>,
     mut hooks: Query<&mut Grapple>,
     ships: Query<&Transform>,
-    player: Query<Entity, With<PlayerShip>>,
+    player: Query<Entity, With<crate::commands::Commander>>,
 ) {
     let dt = time.delta_secs();
     for mut g in &mut hooks {

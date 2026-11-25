@@ -809,19 +809,19 @@ fn fleet_orders_as_commands_do_what_the_buttons_did() {
         w.resource_mut::<Target>().0 = Some(ids[5]);
     }
     set_formation(&mut direct, "Player", Some(Formation::Column), true);
-    apply(&mut sent, &Kind::Formation { formation: Formation::Column, hold: true });
+    apply(&mut sent, crate::commands::PlayerId(0), &Kind::Formation { formation: Formation::Column, hold: true });
     assert!(pilots(&sent, &ids) == pilots(&direct, &ids));
     assert_eq!(sent.resource::<Fleets>().groups["Player"].formation, Formation::Column);
     fleet_help(&mut direct, "Player", true);
-    apply(&mut sent, &Kind::FleetAttack);
+    apply(&mut sent, crate::commands::PlayerId(0), &Kind::FleetAttack);
     assert!(pilots(&sent, &ids) == pilots(&direct, &ids));
     assert!(ids[1..4].iter().all(|e| sent.get::<FleetPilot>(*e).unwrap().target == Some(ids[5])));
     fleet_help(&mut direct, "Player", false);
-    apply(&mut sent, &Kind::CeaseFire);
+    apply(&mut sent, crate::commands::PlayerId(0), &Kind::CeaseFire);
     assert!(pilots(&sent, &ids) == pilots(&direct, &ids));
     assert!(sent.resource::<Fleets>().groups["Player"].cease_fire);
     assert!(promote(&mut direct, ids[2], false));
-    apply(&mut sent, &Kind::Promote { ship: ids[2] });
+    apply(&mut sent, crate::commands::PlayerId(0), &Kind::Promote { ship: ids[2] });
     assert!(pilots(&sent, &ids) == pilots(&direct, &ids));
     assert_eq!(sent.resource::<Fleets>().primary(), Some(ids[2]));
     assert!(sent.get::<PlayerShip>(ids[2]).is_some() && sent.get::<PlayerShip>(ids[0]).is_none());

@@ -10,7 +10,7 @@ pub struct Boarders<'w, 's> {
     fighters: Query<'w, 's, (Entity, &'static Boarding)>,
     grapples: Query<'w, 's, (Entity, &'static Grapple)>,
     ships: Query<'w, 's, (&'static Ship, &'static Health, Option<&'static crate::combat::GunStates>)>,
-    player: Query<'w, 's, Entity, With<PlayerShip>>,
+    player: Query<'w, 's, Entity, With<crate::commands::Commander>>,
     abandoned: Query<'w, 's, (), With<crate::lifeboats::Abandoned>>,
     lib: Res<'w, Library>,
     mission: Option<Res<'w, Mission>>,
@@ -195,7 +195,7 @@ pub(super) fn fights(
     mut settled: MessageWriter<Settled>,
     mut fighters: Query<(Entity, &mut Boarding)>,
     grapples: Query<(Entity, &Grapple)>,
-    player: Query<Entity, With<PlayerShip>>,
+    player: Query<Entity, With<crate::commands::Commander>>,
     mut things: Query<(&Transform, Option<&Ship>, Option<&Drift>, &mut Boardable, Option<&Health>, Option<&MissionShip>, Option<&MissionBase>, Option<&crate::combat::BaseSide>)>,
     spawn_order: Query<&crate::scenario::SpawnIndex>,
 ) {

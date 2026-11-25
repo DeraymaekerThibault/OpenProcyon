@@ -46,7 +46,7 @@ fn order(app: &App, e: Entity) -> EngineOrder {
 /// The player's command ship (index 0 of the local fleet) and a fleet captain beside it, numbered as at battle start.
 fn fleet(app: &mut App) -> (Entity, Entity, Entity) {
     let w = app.world_mut();
-    let me = w.spawn((Ship::new(0, Side::Player), SpawnIndex(0))).id();
+    let me = w.spawn((Ship::new(0, Side::Player), SpawnIndex(0), Commander(PlayerId(0)))).id();
     let captain = w.spawn((Ship::new(0, Side::Player), crate::ship::FleetPilot::default(), SpawnIndex(1))).id();
     let enemy = w.spawn((Ship::new(0, Side::Enemy), SpawnIndex(2))).id();
     let mut fleets = crate::ship::Fleets::default();
@@ -287,6 +287,49 @@ fn space_animals_and_bases_without_guns_have_ids() {
     assert!(Saved::save(w, &Kind::Target { ship: me, target: Some(whale), spot: None }).is_ok(), "a whale is a target with an id");
 }
 
+/// `Commander` follows `PlayerShip` (battle start, promotion, loss), and "direct" is decided by the command's player: another
+/// player's order to this command ship is not its commander's.
+#[test]
+fn the_command_ship_is_the_commanders_and_only_its_players_orders_are_direct() {
+    let mut app = battle();
+    let (me, captain, enemy) = fleet(&mut app);
+    loaded(&mut app);
+    let w = app.world_mut();
+    w.entity_mut(me).remove::<Commander>();
+    w.entity_mut(captain).insert(crate::PlayerShip);
+    w.flush();
+    assert_eq!(w.get::<Commander>(captain), Some(&Commander(PlayerId(0))), "the player ship is player 0's command ship");
+    w.entity_mut(captain).remove::<crate::PlayerShip>();
+    w.entity_mut(me).insert(crate::PlayerShip);
+    w.flush();
+    assert_eq!((w.get::<Commander>(captain), w.get::<Commander>(me)), (None, Some(&Commander(PlayerId(0)))), "promotion moves it");
+    app.world_mut().resource_mut::<crate::combat::Target>().2.panic = true;
+    app.world_mut().resource_mut::<Outbox>().0.push(PlayerCommand { player: PlayerId(1), kind: Kind::Target { ship: me, target: Some(enemy), spot: None } });
+    app.world_mut().resource_mut::<Outbox>().0.push(PlayerCommand { player: PlayerId(1), kind: Kind::PanicFire { ship: me } });
+    frame(&mut app, 40);
+    let t = app.world().resource::<crate::combat::Target>();
+    assert_eq!((t.0, t.2.panic), (None, true), "player 1 does not command player 0's ship");
+    send(&mut app, Kind::Target { ship: me, target: Some(enemy), spot: None });
+    frame(&mut app, 40);
+    assert_eq!(app.world().resource::<crate::combat::Target>().0, Some(enemy));
+}
+
+/// A replay gives each command back to the player who gave it.
+#[test]
+fn a_replay_keeps_the_player_of_each_command() {
+    let header = r#"{"format":2,"version":"0.0.0","seed":5,"args":[],"mods":[]}"#;
+    let line = |p: u8| format!(r#"{{"command":{{"at":{{"tick":0}},"player":{p},"order":{{"cease_fire":null}}}}}}"#);
+    let text = format!("{header}\n{}\n{}\n", line(0), line(3));
+    let (_, replay, _) = Replay::read(text.as_bytes()).unwrap();
+    assert_eq!(replay.commands.iter().map(|c| c.1).collect::<Vec<_>>(), [PlayerId(0), PlayerId(3)]);
+    let mut app = battle();
+    fleet(&mut app);
+    app.insert_resource(replay);
+    loaded(&mut app);
+    let got = replayed(app.world_mut(), At::Tick(0)).unwrap();
+    assert_eq!(got.iter().map(|c| c.player).collect::<Vec<_>>(), [PlayerId(0), PlayerId(3)]);
+}
+
 #[test]
 fn a_command_keeps_its_meaning_through_the_file() {
     let mut app = battle();
@@ -342,7 +385,7 @@ fn a_recording_reads_back_with_its_frames_unpacked() {
     assert_eq!((h.seed, h.args.as_slice(), unrecorded), (5, ["--map".to_string(), "red_rover".to_string()].as_slice(), 1));
     let ms = |m: u64| Duration::from_millis(m);
     assert_eq!(replay.frames, vec![(ms(0), 0), (ms(16), 0), (ms(16), 0), (ms(16), 0), (ms(33), 1)]);
-    assert_eq!(replay.commands, vec![(At::Frame(2), Saved::Engine { ship: NetId { kind: NetKind::Ship, index: 0 }, engine: SavedEngine::Slower })]);
+    assert_eq!(replay.commands, vec![(At::Frame(2), PlayerId(0), Saved::Engine { ship: NetId { kind: NetKind::Ship, index: 0 }, engine: SavedEngine::Slower })]);
     assert!(Replay::read(header.replace("\"format\":1", "\"format\":3").as_bytes()).is_err(), "a newer format is refused");
     assert!(Replay::read(header.replace("\"format\":1", "\"format\":0").as_bytes()).is_err());
 }

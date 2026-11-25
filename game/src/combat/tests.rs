@@ -1,5 +1,6 @@
 use super::*;
 use crate::EngineOrder;
+use crate::PlayerShip;
 
 /// Mission 6's stockade gate has no guns, only a vitalToMission section, and the rules wait for that section's damage to reach 1.
 /// The importer must export it as a class (an attackable base), and shooting the section down must read as full mission damage.

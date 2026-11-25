@@ -6,7 +6,7 @@ use bevy::prelude::*;
 use crate::audio::Sfx;
 pub use crate::data::*;
 use crate::fx::{self, FxLib};
-use crate::{PlayerShip, Ship, Side, assets_dir};
+use crate::{Ship, Side, assets_dir};
 
 mod asteroid;
 pub mod beam;
