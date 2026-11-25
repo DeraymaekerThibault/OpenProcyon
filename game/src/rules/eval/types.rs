@@ -320,6 +320,14 @@ pub(in crate::rules) fn matches(u: &Unit, spec: &str) -> bool {
 pub(in crate::rules) fn members<'a>(w: &'a [Unit], spec: &str) -> Vec<&'a Unit> {
     w.iter().filter(|u| matches(u, spec)).collect()
 }
+/// The members of `spec` that are alive.
+pub(in crate::rules) fn alive_members<'a>(w: &'a [Unit], spec: &str) -> Vec<&'a Unit> {
+    w.iter().filter(|u| u.alive && matches(u, spec)).collect()
+}
+/// The members of `spec` that are alive and not hidden: the ones rules can see.
+pub(in crate::rules) fn live_members<'a>(w: &'a [Unit], spec: &str) -> Vec<&'a Unit> {
+    w.iter().filter(|u| u.alive && u.visible && matches(u, spec)).collect()
+}
 pub(in crate::rules) fn ids(w: &[Unit], spec: &str) -> Vec<Entity> {
     members(w, spec).iter().map(|u| u.e).collect()
 }

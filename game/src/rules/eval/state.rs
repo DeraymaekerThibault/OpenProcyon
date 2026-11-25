@@ -646,7 +646,7 @@ impl Script {
     pub(super) fn group_in_volume(&mut self, c: &Value, w: &[Unit], entering: bool, repeating: bool) -> bool {
         let key = (s(c, "Group Name").to_string() + "|" + s(c, "Volume Name"), 0);
         let vol = self.volume(s(c, "Volume Name"));
-        let m: Vec<_> = members(w, s(c, "Group Name")).into_iter().filter(|u| u.alive && u.visible).collect();
+        let m = live_members(w, s(c, "Group Name"));
         let all = !entering && b(c, "Entire Group");
         let now = !m.is_empty() && if all { m.iter().all(|u| in_volume(vol, u.pos)) } else { m.iter().any(|u| in_volume(vol, u.pos)) };
         // Hidden placement/reveal is not entry: track physical membership before applying visibility.
@@ -661,7 +661,7 @@ impl Script {
     pub(super) fn group_exited_volume(&mut self, c: &Value, w: &[Unit]) -> bool {
         let key = (s(c, "Group Name").to_string() + "|" + s(c, "Volume Name"), 1);
         let vol = self.volume(s(c, "Volume Name"));
-        let m: Vec<_> = members(w, s(c, "Group Name")).into_iter().filter(|u| u.alive && u.visible).collect();
+        let m = live_members(w, s(c, "Group Name"));
         let now = !m.is_empty() && m.iter().any(|u| in_volume(vol, u.pos));
         let was = self.prev_inside.insert(key, now).unwrap_or(false);
         was && !now

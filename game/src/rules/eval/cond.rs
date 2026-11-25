@@ -6,6 +6,15 @@ use super::state::{Entered, EventKey};
 use super::*;
 
 impl Script {
+    /// Hits taken in all by the members of the condition's "Group/Unit Name": by anyone (`by` None) or by one player.
+    fn hit_total(&self, w: &[Unit], c: &Value, by: Option<&str>) -> u32 {
+        members(w, s(c, "Group/Unit Name")).iter().map(|u| by.map_or_else(|| self.hits.get(&u.e), |by| self.hits_by.get(&(by.into(), u.e))).copied().unwrap_or(0)).sum()
+    }
+    /// How many entries of `list` (captures or kills by player) are of a unit of the condition's "Group/Unit" made by the team ("Team Name").
+    fn team_tally(&self, list: &[(Owner, Entity)], w: &[Unit], c: &Value) -> u32 {
+        let (team, ids) = (s(c, "Team Name"), ids(w, s(c, "Group/Unit")));
+        list.iter().filter(|(by, e)| ids.contains(e) && self.in_team(team, by)).count() as u32
+    }
     pub(in crate::rules) fn cond(&mut self, c: &Value, w: &[Unit], repeating: bool) -> bool {
         let Some(t) = RuleType::of(Role::Condition, c) else {
             self.warn(&format!("condition '{}'", s(c, "Type")));
@@ -47,20 +56,12 @@ impl Script {
                 self.tows.iter().any(|t| x.contains(&t.0) && y.contains(&t.1)) == b(c, "Boolean")
             }
             T::IsGroupAAttackingGroupB => self.attacking(w, s(c, "GroupA Name"), s(c, "GroupB Name")),
-            T::GroupUnitHitAtLeastXTimes => {
-                let n: u32 = members(w, s(c, "Group/Unit Name")).iter().map(|u| self.hits.get(&u.e).copied().unwrap_or(0)).sum();
-                n as f32 >= f(c, "Number Of Times Hit")
-            }
+            T::GroupUnitHitAtLeastXTimes => self.hit_total(w, c, None) as f32 >= f(c, "Number Of Times Hit"),
             T::GroupUnitHitAtLeastXTimesByPlayerWithEqivalence => {
-                let by = base(s(c, "Player Name"));
-                let n: u32 = members(w, s(c, "Group/Unit Name")).iter().map(|u| self.hits_by.get(&(by.into(), u.e)).copied().unwrap_or(0)).sum();
+                let n = self.hit_total(w, c, Some(base(s(c, "Player Name"))));
                 cmp(s(c, "Equivalence"), n as f32, f(c, "Number Of Times Hit"))
             }
-            T::PlayerHasHitGroupUnitAtLeastXTimes => {
-                let by = base(s(c, "Player Name"));
-                let n: u32 = members(w, s(c, "Group/Unit Name")).iter().map(|u| self.hits_by.get(&(by.into(), u.e)).copied().unwrap_or(0)).sum();
-                n as f32 >= f(c, "Number Of Times Hit")
-            }
+            T::PlayerHasHitGroupUnitAtLeastXTimes => self.hit_total(w, c, Some(base(s(c, "Player Name")))) as f32 >= f(c, "Number Of Times Hit"),
             T::GroupHasXMembers => cmp(s(c, "Equivalence"), members(w, s(c, "Group Name")).iter().filter(|u| u.alive).count() as f32, f(c, "number")),
             T::GroupUnitHasXDamage => {
                 let m = members(w, s(c, "Group/Unit Name"));
@@ -73,12 +74,8 @@ impl Script {
                 !m.is_empty() && m.iter().all(|u| u.flag == s(c, "Flag Type")) == b(c, "Boolean")
             }
             T::GroupToGroupDistance => {
-                let (a, bb) = (members(w, s(c, "GroupA Name")), members(w, s(c, "GroupB Name")));
-                let d = a
-                    .iter()
-                    .filter(|u| u.alive && u.visible)
-                    .flat_map(|x| bb.iter().filter(|u| u.alive && u.visible).map(move |y| x.pos.distance(y.pos)))
-                    .fold(f32::INFINITY, f32::min);
+                let (a, bb) = (live_members(w, s(c, "GroupA Name")), live_members(w, s(c, "GroupB Name")));
+                let d = a.iter().flat_map(|x| bb.iter().map(move |y| x.pos.distance(y.pos))).fold(f32::INFINITY, f32::min);
                 d.is_finite() && cmp(s(c, "Equivalence"), d, f(c, "Distance"))
             }
             T::GroupUnitDocked | T::GroupUnitIsDocked => {
@@ -93,7 +90,7 @@ impl Script {
             T::AllUnitsFromGroupHaveEnteredTriggerVolumeOnce => {
                 let key = Entered::AllOnce { group: s(c, "Group Name").into(), volume: s(c, "Volume Name").into() };
                 let vol = self.volume(s(c, "Volume Name")).clone();
-                let m: Vec<_> = members(w, s(c, "Group Name")).into_iter().filter(|u| u.alive).collect();
+                let m = alive_members(w, s(c, "Group Name"));
                 let seen = self.entered.entry(key).or_default();
                 seen.extend(m.iter().filter(|u| in_volume(&vol, u.pos)).map(|u| u.e));
                 !m.is_empty() && m.iter().all(|u| seen.contains(&u.e))
@@ -108,14 +105,12 @@ impl Script {
             // Campaign maps have no teams: a capture by anyone of a unit of the group counts there.
             T::TeamHasCapturedAShipFromGroupUnit => {
                 let (team, group) = (s(c, "Team Name"), s(c, "Group/Unit"));
-                let ids = ids(w, group);
-                let n = self.captured.iter().filter(|(by, e)| ids.contains(e) && self.in_team(team, by)).count() as u32;
+                let n = self.team_tally(&self.captured, w, c);
                 self.event(EventKey::Captured { team: team.into(), group: group.into() }, n, f(c, "Number Of Captures"))
             }
             T::TeamHasDestroyedAShipFromGroupUnit => {
                 let (team, group) = (s(c, "Team Name"), s(c, "Group/Unit"));
-                let ids = ids(w, group);
-                let n = self.destroyed.iter().filter(|(by, e)| ids.contains(e) && self.in_team(team, by)).count() as u32;
+                let n = self.team_tally(&self.destroyed, w, c);
                 self.event(EventKey::Destroyed { team: team.into(), group: group.into() }, n, f(c, "Number Of Ships Destroyed"))
             }
             // Each unit of the group counts once, the first time it is inside. PROVISIONAL: 'Team Name' is read as the team the rule
