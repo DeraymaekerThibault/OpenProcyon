@@ -43,6 +43,8 @@ mod check_mod;
 mod content;
 mod extensions;
 mod json;
+#[cfg(test)]
+mod keyed_tests;
 mod resolved;
 /// Whether a model's mesh layer is a damage variant (`<A>Damage_<B>`, swapped in when the section `<A>_<B>` is destroyed) rather than
 /// part of the intact hull: true when the name contains `Damage_`. The one rule the game, `--check-mod` and the ship art use, so a tool
@@ -140,6 +142,10 @@ pub fn schemas() -> Vec<(&'static str, Value)> {
         props.insert(
             "set".into(),
             serde_json::json!({"type": "object", "x-origin": "engine", "description": "Not part of the ship: with `extends`, JSON pointers (`/engines/0/fx`) mapped to the value that replaces what the merge left there; reaches inside arrays."}),
+        );
+        props.insert(
+            "merge".into(),
+            serde_json::json!({"type": "object", "x-origin": "engine", "description": "Not part of the ship (PROVISIONAL spelling): with `extends`, a list merged by key instead of replaced, as {\"/crew_nodes\": \"name\"}: the file's list at that pointer changes, adds or (`\"$remove\": true`) removes single entries of the parent's list, matched by that field. Applied before `set`."}),
         );
     }
     all

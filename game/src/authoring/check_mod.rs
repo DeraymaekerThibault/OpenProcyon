@@ -55,8 +55,14 @@ pub fn check_mod_with(dir: &Path, base: Option<&Path>, installed: &[Installed]) 
                         c.unchecked += 1;
                     } else {
                         let why = c.tidy(why);
-                        c.error(file, "", why);
+                        let ptr = merge_pointer(&why).to_string();
+                        c.error(file, &ptr, why);
                     }
+                }
+                for (file, why) in &entry.warnings {
+                    let why = c.tidy(why);
+                    let ptr = merge_pointer(&why).to_string();
+                    c.warn(file, &ptr, why);
                 }
                 for file in &entry.unused_textures {
                     c.warn(file, "", "no model uses this texture override; check the name".into());
@@ -77,6 +83,11 @@ pub fn check_mod_with(dir: &Path, base: Option<&Path>, installed: &[Installed]) 
         ));
     }
     c.out
+}
+
+/// The pointer of a keyed-merge message (`merges '/objects': ...`, docs/modding.md "Changing one entry of a list"), else "".
+fn merge_pointer(why: &str) -> &str {
+    why.strip_prefix("merges '").and_then(|r| r.split_once("':")).map_or("", |(ptr, _)| ptr)
 }
 
 struct Checker<'a> {
@@ -192,6 +203,9 @@ impl Checker<'_> {
                 // Merge keywords of any file extended over a sibling.
                 o.remove("extends");
                 o.remove("set");
+                if o.get("merge").is_some_and(Value::is_object) {
+                    o.remove("merge");
+                }
             }
             self.out.extend(unknown_key_findings(schema, &doc, &name));
         }
