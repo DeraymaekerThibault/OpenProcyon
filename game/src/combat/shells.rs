@@ -149,7 +149,7 @@ pub(super) fn damage_sfx(pool: &str, at: Vec3, rng: &mut Rng) -> Sfx {
 /// factor is the player's ships' only. PROVISIONAL: computer-vs-computer, allied and hostile-base-on-player hits are not measured.
 pub(super) fn side_damage_scale(shooter: Side, victim: Side, difficulty: u8, base: bool) -> f32 {
     let d = difficulty.min(2) as usize;
-    let (out, inc) = ([3.0, 2.0, 1.0][d], [0.25, 0.5, 1.0][d]);
+    let (out, inc) = (super::damage::OUTGOING_BY_DIFFICULTY[d], super::damage::INCOMING_BY_DIFFICULTY[d]);
     match (shooter, victim) {
         (Side::Player, v) if v != Side::Player => {
             if base {

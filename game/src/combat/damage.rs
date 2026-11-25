@@ -260,13 +260,18 @@ pub fn fraction_hit(class: &Class, hp: &mut Health, fraction: f32, humans_own_sh
     }
 }
 
+/// Damage factor on the human player's own ships per difficulty (Easy, Normal, Hard): shells of the other side and fire.
+pub(super) const INCOMING_BY_DIFFICULTY: [f32; 3] = [0.25, 0.5, 1.0];
+/// Damage factor of the player's shells on computer ships per difficulty (Easy, Normal, Hard).
+pub(super) const OUTGOING_BY_DIFFICULTY: [f32; 3] = [3.0, 2.0, 1.0];
+
 /// What a burning fire takes from its section on a fire tick. In the original a fire hurts its section through the ordinary hit
 /// routine, which scales by the victim's owner: on the human player's own ships by the incoming difficulty factor (Easy x0.25,
 /// Normal x0.5, Hard x1), on any other ship not at all (a fire has no attacker, and only the player's own hits are scaled up).
 /// Hit points are whole numbers, rounded to the nearest (half to even): a fire of 1.0 takes nothing on Normal (measured on the
 /// original: eight times of eight).
 pub fn fire_damage(intensity: f32, humans_own_ship: bool, difficulty: u8) -> f32 {
-    let scale = if humans_own_ship { [0.25, 0.5, 1.0][difficulty.min(2) as usize] } else { 1.0 };
+    let scale = if humans_own_ship { INCOMING_BY_DIFFICULTY[difficulty.min(2) as usize] } else { 1.0 };
     (intensity * scale).round_ties_even()
 }
 
