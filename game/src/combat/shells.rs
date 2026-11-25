@@ -534,8 +534,8 @@ pub(super) fn shells(
             let [lo, hi, ..] = bd.damage["Stone"];
             hits.write(Hit { shooter: s.shooter, victim: re });
             if let Ok((_, _, mut rk, _)) = rocks.get_mut(re) {
-                if rk.damage(rng.range(lo, hi)) {
-                    destroyed.write(Destroyed { by: s.shooter, victim: re });
+                if let Some(d) = rk.strike(rng.range(lo, hi), s.shooter, re) {
+                    destroyed.write(d);
                 } else {
                     sfx.write(Sfx { name: format!("Damage_Stone0{}", rng.variant(5)), at: Some(at), vol: 1.0, max: 600.0 });
                 }

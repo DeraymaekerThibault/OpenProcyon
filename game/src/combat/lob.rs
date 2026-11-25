@@ -231,8 +231,8 @@ pub fn blasts(
         for (re, rtf, mut rock) in &mut rocks {
             let Some(f) = passed(rtf.translation).filter(|_| rock.hp > 0.0) else { continue };
             let [lo, hi, ..] = bd.damage["Stone"];
-            if rock.damage(rng.range(lo, hi) * f) {
-                destroyed.write(Destroyed { by, victim: re });
+            if let Some(d) = rock.strike(rng.range(lo, hi) * f, by, re) {
+                destroyed.write(d);
             }
         }
         for (pe, mut shell, ptf) in &mut shells {
