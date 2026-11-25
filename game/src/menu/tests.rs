@@ -975,7 +975,7 @@ fn leaving_a_lobby_scenario_battle_exits_the_process() {
             .add_message::<AppExit>()
             .add_systems(OnEnter(Screen::Main), exit_after_lobby_scenario);
         if scenario {
-            app.insert_resource(LobbyScenario::parse("map=border_dispute;slots=human,computer").unwrap());
+            app.insert_resource(LobbyLaunch::parse("map=border_dispute;slots=human,computer").unwrap());
         }
         app.update();
         assert!(app.world_mut().resource_mut::<Messages<AppExit>>().drain().next().is_none(), "no exit while the battle is on");

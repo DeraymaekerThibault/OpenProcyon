@@ -132,7 +132,8 @@ fn a_recording_reads_back_with_its_frames_unpacked() {
     let ms = |m: u64| Duration::from_millis(m);
     assert_eq!(replay.frames, vec![(ms(0), 0), (ms(16), 0), (ms(16), 0), (ms(16), 0), (ms(33), 1)]);
     assert_eq!(replay.commands, vec![(At::Frame(2), Saved::Engine { ship: NetId { kind: NetKind::Ship, index: 0 }, engine: SavedEngine::Slower })]);
-    assert!(Replay::read(header.replace("\"format\":1", "\"format\":2").as_bytes()).is_err(), "another format is refused");
+    assert!(Replay::read(header.replace("\"format\":1", "\"format\":3").as_bytes()).is_err(), "a newer format is refused");
+    assert!(Replay::read(header.replace("\"format\":1", "\"format\":0").as_bytes()).is_err());
 }
 
 #[test]
@@ -140,7 +141,7 @@ fn the_recorded_arguments_are_the_ones_that_decide_the_battle() {
     let args: Vec<String> =
         ["game", "--lobby", "map=x", "--speed", "16", "--script", "commands", "--fixed-step", "--seed", "3", "--replay", "f.jsonl"].iter().map(|s| s.to_string()).collect();
     assert_eq!(scenario_args(&args), ["--lobby", "map=x", "--seed", "3"]);
-    let header = Header { format: FORMAT, version: "x".into(), seed: 3, args: scenario_args(&args), mods: vec![], from_menu: false };
+    let header = Header { format: FORMAT, version: "x".into(), seed: 3, args: scenario_args(&args), mods: vec![], from_menu: false, skirmish: None };
     assert_eq!(mismatch(&header, &args, 3, &[]), None);
     assert!(mismatch(&header, &args, 4, &[]).unwrap().contains("--seed 3"));
     assert!(mismatch(&header, &["game".to_string(), "--map".to_string(), "y".to_string()], 3, &[]).is_some());
@@ -148,6 +149,30 @@ fn the_recorded_arguments_are_the_ones_that_decide_the_battle() {
     let menu = Header { args: vec![], from_menu: true, ..header };
     assert!(mismatch(&menu, &["game".to_string()], 3, &[]).unwrap().contains("menus"), "a battle set up in the menus is refused, not replayed wrong");
     assert!(sets_up_battle(&scenario_args(&args)) && !sets_up_battle(&[]));
+}
+
+/// A battle launched from the lobby keeps the lobby's setup instead of `--lobby`, and replays from `--replay <file>` alone.
+#[test]
+fn a_lobby_battle_keeps_its_setup_and_replays_without_arguments() {
+    let setup = crate::menu::SkirmishSetup::parse(r#"{"map":"m","points":300,"limit":5,"slots":[{"kind":"human","race":"navy","team":0,"flag":0}]}"#).unwrap();
+    let a = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+    let header = Header::new(0, &a(&["game", "--lobby", "map=m;slots=human,computer", "--speed", "4"]), Some(setup.clone()));
+    assert_eq!((header.format, header.args.as_slice(), header.from_menu), (2, [].as_slice(), false));
+    assert_eq!(mismatch(&header, &a(&["game", "--replay", "f"]), 0, &mod_names()), None);
+    assert!(mismatch(&header, &a(&["game", "--replay", "f", "--lobby", "map=m"]), 0, &mod_names()).unwrap().contains("leave out --lobby"));
+    let menu = Header::new(0, &a(&["game"]), Some(setup.clone()));
+    assert!(!menu.from_menu, "a skirmish set up by hand in the menus replays");
+    assert!(Header::new(0, &a(&["game"]), None).from_menu, "a campaign mission from the menus is still refused");
+    assert_eq!(Header::new(0, &a(&["game", "--map", "x"]), None).args, ["--map", "x"]);
+    // The header line round-trips, and `recorded_setup` finds the setup for the launch.
+    let path = std::env::temp_dir().join(format!("openprocyon-commands-setup-{}.jsonl", std::process::id()));
+    std::fs::write(&path, format!("{}\n{{\"frames\":[]}}\n", serde_json::to_string(&header).unwrap())).unwrap();
+    let found = recorded_setup(&a(&["game", "--replay", &path.to_string_lossy()]));
+    let read = Replay::read(std::io::BufReader::new(std::fs::File::open(&path).unwrap())).map(|r| r.0);
+    let _ = std::fs::remove_file(&path);
+    assert_eq!(found, Some(setup));
+    assert_eq!(read.unwrap(), header);
+    assert_eq!(recorded_setup(&a(&["game", "--replay", "/no/such/file"])), None);
 }
 
 #[test]
@@ -171,7 +196,7 @@ fn a_damaged_recording_cannot_ask_for_unbounded_frames() {
 #[test]
 fn frames_held_back_are_written_when_the_recorder_goes() {
     let path = std::env::temp_dir().join(format!("openprocyon-commands-drop-{}.jsonl", std::process::id()));
-    let mut rec = Recorder { out: std::io::BufWriter::new(std::fs::File::create(&path).unwrap()), frames: vec![], warned: false };
+    let mut rec = Recorder { out: std::io::BufWriter::new(std::fs::File::create(&path).unwrap()), pending: None, frames: vec![], warned: false };
     rec.frame(Duration::from_millis(16), 0);
     drop(rec);
     let text = std::fs::read_to_string(&path).unwrap();
@@ -227,8 +252,8 @@ fn a_recorded_session_replays_tick_for_tick_on_another_frame_rate() {
     let mut app = battle();
     let (me, _, enemy) = fleet(&mut app);
     let file = std::fs::File::create(&path).unwrap();
-    let mut rec = Recorder { out: std::io::BufWriter::new(file), frames: vec![], warned: false };
-    let header = Header { format: FORMAT, version: "test".into(), seed: 1, args: vec![], mods: vec![], from_menu: false };
+    let mut rec = Recorder { out: std::io::BufWriter::new(file), pending: None, frames: vec![], warned: false };
+    let header = Header { format: FORMAT, version: "test".into(), seed: 1, args: vec![], mods: vec![], from_menu: false, skirmish: None };
     serde_json::to_writer(&mut rec.out, &header).unwrap();
     rec.out.write_all(b"\n").unwrap();
     app.insert_resource(rec);

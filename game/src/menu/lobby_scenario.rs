@@ -10,6 +10,9 @@
 //!   of Auto Assign's. Not checked against the budget here: the lobby's own launch check still applies.
 //! - `slots`: the lobby rows in order, `human`, `computer`, `open` or `closed`; `N*kind` repeats. The first row is always the
 //!   human's. Rows left out stay as the lobby opens them. Computers take the team and fleet type the lobby gives them.
+//!
+//! A spec starting with `{` is a whole [`SkirmishSetup`] in JSON instead (teams, fleet types, flags, gun swaps, ship names, named
+//! crew), the form a command log's header holds.
 use super::*;
 use crate::scenario::Race;
 
@@ -21,7 +24,28 @@ pub enum SlotSpec {
     Closed,
 }
 
+/// What a tool launch sets the lobby up with: `--lobby <spec>`, or the setup a replayed recording holds.
 #[derive(Resource, Clone, PartialEq, Debug)]
+pub enum LobbyLaunch {
+    Spec(LobbyScenario),
+    Setup(SkirmishSetup),
+}
+
+impl LobbyLaunch {
+    /// A `--lobby` argument: the JSON setup or the short spec.
+    pub fn parse(spec: &str) -> Result<Self, String> {
+        if spec.trim_start().starts_with('{') { SkirmishSetup::parse(spec).map(Self::Setup) } else { LobbyScenario::parse(spec).map(Self::Spec) }
+    }
+    /// Sets the lobby up, ready for Launch.
+    pub fn apply(&self, sk: &mut Skirmish, lib: &Library) -> Result<(), String> {
+        match self {
+            Self::Spec(spec) => spec.apply(sk, lib),
+            Self::Setup(setup) => setup.apply(sk, lib),
+        }
+    }
+}
+
+#[derive(Clone, PartialEq, Debug)]
 pub struct LobbyScenario {
     pub map: String,
     pub points: u32,
@@ -163,6 +187,14 @@ mod tests {
         assert!(s.fleet.is_empty());
         let f = LobbyScenario::parse("map=a;fleet=Ship_Navy_Cutter + Ship_Navy_ManOWar;slots=human,computer").unwrap();
         assert_eq!(f.fleet, ["Ship_Navy_Cutter", "Ship_Navy_ManOWar"]);
+    }
+
+    #[test]
+    fn a_spec_starting_with_a_brace_is_a_whole_setup() {
+        assert!(matches!(LobbyLaunch::parse("map=a;slots=human"), Ok(LobbyLaunch::Spec(_))));
+        let json = r#" {"map":"a","points":300,"limit":5,"slots":[{"kind":"human","team":0,"flag":0}]}"#;
+        assert!(matches!(LobbyLaunch::parse(json), Ok(LobbyLaunch::Setup(s)) if s.map == "a"));
+        assert!(LobbyLaunch::parse("{not json}").unwrap_err().contains("lobby setup"));
     }
 
     #[test]

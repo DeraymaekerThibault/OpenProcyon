@@ -101,7 +101,8 @@ pub fn reset_sim(world: &mut World) {
 }
 
 /// A fleet type, as the TWT numbers it: 0 Navy, 2 Pirate, 3 Procyon; 4 (and any other number) is no fleet type chosen or known.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum Race {
     Navy,
     Pirate,
@@ -171,6 +172,7 @@ impl Race {
 
 /// One fleet of a battle: whose start point it uses (index in the map's player list), which side it fights for, whether the
 /// human commands it, and its ships with an explicit start position (historical maps) or none (formation at the start point).
+#[derive(Debug, PartialEq)]
 pub struct Group {
     pub player: usize,
     pub side: Side,
