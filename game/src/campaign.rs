@@ -368,10 +368,9 @@ pub fn custom_missions_in(mods: &[std::path::PathBuf], maps: &std::path::Path) -
         ids.sort_by_key(|id| (order.iter().position(|o| o == id).unwrap_or(usize::MAX), id.clone()));
         for id in ids {
             out.retain(|m| m.id != id);
-            let map = crate::data::try_json(&maps.join(&id).join("map.json")).unwrap_or_default();
-            let text = |k: &str| map[k].as_str().unwrap_or_default().to_string();
-            let name = Some(text("name")).filter(|s| !s.is_empty()).unwrap_or_else(|| id.clone());
-            out.push(CustomMission { id, name, description: text("description"), campaign: campaign.clone() });
+            let map = crate::data::try_json(&maps.join(&id).join("map.json")).map(|v| crate::data::MapDoc::from_value(&v)).unwrap_or_default();
+            let name = Some(map.name_or_empty().to_string()).filter(|s| !s.is_empty()).unwrap_or_else(|| id.clone());
+            out.push(CustomMission { id, name, description: map.description_or_empty().to_string(), campaign: campaign.clone() });
         }
     }
     out

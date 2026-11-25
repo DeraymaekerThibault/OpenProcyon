@@ -989,12 +989,17 @@ pub fn skirmish_maps() -> Vec<(String, String, bool, usize)> {
         .flatten()
         .filter_map(|e| {
             let m = crate::data::try_json(&e.path().join("map.json"))?;
-            let players = m["players"].as_array().map_or(0, |p| p.iter().filter(|p| p["playable"].as_bool().unwrap_or(false)).count());
-            m["skirmish"].as_bool()?.then(|| (e.file_name().to_string_lossy().into(), m["name"].as_str().unwrap_or("").into(), m["assemble"].as_bool().unwrap_or(false), players))
+            skirmish_entry(e.file_name().to_string_lossy().into(), &m)
         })
         .collect();
     maps.sort();
     maps
+}
+
+/// One row of [`skirmish_maps`] from a map's `map.json`; none unless it is flagged `"skirmish": true`.
+pub(super) fn skirmish_entry(id: String, map: &Value) -> Option<(String, String, bool, usize)> {
+    let m = crate::data::MapDoc::from_value(map);
+    m.skirmish?.then(|| (id, m.name_or_empty().into(), m.assemble.unwrap_or(false), m.playable_players()))
 }
 
 /// The fleet screen's ship information, as the original lists it.

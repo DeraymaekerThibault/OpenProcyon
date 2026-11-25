@@ -9,7 +9,7 @@
 //! - [`read_merged`] / [`read_map`]: a JSON file of such a root (or of the base folder), read like the game reads it, as a
 //!   [`DataError`] that names the file and the mod that provided it.
 //! - [`rule_schema`]: the mission rule vocabulary as JSON, the same document `--dump-rule-schema` writes.
-//! - [`schemas`]: JSON Schemas of `ship.json`, `guns.json`, `bullets.json`, `data/crew_nodes.json` and `mod.json` (`--dump-schemas <dir>`).
+//! - [`schemas`]: JSON Schemas of `ship.json`, `guns.json`, `bullets.json`, `data/crew_nodes.json`, `mod.json` and `maps/<id>/map.json` (`--dump-schemas <dir>`).
 //! - [`extensions`]: the engine's additions to the original (the table of docs/modding.md), as data.
 //! - [`check_mission`] / [`known_names`]: the mission checker behind `--check-mission`, on JSON values in memory.
 //! - [`defined_names`] / [`accepted_names`]: the names a mission defines per kind of rule field, and exactly the names a field of
@@ -111,7 +111,7 @@ pub fn rule_schema() -> Value {
 }
 
 /// The JSON Schemas (draft 2020-12) of the files a modder writes, as `(file name, schema)`: `ship.schema.json`, `guns.schema.json`,
-/// `bullets.schema.json`, `crew_nodes.schema.json`, `mod.schema.json`; the files `--dump-schemas <dir>` writes. Generated from the
+/// `bullets.schema.json`, `crew_nodes.schema.json`, `mod.schema.json`, `map.schema.json`; the files `--dump-schemas <dir>` writes. Generated from the
 /// types the loader reads, so they cannot drift from it. Unknown keys stay allowed, as in the loader. No key is `required`: a mod's
 /// files are merged over a parent (`extends`, or a retail entry) before the loader reads them, so a partial file is valid; the loader's own
 /// validation of the merged result is unchanged. The entry of `guns.json` and `bullets.json` carries `"x-required-new"`, the dotted
@@ -126,6 +126,7 @@ pub fn schemas() -> Vec<(&'static str, Value)> {
     let mut all = crate::data::schemas();
     annotate::all(&mut all);
     all.push(("mod.schema.json", crate::modding::schema()));
+    all.push(("map.schema.json", crate::data::map_schema()));
     for (name, schema) in &mut all {
         // `guns.json` and `bullets.json` entries are merged key by key, so a partial entry is the normal case and no key is `required`;
         // what a NEW entry must set is listed apart, as the non-enforcing annotation `x-required-new` on the entry.
@@ -343,7 +344,7 @@ mod tests {
     fn schemas_are_2020_12_for_every_file_a_modder_writes() {
         let all = schemas();
         let names: Vec<_> = all.iter().map(|(n, _)| *n).collect();
-        assert_eq!(names, ["ship.schema.json", "guns.schema.json", "bullets.schema.json", "crew_nodes.schema.json", "mod.schema.json"]);
+        assert_eq!(names, ["ship.schema.json", "guns.schema.json", "bullets.schema.json", "crew_nodes.schema.json", "mod.schema.json", "map.schema.json"]);
         for (name, schema) in &all {
             let text = serde_json::to_string(schema).unwrap();
             let back: Value = serde_json::from_str(&text).unwrap();

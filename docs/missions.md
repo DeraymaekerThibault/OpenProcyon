@@ -89,6 +89,8 @@ For a mission, the loader reads only the keys marked "yes" below. Numbers are ga
 | `players` | no | skirmish lobby slots. `--check-mission` reads the names as known players, but a mission's players live in `mission.json`. Leave it out, or fill it as the retail maps do: `{"name", "team": -1, "start": [x, y, z], "forward": [x, y, z], "formation": 0, "playable": true, "race": 4, "color": [r, g, b, a]}` (`race`: 0 Navy, 2 Pirate, 3 Procyon, 4 open; other numbers are unverified) |
 | `alliance_change`, `teams`, `ship_names`, `name_id`, `desc_id`, `assemble`, `islands_make_sounds` | no | skirmish-lobby and retail-text fields; leave them out |
 
+`openprocyon --dump-schemas <dir>` writes `map.schema.json`, the keys above with their types and defaults, for an editor's hints (`docs/modding.md` "JSON schemas").
+
 `rot` (objects, ships, animals) is nine numbers: a 3x3 rotation matrix in the order the file stores it (column by column: the first
 triple is the starboard side, the second the forward vector). `[1,0,0, 0,1,0, 0,0,1]` faces north (+y). To face a heading `a`
 (clockwise from north), with `f = (sin a, cos a)`: `[fy, -fx, 0, fx, fy, 0, 0, 0, 1]`. Missing entries read as the identity; four

@@ -213,9 +213,9 @@ fn check_mod_reports_misuse_with_file_and_pointer() {
     let found = check_mod_with(&m, None, &[]);
     let at = |file: &str| found.iter().find(|f| f.file == file).unwrap_or_else(|| panic!("{file}: {found:#?}"));
     let (warn, error) = (at("data/b.json"), at("data/c.json"));
-    assert_eq!((warn.level, warn.path.as_str()), (Level::Warning, "/list"), "{warn:?}");
+    assert_eq!((warn.level, warn.path.as_str(), warn.pointer.as_str()), (Level::Warning, "list", "/list"), "{warn:?}");
     assert!(warn.message.contains("id 1"));
-    assert_eq!((error.level, error.path.as_str()), (Level::Error, "/list"), "{error:?}");
+    assert_eq!((error.level, error.path.as_str(), error.pointer.as_str()), (Level::Error, "list", "/list"), "{error:?}");
     assert!(error.message.contains("entry 0 has no 'id'"));
     assert!(!found.iter().any(|f| f.message.contains("unknown key 'merge'")), "{found:#?}");
     std::fs::remove_dir_all(dir).unwrap();

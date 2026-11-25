@@ -93,7 +93,7 @@ pub fn check_references(mission: &Value, map: &Value, media: &Value, look: &Look
         }
     }
     if let Some(picture) = look.picture
-        && (map["backdrop"] == true || map["backdrop"].as_str().is_some_and(|s| !s.is_empty()))
+        && crate::data::MapDoc::from_value(map).wants_backdrop()
         && !picture("backdrop.png")
     {
         out.push(problem("(mission)", "files".into(), "backdrop", "map.json asks for a backdrop but the map folder has no backdrop.png".into()));

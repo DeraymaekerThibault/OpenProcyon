@@ -55,14 +55,14 @@ pub fn check_mod_with(dir: &Path, base: Option<&Path>, installed: &[Installed]) 
                         c.unchecked += 1;
                     } else {
                         let why = c.tidy(why);
-                        let ptr = merge_pointer(&why).to_string();
-                        c.error(file, &ptr, why);
+                        let ptr = merge_pointer(&why);
+                        c.error(file, ptr, why);
                     }
                 }
                 for (file, why) in &entry.warnings {
                     let why = c.tidy(why);
-                    let ptr = merge_pointer(&why).to_string();
-                    c.warn(file, &ptr, why);
+                    let ptr = merge_pointer(&why);
+                    c.warn(file, ptr, why);
                 }
                 for file in &entry.unused_textures {
                     c.warn(file, "", "no model uses this texture override; check the name".into());
@@ -85,9 +85,11 @@ pub fn check_mod_with(dir: &Path, base: Option<&Path>, installed: &[Installed]) 
     c.out
 }
 
-/// The pointer of a keyed-merge message (`merges '/objects': ...`, docs/modding.md "Changing one entry of a list"), else "".
-fn merge_pointer(why: &str) -> &str {
-    why.strip_prefix("merges '").and_then(|r| r.split_once("':")).map_or("", |(ptr, _)| ptr)
+/// The place a keyed-merge message names (`merges '/objects': ...`, docs/modding.md "Changing one entry of a list"), else the
+/// whole file. The message holds a JSON pointer; its `~1` / `~0` escapes are undone so the finding's `pointer` is that pointer.
+fn merge_pointer(why: &str) -> JsonPath {
+    let ptr = why.strip_prefix("merges '").and_then(|r| r.split_once("':")).map_or("", |(ptr, _)| ptr);
+    ptr.split('/').skip(1).fold(JsonPath::default(), |path, seg| path.key(seg.replace("~1", "/").replace("~0", "~")))
 }
 
 struct Checker<'a> {
