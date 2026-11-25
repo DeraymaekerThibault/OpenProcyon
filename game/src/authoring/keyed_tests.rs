@@ -189,6 +189,26 @@ fn a_mission_merges_its_rules_by_name_and_ships_by_id_without_saying_so() {
 }
 
 #[test]
+fn an_extending_mission_changes_one_task_by_name_and_repeated_names_are_refused() {
+    let tasks = json!([{"Name": "Reach", "text": "Reach the gate", "Active": true}, {"Name": "Clear", "text": "Clear it", "Active": false}]);
+    let diff = json!({"extends": "m", "tasks": [{"Name": "Clear", "required": true, "complete_when": [{"Type": "Group Destroyed", "Group Name": "Raiders"}]}, {"Name": "Reach", "$remove": true}, {"Name": "Escape", "text": "Leave"}]});
+    let (merged, warnings) = crate::authoring::extend("maps/m/mission.json", json!({"tasks": tasks}), &diff).unwrap();
+    assert!(warnings.is_empty(), "{warnings:?}");
+    assert_eq!(merged["tasks"][0]["Name"], "Clear");
+    assert_eq!((merged["tasks"][0]["text"].as_str(), merged["tasks"][0]["required"].as_bool()), (Some("Clear it"), Some(true)), "an entry of the parent is merged, not replaced");
+    assert_eq!(merged["tasks"].as_array().unwrap().len(), 2);
+    assert_eq!(merged["tasks"][1]["Name"], "Escape", "a new name is appended");
+    assert!(crate::authoring::keyed_lists("maps/m/mission.json").contains(&("/tasks", "Name")));
+    assert!(crate::authoring::keyed_lists("maps/m/script.json").iter().all(|(p, _)| *p != "/tasks"), "a skirmish script keeps its tasks whole");
+    // a parent that repeats a task name cannot be keyed: the error says which entries, and `merge: false` is the way out
+    let twice = json!({"tasks": [{"Name": "A"}, {"Name": "B"}, {"Name": "A"}]});
+    let err = crate::authoring::extend("maps/m/mission.json", twice.clone(), &diff).unwrap_err();
+    assert!(err.contains("merges '/tasks'") && err.contains("same 'Name'"), "{err}");
+    let whole = json!({"extends": "m", "merge": {"/tasks": false}, "tasks": [{"Name": "Only"}]});
+    assert_eq!(crate::authoring::extend("maps/m/mission.json", twice, &whole).unwrap().0["tasks"], json!([{"Name": "Only"}]));
+}
+
+#[test]
 fn string_keys_and_a_missing_base_list_work() {
     let b = json!({"rules": [{"name": "A", "n": 1}, {"name": "B", "n": 2}]});
     let diff =

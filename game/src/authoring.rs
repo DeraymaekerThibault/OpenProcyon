@@ -11,11 +11,13 @@
 //! - [`rule_schema`]: the mission rule vocabulary as JSON, the same document `--dump-rule-schema` writes.
 //! - [`RuleReport`] / [`rule_report_schema`]: the file `--rule-report <file>` writes (what each rule of a mission did in one play), to parse.
 //! - [`sound_duration`]: how long a sound file (Ogg Vorbis) plays, read with the decoder the game plays it with.
-//! - [`schemas`]: JSON Schemas of `ship.json`, `guns.json`, `bullets.json`, `data/crew_nodes.json`, `mod.json` and `maps/<id>/map.json` (`--dump-schemas <dir>`).
+//! - [`schemas`]: JSON Schemas of `ship.json`, `guns.json`, `bullets.json`, `data/crew_nodes.json`, `mod.json`, `maps/<id>/map.json`, `mission.json`, `script.json` and `media.json` of a map (`--dump-schemas <dir>`).
 //! - [`extensions`]: the engine's additions to the original (the table of docs/modding.md), as data.
 //! - [`check_mission`] / [`known_names`]: the mission checker behind `--check-mission`, on JSON values in memory.
 //! - [`defined_names`] / [`accepted_names`]: the names a mission defines per kind of rule field, and exactly the names a field of
 //!   that kind accepts (derived from the checker's own test, so a `group` field also offers players and placed ships' groups).
+//! - [`visit_fields`] / [`visit_fields_mut`] / [`split_group`]: every rule field that names something (group, volume, point, point set,
+//!   speech event, rule ...) with its kind and JSON pointer, read or for rewriting; the walk the checker itself runs.
 //! - [`Finding`]: what the checkers find, located by `path` (printed) and `pointer` (a JSON pointer); [`unknown_key_findings`] gives
 //!   the unknown-key warnings of any document with the nearest known key.
 //! - [`merge_rule`] / [`extends_parent`] / [`MERGED`]: how a mod file combines with the overlay below it, and what an `extends` file
@@ -65,7 +67,27 @@ pub use templates::{Expansion, PARAMETER_KINDS, Parameter, Template, expand_temp
 
 pub use crate::data::DataError;
 pub use crate::modding::{MERGED, MergeRule, ModEntry, ModReport, extends_parent, merge_rule};
-pub use crate::rules::check::{Finding, JsonPath, Level, Problem, Segment, accepted_names, defined_names};
+pub use crate::rules::check::{FieldVisit, Finding, JsonPath, Level, Problem, Segment, accepted_names, defined_names, split_group};
+
+/// Calls `f` for every string field of a mission's rules that names something, as the checker reads them: each condition and action of
+/// `rules`, the nested conditions of `OP Any Of` / `OP Not`, and the `complete_when` / `fail_when` lists of `tasks`. A [`FieldVisit`]
+/// gives the JSON `pointer` of the field in `mission` (a `/rules/3/actions/0/Group`), its `kind()` as the rule schema names it
+/// (`group`, `player`, `path`, `volume`, `task`, `point`, `timer`, `flag`, `counter`, `campaign_counter`, `rule`, `speech_event`,
+/// `point_set`, `map_text`, `message`, `team`, `ship_name`, and the plain `bool`, `number`, `enum`, `text`), the field's name, the
+/// `item_type()` of the condition or action, its `role()` and the `text`. Entries of a Type the schema does not know are skipped, as the
+/// checker skips them. A `group` field's text is `Group` or `Group,Unit` ([`split_group`]); a `rule` field is matched by its trimmed
+/// text. It is the very walk behind `--check-mission`, [`defined_names`] and the unused-definition warnings, so a rename that follows it
+/// changes what the checker reads. Only rules and tasks are walked, not the definitions (`volumes`, `groups`, ...): renaming those is
+/// the caller's edit.
+pub fn visit_fields(mission: &Value, f: &mut dyn FnMut(&FieldVisit)) {
+    crate::rules::check::visit_located(mission, f);
+}
+
+/// [`visit_fields`] for a rename: `f` gets each field and a copy of its text, and a change it makes to the copy is written back into
+/// `mission` at the field's pointer after the walk (so `f` never sees its own edits). Same fields, same order.
+pub fn visit_fields_mut(mission: &mut Value, f: &mut dyn FnMut(&FieldVisit, &mut String)) {
+    crate::rules::check::visit_located_mut(mission, f);
+}
 
 /// The version of this engine (the crate version).
 pub const ENGINE_VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -110,7 +132,7 @@ pub fn rule_schema() -> Value {
 }
 
 /// The JSON Schemas (draft 2020-12) of the files a modder writes, as `(file name, schema)`: `ship.schema.json`, `guns.schema.json`,
-/// `bullets.schema.json`, `crew_nodes.schema.json`, `mod.schema.json`, `map.schema.json`; the files `--dump-schemas <dir>` writes. Generated from the
+/// `bullets.schema.json`, `crew_nodes.schema.json`, `mod.schema.json`, `map.schema.json`, `mission.schema.json`, `script.schema.json`, `media.schema.json`; the files `--dump-schemas <dir>` writes. Generated from the
 /// types the loader reads, so they cannot drift from it. Unknown keys stay allowed, as in the loader. No key is `required`: a mod's
 /// files are merged over a parent (`extends`, or a retail entry) before the loader reads them, so a partial file is valid; the loader's own
 /// validation of the merged result is unchanged. The entry of `guns.json` and `bullets.json` carries `"x-required-new"`, the dotted
@@ -126,6 +148,9 @@ pub fn schemas() -> Vec<(&'static str, Value)> {
     annotate::all(&mut all);
     all.push(("mod.schema.json", crate::modding::schema()));
     all.push(("map.schema.json", crate::data::map_schema()));
+    all.push(("mission.schema.json", crate::data::mission_doc::mission_schema()));
+    all.push(("script.schema.json", crate::data::mission_doc::script_schema()));
+    all.push(("media.schema.json", crate::data::mission_doc::media_schema()));
     for (name, schema) in &mut all {
         // `guns.json` and `bullets.json` entries are merged key by key, so a partial entry is the normal case and no key is `required`;
         // what a NEW entry must set is listed apart, as the non-enforcing annotation `x-required-new` on the entry.
@@ -310,6 +335,41 @@ mod tests {
     }
 
     #[test]
+    fn visit_fields_gives_kind_and_pointer_of_every_named_field_and_renames() {
+        let mut mission = json!({
+            "rules": [{"name": "r", "conditions": [{"Type": "OP Any Of", "Conditions": [{"Type": "Group Destroyed", "Group Name": "Pirates,Flagship"}]}],
+                       "actions": [{"Type": "Set Flag Action", "Flag Name": "seen"}]}],
+            "tasks": [{"Name": "T", "complete_when": [{"Type": "Group Destroyed", "Group Name": "Pirates"}], "fail_when": []}]
+        });
+        let mut seen = vec![];
+        visit_fields(&mission, &mut |v| seen.push((v.pointer.clone(), v.kind(), v.item_type(), v.role(), v.text.to_string())));
+        assert!(
+            seen.iter().any(|(p, k, ty, role, t)| p == "/rules/0/conditions/0/Conditions/0/Group Name"
+                && *k == "group"
+                && ty == &"Group Destroyed"
+                && *role == "condition"
+                && t == "Pirates,Flagship"),
+            "{seen:?}"
+        );
+        assert!(seen.iter().any(|(p, k, _, role, _)| p == "/rules/0/actions/0/Flag Name" && *k == "flag" && *role == "action"));
+        assert!(seen.iter().any(|(p, k, _, _, _)| p == "/tasks/0/complete_when/0/Group Name" && *k == "group"));
+        assert_eq!(split_group("Pirates,Flagship"), ("Pirates", Some("Flagship")));
+        assert_eq!(split_group("Pirates"), ("Pirates", None));
+        // every pointer finds its text back in the document
+        visit_fields(&mission, &mut |v| assert_eq!(mission.pointer(&v.pointer).and_then(Value::as_str), Some(v.text)));
+        // a rename through the walk
+        visit_fields_mut(&mut mission, &mut |v, text| {
+            let (group, unit) = split_group(text);
+            if v.kind() == "group" && group == "Pirates" {
+                *text = unit.map_or_else(|| "Raiders".to_string(), |u| format!("Raiders,{u}"));
+            }
+        });
+        assert_eq!(mission["rules"][0]["conditions"][0]["Conditions"][0]["Group Name"], "Raiders,Flagship");
+        assert_eq!(mission["tasks"][0]["complete_when"][0]["Group Name"], "Raiders");
+        assert_eq!(mission["rules"][0]["actions"][0]["Flag Name"], "seen");
+    }
+
+    #[test]
     fn merge_keyed_alone() {
         let mut base = json!({"rules": [{"name": "a", "x": 1}]});
         let w = merge_keyed(&mut base, "/rules", "name", &[json!({"name": "a", "x": 2}), json!({"name": "b"}), json!({"name": "c", "$remove": true})]).unwrap();
@@ -457,7 +517,20 @@ mod tests {
     fn schemas_are_2020_12_for_every_file_a_modder_writes() {
         let all = schemas();
         let names: Vec<_> = all.iter().map(|(n, _)| *n).collect();
-        assert_eq!(names, ["ship.schema.json", "guns.schema.json", "bullets.schema.json", "crew_nodes.schema.json", "mod.schema.json", "map.schema.json"]);
+        assert_eq!(
+            names,
+            [
+                "ship.schema.json",
+                "guns.schema.json",
+                "bullets.schema.json",
+                "crew_nodes.schema.json",
+                "mod.schema.json",
+                "map.schema.json",
+                "mission.schema.json",
+                "script.schema.json",
+                "media.schema.json"
+            ]
+        );
         for (name, schema) in &all {
             let text = serde_json::to_string(schema).unwrap();
             let back: Value = serde_json::from_str(&text).unwrap();

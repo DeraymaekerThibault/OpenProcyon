@@ -208,7 +208,7 @@ pub(crate) fn keyed_defaults(name: &str) -> &'static [(&'static str, &'static st
     let parts: Vec<&str> = name.split('/').collect();
     match parts[..] {
         ["maps", _, "map.json"] => &[("/objects", "id"), ("/ships", "id"), ("/mines", "id"), ("/nebulae", "name"), ("/players", "name")],
-        ["maps", _, "mission.json"] => &[("/ships", "id"), ("/rules", "name"), ("/points", "Name")],
+        ["maps", _, "mission.json"] => &[("/ships", "id"), ("/rules", "name"), ("/points", "Name"), ("/tasks", "Name")],
         ["maps", _, "script.json"] => &[("/rules", "name")],
         _ => &[],
     }

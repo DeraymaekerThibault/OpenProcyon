@@ -264,29 +264,105 @@ fn names(v: &Value, key: &str) -> BTreeSet<String> {
     }
 }
 
-/// Calls `f(role, type, field, text)` for every string a rule of the mission writes in a field of the schema, nested conditions
-/// (`OP Any Of`, `OP Not`) and the `complete_when` / `fail_when` lists of tasks included. Entries of an unknown Type are skipped.
-pub(crate) fn visit_fields(mission: &Value, f: &mut dyn FnMut(Role, &TypeDef, &Field, &str)) {
-    fn entry(role: Role, e: &Value, f: &mut dyn FnMut(Role, &TypeDef, &Field, &str)) {
+/// One string field of a rule (or of a task's `complete_when` / `fail_when`) that the rule schema knows: where it is, what kind of
+/// thing it names, and its text. The unit of [`visit_located`] and of `authoring::visit_fields`.
+pub struct FieldVisit<'a> {
+    /// The JSON pointer of the field in the mission document (`/rules/3/actions/0/Group`, `/tasks/1/complete_when/0/Volume`;
+    /// `~` and `/` in a key escaped as `~0` and `~1`), nested conditions of `OP Any Of` / `OP Not` included.
+    pub pointer: String,
+    /// The field's text.
+    pub text: &'a str,
+    pub(crate) role: Role,
+    pub(crate) def: &'static TypeDef,
+    pub(crate) field: &'static Field,
+}
+
+impl FieldVisit<'_> {
+    /// The field's kind as the rule schema names it (`Kind::name`: `group`, `volume`, `point_set`, `speech_event`, `rule`, ...).
+    pub fn kind(&self) -> &'static str {
+        self.field.kind.name()
+    }
+    /// The field's name in its Type (`Group`, `Volume`).
+    pub fn field(&self) -> &'static str {
+        self.field.name
+    }
+    /// The `Type` of the condition or action that holds the field.
+    pub fn item_type(&self) -> &'static str {
+        self.def.name
+    }
+    /// `"condition"` or `"action"`, the `role` of the rule schema.
+    pub fn role(&self) -> &'static str {
+        match self.role {
+            Role::Condition => "condition",
+            Role::Action => "action",
+        }
+    }
+}
+
+/// The two names of a `group` field: `Group` and, after the first comma, the `Unit` (the interpreter splits at the first comma). The
+/// text of any other kind has no such part. A `player` field is the same namespace as `group` (see [`accepted_names`]).
+pub fn split_group(text: &str) -> (&str, Option<&str>) {
+    match text.split_once(',') {
+        Some((group, unit)) => (group, Some(unit)),
+        None => (text, None),
+    }
+}
+
+/// Calls `f` for every string a rule of the mission writes in a field of the schema, with its JSON pointer: nested conditions
+/// (`OP Any Of`, `OP Not`) and the `complete_when` / `fail_when` lists of tasks included. Entries of an unknown Type are skipped. The
+/// one walk behind the checker, `defined_names` and `authoring::visit_fields`.
+pub fn visit_located(mission: &Value, f: &mut dyn FnMut(&FieldVisit)) {
+    fn entry(role: Role, e: &Value, at: JsonPath, f: &mut dyn FnMut(&FieldVisit)) {
         let Some(def) = e["Type"].as_str().and_then(|ty| lookup(role, ty)) else { return };
         for field in def.fields {
+            let here = at.clone().key(field.name);
             match (&e[field.name], field.kind) {
-                (Value::Array(list), Kind::ConditionList) => list.iter().for_each(|c| entry(Role::Condition, c, f)),
-                (v @ Value::Object(_), Kind::Condition) => entry(Role::Condition, v, f),
-                (Value::String(text), _) => f(role, def, field, text),
+                (Value::Array(list), Kind::ConditionList) => list.iter().enumerate().for_each(|(i, c)| entry(Role::Condition, c, here.clone().index(i), f)),
+                (v @ Value::Object(_), Kind::Condition) => entry(Role::Condition, v, here, f),
+                (Value::String(text), _) => f(&FieldVisit { pointer: here.pointer(), text, role, def, field }),
                 _ => {}
             }
         }
     }
-    for r in mission["rules"].as_array().into_iter().flatten() {
-        r["conditions"].as_array().into_iter().flatten().for_each(|e| entry(Role::Condition, e, f));
-        r["actions"].as_array().into_iter().flatten().for_each(|e| entry(Role::Action, e, f));
-    }
-    for t in mission["tasks"].as_array().into_iter().flatten() {
-        for key in ["complete_when", "fail_when"] {
-            t[key].as_array().into_iter().flatten().for_each(|e| entry(Role::Condition, e, f));
+    for (r, rule) in mission["rules"].as_array().into_iter().flatten().enumerate() {
+        let at = JsonPath::default().key("rules").index(r);
+        for (key, role) in [("conditions", Role::Condition), ("actions", Role::Action)] {
+            for (i, e) in rule[key].as_array().into_iter().flatten().enumerate() {
+                entry(role, e, at.clone().key(key).index(i), f);
+            }
         }
     }
+    for (t, task) in mission["tasks"].as_array().into_iter().flatten().enumerate() {
+        for key in ["complete_when", "fail_when"] {
+            for (i, e) in task[key].as_array().into_iter().flatten().enumerate() {
+                entry(Role::Condition, e, JsonPath::default().key("tasks").index(t).key(key).index(i), f);
+            }
+        }
+    }
+}
+
+/// [`visit_located`] where `f` may change the text (a rename): `f` gets the field and a copy of its text, and what it leaves in the
+/// copy is written back to the field. Visits the same fields in the same order; the fields are found first, then written, so `f` never
+/// sees an edit of its own.
+pub fn visit_located_mut(mission: &mut Value, f: &mut dyn FnMut(&FieldVisit, &mut String)) {
+    let mut edits = vec![];
+    visit_located(mission, &mut |v| {
+        let mut text = v.text.to_string();
+        f(v, &mut text);
+        if text != v.text {
+            edits.push((v.pointer.clone(), text));
+        }
+    });
+    for (pointer, text) in edits {
+        if let Some(slot) = mission.pointer_mut(&pointer) {
+            *slot = Value::String(text);
+        }
+    }
+}
+
+/// Calls `f(role, type, field, text)` for every string a rule of the mission writes in a field of the schema (see [`visit_located`]).
+pub(crate) fn visit_fields(mission: &Value, f: &mut dyn FnMut(Role, &TypeDef, &Field, &str)) {
+    visit_located(mission, &mut |v| f(v.role, v.def, v.field, v.text));
 }
 
 impl Defs {
