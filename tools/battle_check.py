@@ -1,5 +1,5 @@
 """Battle check: play short skirmish battles and fail when one stops behaving like a battle.
-usage: python3 -m tools.battle_check [NAME ...] [--speed N] [--profile fast|release] [--jobs N]   (default: every scenario below)
+usage: python3 -m tools.battle_check [NAME ...] [--speed N] [--profile fast|release] [--jobs N] [--twice | --replay]   (default: every scenario below)
 Two kinds of scenario: a map with the --ship/--allies/--enemies fleet shortcut, and a lobby scenario (`--lobby <spec>`,
 game/src/menu/lobby_scenario.rs) that sets the skirmish lobby up like a player (slots, victory points, fleet limit) and presses
 Launch. The shortcut never plays an allied computer slot or a full lobby; only lobby scenarios do.
@@ -121,16 +121,30 @@ def comparable(report):
     return {k: v for k, v in report.items() if k != "frame_ms"}
 
 
-def same_run(log_a, log_b):
-    """(same, why) for two logs of one fixed-step, seeded scenario: the battle reports must match exactly."""
+def replayable(report):
+    """A report without what a replay does not reproduce: frame times, and the entity peak, which counts presentation (sounds end
+    with their playback, not on a tick)."""
+    out = comparable(report)
+    out["sanity"] = {k: v for k, v in out.get("sanity", {}).items() if k != "entities"}
+    return out
+
+
+def same_run(
+    log_a,
+    log_b,
+    keep=comparable,
+    what="same report twice",
+    differ="the same seed gave different reports",
+):
+    """(same, why) for two logs of one seeded scenario (two fixed-step runs, or a run and its replay): the battle reports must match."""
     reports = [REPORT.search(log) for log in (log_a, log_b)]
     if not all(reports):
         return False, "a repeat produced no battle report"
-    a, b = (comparable(json.loads(m[1])) for m in reports)
+    a, b = (keep(json.loads(m[1])) for m in reports)
     if a == b:
-        return True, "same report twice"
+        return True, what
     keys = sorted(k for k in a.keys() | b.keys() if a.get(k) != b.get(k))
-    return False, f"the same seed gave different reports ({', '.join(keys)})"
+    return False, f"{differ} ({', '.join(keys)})"
 
 
 def evaluate(report, expect):
@@ -238,6 +252,12 @@ def main():
         action="store_true",
         help="play each scenario twice, fixed-step with seed 1, and fail when the two reports differ",
     )
+    ap.add_argument(
+        "--replay",
+        action="store_true",
+        help="play each scenario on the normal clock with `--script commands` recording a command log (PROCYON_COMMANDS), "
+        "replay the log (`--replay`), and fail when the two reports differ",
+    )
     args = ap.parse_args()
     chosen = [s for s in SCENARIOS if not args.names or s.name in args.names]
     if not chosen:
@@ -258,12 +278,20 @@ def main():
     def run(scenario):
         """Plays one scenario in its own display and scratch XDG_DATA_HOME; returns (passed, line)."""
         name, game_args, seconds, expect = scenario
-        if jobs > 1 or args.twice:
+        if jobs > 1 or args.twice or args.replay:
             expect = expect | {"no-stutter"}
         start = time.monotonic()
         log = out / f"{name}.log"
-        text = play(name, game_args, seconds, log, *deterministic(args.twice))
+        extra, env_extra = deterministic(args.twice)
+        if args.replay:
+            extra, env_extra = (
+                ["--script", "commands"],
+                {"PROCYON_COMMANDS": str(log.with_suffix(".commands.jsonl"))},
+            )
+        text = play(name, game_args, seconds, log, extra, env_extra)
         passed, summary = outcome(text, expect)
+        if passed and args.replay:
+            passed, summary = replay(name, game_args, seconds, text, log)
         if passed and args.twice:
             passed, summary = same_run(
                 text,
@@ -282,6 +310,27 @@ def main():
                 "\n    " + ln for ln in text.splitlines()[-10:] if ln.strip()
             )
         return passed, line
+
+    def replay(name, game_args, seconds, text, log):
+        """(same, why) for the recorded run `text` (log `log`) and a replay of its command log."""
+        commands = log.with_suffix(".commands.jsonl")
+        if not commands.exists():
+            return False, f"the run wrote no command log ({commands})"
+        again = play(
+            name,
+            game_args,
+            seconds,
+            out / f"{name}.replay.log",
+            ["--replay", str(commands)],
+            {},
+        )
+        return same_run(
+            text,
+            again,
+            replayable,
+            "the replay gave the same report",
+            "the replay gave a different report",
+        )
 
     def play(name, game_args, seconds, log, extra, env_extra):
         """Plays one scenario in its own display and scratch XDG_DATA_HOME; returns the log text."""

@@ -35,6 +35,8 @@ struct SideLine {
 }
 
 struct ShipLine {
+    /// Creation number (`SpawnIndex`): the order the report lists ships in, the same in every run of one battle.
+    order: u32,
     class: String,
     side: String,
     last: Vec3,
@@ -129,6 +131,7 @@ fn watch(
     mut hits: MessageReader<Hit>,
     mut exit: MessageWriter<AppExit>,
     everything: Query<Entity>,
+    spawn: Query<&crate::scenario::SpawnIndex>,
 ) {
     let dt = time.delta_secs();
     report.time += dt;
@@ -163,7 +166,18 @@ fn watch(
             let computer = !(ship.side == Side::Player && member.is_none_or(|m| m.0 == fleets.local));
             report.ships.insert(
                 e,
-                ShipLine { class: class.name.clone(), side: side.clone(), last: tf.translation, sailed: 0.0, bursts: 0, computer, contact: 0.0, worst_contact: 0.0, sunk: false },
+                ShipLine {
+                    order: crate::scenario::SpawnIndex::of(&spawn, e).0,
+                    class: class.name.clone(),
+                    side: side.clone(),
+                    last: tf.translation,
+                    sailed: 0.0,
+                    bursts: 0,
+                    computer,
+                    contact: 0.0,
+                    worst_contact: 0.0,
+                    sunk: false,
+                },
             );
         }
         let (finite, far) = position_sanity(tf.translation);
@@ -195,6 +209,8 @@ fn watch(
         return;
     }
     let (p50, p99, worst, over) = frame_stats(&report.frames);
+    let mut listed: Vec<&ShipLine> = report.ships.values().collect();
+    listed.sort_by_key(|s| s.order);
     let json = serde_json::json!({
         "time": report.time.round(),
         "frame_ms": {"p50": p50.round(), "p99": p99.round(), "worst": worst.round(), "over_50": over},
@@ -202,7 +218,7 @@ fn watch(
         "sides": report.sides.iter().map(|(name, l)| (name.clone(), serde_json::json!({
             "ships": l.ships, "alive": l.alive, "bursts": l.bursts, "hits": l.hits, "first_burst": l.first_burst.map(f32::round),
         }))).collect::<serde_json::Map<_, _>>(),
-        "ships": report.ships.values().map(|s| serde_json::json!({
+        "ships": listed.iter().map(|s| serde_json::json!({
             "class": s.class, "side": s.side, "computer": s.computer, "bursts": s.bursts, "sailed": s.sailed.round(), "sunk": s.sunk,
             "worst_contact": (s.worst_contact * 10.0).round() / 10.0,
         })).collect::<Vec<_>>(),

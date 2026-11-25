@@ -2,6 +2,7 @@
 
 use crate::Nearest;
 use crate::bindings::Act;
+use crate::commands::{Engine, Kind, Orders};
 use crate::*;
 
 #[derive(Component, Clone, Copy)]
@@ -138,17 +139,23 @@ struct ClickScene<'a> {
 }
 
 /// Speed, course and order keys of the selected ship.
-fn keyboard_orders(c: &mut Controlled, keys: &ButtonInput<KeyCode>, pointer: &mut Pointer, target: &mut Target, vtime: &mut Time<Virtual>, commands: &mut Commands) {
+fn keyboard_orders(
+    c: &mut Controlled,
+    keys: &ButtonInput<KeyCode>,
+    pointer: &mut Pointer,
+    target: &mut Target,
+    vtime: &mut Time<Virtual>,
+    commands: &mut Commands,
+    orders: &mut Orders,
+) {
     let b = &pointer.binds;
     let direct = c.direct;
     // Engine orders: +/- step through All Stop .. Emergency.
     if direct && (b.just_pressed(keys, Act::SpeedUp) || keys.just_pressed(KeyCode::NumpadAdd)) {
-        c.ship.throttle = None;
-        c.ship.order = c.ship.order.faster();
+        orders.send(Kind::Engine { ship: c.actor, engine: Engine::Faster });
     }
     if direct && (b.just_pressed(keys, Act::SpeedDown) || keys.just_pressed(KeyCode::NumpadSubtract)) {
-        c.ship.throttle = None;
-        c.ship.order = c.ship.order.slower();
+        orders.send(Kind::Engine { ship: c.actor, engine: Engine::Slower });
     }
     // Advanced movement: Enter accepts the plotted course, Backspace drops it (and nothing else).
     if direct && keys.just_pressed(KeyCode::Enter) && !pointer.plot.pending.is_empty() {
@@ -161,9 +168,7 @@ fn keyboard_orders(c: &mut Controlled, keys: &ButtonInput<KeyCode>, pointer: &mu
         cancel_orders(c, target);
     }
     if direct && keys.just_pressed(KeyCode::KeyC) {
-        target.0 = None;
-        target.1 = None;
-        target.2.panic = false;
+        orders.send(Kind::Target { ship: c.actor, target: None, spot: None });
     }
     // Not retail: the Pause key toggles the pause too, beside the HUD pause button.
     if keys.just_pressed(KeyCode::Pause) {
@@ -214,7 +219,7 @@ fn select_own(ray: Ray3d, scene: &ClickScene, fleets: &mut ship::Fleets, orbit: 
 }
 
 /// A left click that is not a selection: dock, pick a target or give a move order.
-fn left_click(c: &mut Controlled, ray: Ray3d, scene: &ClickScene, pointer: &mut Pointer, target: &mut Target, docks: &mut docking::Dockees, commands: &mut Commands) {
+fn left_click(c: &mut Controlled, ray: Ray3d, scene: &ClickScene, pointer: &mut Pointer, docks: &mut docking::Dockees, commands: &mut Commands, orders: &mut Orders) {
     let (actor, direct) = (c.actor, c.direct);
     // Attack Only Mode (held key): a click only picks targets, never a dock or a destination.
     let attack_only = pointer.binds.pressed(scene.keys, Act::AttackOnly);
@@ -230,17 +235,14 @@ fn left_click(c: &mut Controlled, ray: Ray3d, scene: &ClickScene, pointer: &mut 
     let base = docks.hostile_base_hit(ray, scene.player_pos);
     let pick = [hit, object, base.map(|(e, t, _)| (e, t))].into_iter().flatten().min_by(|a, b| a.1.total_cmp(&b.1));
     if let Some((e, t)) = pick {
-        if !direct {
-            if let Some(p) = c.pilot.as_mut() {
-                p.attack(e);
-            }
-            return;
-        }
-        target.0 = Some(e);
-        target.2.panic = false;
-        // Remember the clicked spot on the hull (ship-local) so the guns aim there.
+        // On the command ship, remember the clicked spot on the hull (ship-local) so the guns aim there; a captain just attacks.
         let at = ray.origin + *ray.direction * t;
-        target.1 = scene.others.iter().find(|o| o.0 == e).map(|o| o.1.to_matrix().inverse().transform_point3(at)).or_else(|| base.filter(|b| b.0 == e).map(|b| b.2));
+        let spot = if direct {
+            scene.others.iter().find(|o| o.0 == e).map(|o| o.1.to_matrix().inverse().transform_point3(at)).or_else(|| base.filter(|b| b.0 == e).map(|b| b.2))
+        } else {
+            None
+        };
+        orders.send(Kind::Target { ship: actor, target: Some(e), spot });
         return;
     }
     if attack_only {
@@ -298,7 +300,7 @@ pub fn input(
     mut vtime: ResMut<Time<Virtual>>,
     ui: Res<crate::panels::UiClick>,
     mut docks: docking::Dockees,
-    (sensors, mission, mut sfx, lob): (Res<environment::Sensors>, Option<Res<campaign::Mission>>, MessageWriter<audio::Sfx>, Res<combat::LobAim>),
+    (sensors, mission, mut sfx, lob, mut orders): (Res<environment::Sensors>, Option<Res<campaign::Mission>>, MessageWriter<audio::Sfx>, Res<combat::LobAim>, Orders),
     objects: ObjectQuery,
     mut commands: Commands,
 ) {
@@ -315,7 +317,7 @@ pub fn input(
         // The focus's bounding radius sets the retail zoom limits (collision sphere for the mesh bounds, PROVISIONAL; others 0).
         let radius = orbit.focus.or(Some(actor)).and_then(|e| ships.get(e).ok()).map_or(0.0, |(_, s, ..)| lib.classes[s.class].sphere.1);
         camera_input(&mouse, &keys, &pointer, &mut orbit, time.delta_secs(), radius);
-        keyboard_orders(&mut c, &keys, &mut pointer, &mut target, &mut vtime, &mut commands);
+        keyboard_orders(&mut c, &keys, &mut pointer, &mut target, &mut vtime, &mut commands, &mut orders);
         // Left click: an enemy ship selects it as target, otherwise set a destination on the plane (Shift appends).
         if clicking && !docks.menu_swallows_click() {
             let (camera, gt) = *cam;
@@ -323,7 +325,7 @@ pub fn input(
                 let scene =
                     ClickScene { keys: &keys, lib: &lib, sensors: &sensors, mission: mission.as_deref(), others: &others, objects: &objects, player_pos: player_tf.translation() };
                 if !armed_shot(direct, ray, &mut target, &lob, &mut sfx) && !select_own(ray, &scene, &mut pointer.fleets, &mut orbit) {
-                    left_click(&mut c, ray, &scene, &mut pointer, &mut target, &mut docks, &mut commands);
+                    left_click(&mut c, ray, &scene, &mut pointer, &mut docks, &mut commands, &mut orders);
                 }
             }
         }
@@ -723,6 +725,7 @@ mod camera_tests {
             world.entity_mut(e).insert(GlobalTransform::default());
         }
         world.resource_mut::<ship::Fleets>().selected = Some(ids[0]);
+        world.init_resource::<crate::commands::Outbox>();
         world.spawn((Window::default(), PrimaryWindow));
         world.spawn((Camera::default(), GlobalTransform::default()));
         world.init_resource::<ButtonInput<MouseButton>>();
@@ -808,6 +811,7 @@ mod camera_tests {
             world.entity_mut(e).insert(GlobalTransform::default());
         }
         world.resource_mut::<ship::Fleets>().selected = Some(ids[0]);
+        world.init_resource::<crate::commands::Outbox>();
         world.spawn((Window::default(), PrimaryWindow));
         world.spawn((Camera::default(), GlobalTransform::default()));
         world.init_resource::<ButtonInput<MouseButton>>();
