@@ -94,6 +94,10 @@ impl Kind {
             Kind::Text => "text",
         }
     }
+    /// Whether a name of this kind comes into being by being written (flags, timers, counters): an unknown one in a rule is not an error.
+    pub fn creatable(self) -> bool {
+        matches!(self, Kind::Flag | Kind::Timer | Kind::Counter)
+    }
     /// Editor placeholders retail rules carry for "nothing chosen"; they mean unset and are never looked up.
     pub fn placeholders(self) -> &'static [&'static str] {
         match self {
