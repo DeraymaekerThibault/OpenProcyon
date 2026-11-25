@@ -143,7 +143,7 @@ pub(super) fn skirmish(id: &str) -> Skirmish {
         fleet_size: 5,
         draw: 0,
         victory_limit: 300,
-        map_json: Value::Null,
+        map_doc: Default::default(),
         error: None,
         dropdown: None,
         name_open: false,
@@ -292,7 +292,7 @@ fn historical_map_commands_the_ship_its_rules_mark_primary() {
 #[test]
 #[ignore = "needs imported assets"]
 fn historical_map_keeps_preplaced_fleets_and_fixed_fleet_types() {
-    let slots = new_slots(&map("ambush"));
+    let slots = new_slots(&crate::data::MapDoc::from_value(&map("ambush")));
     assert_eq!(slots.iter().map(|s| (s.race, s.team)).collect::<Vec<_>>(), [(Race::Navy, 0), (Race::Pirate, 1), (Race::Pirate, 1), (Race::Pirate, 1)]);
     assert!(slots.iter().all(|s| !s.fleet.is_empty() && s.kind != Kind::Closed));
     assert_eq!(slots[0].kind, Kind::Human);
@@ -816,7 +816,7 @@ fn bare_skirmish(open: bool, human_ships: usize) -> Skirmish {
         fleet_size: 5,
         draw: 0,
         victory_limit: 300,
-        map_json: serde_json::json!({ "assemble": open }),
+        map_doc: crate::data::MapDoc::from_value(&serde_json::json!({ "assemble": open })),
         error: None,
         dropdown: None,
         name_open: false,

@@ -110,13 +110,17 @@ fn repair_secs(class: Option<&str>) -> (f32, f32) {
     }
 }
 
+/// One ship's own `ships/<id>/docks.json`, if it has one.
+pub fn ship_docks(id: &str) -> Option<Value> {
+    crate::data::try_json(&assets_dir().join(format!("ships/{id}/docks.json")))
+}
+
 /// Dock points by entity: `data/docks.json` (bases, islands) plus each ship's own `ships/<id>/docks.json`.
 pub fn load_docks() -> Value {
     let root = assets_dir();
-    let read = |p: std::path::PathBuf| crate::data::try_json(&p);
-    let mut docks = read(root.join("data/docks.json")).unwrap_or_else(|| Value::Object(Default::default()));
+    let mut docks = crate::data::try_json(&root.join("data/docks.json")).unwrap_or_else(|| Value::Object(Default::default()));
     for id in crate::data::ship_ids(root) {
-        if let Some(d) = read(root.join(format!("ships/{id}/docks.json"))) {
+        if let Some(d) = ship_docks(&id) {
             docks[id] = d;
         }
     }

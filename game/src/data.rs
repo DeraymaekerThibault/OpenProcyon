@@ -136,15 +136,48 @@ fn read_typed<T: serde::de::DeserializeOwned>(path: &std::path::Path) -> Result<
     load(path).map_err(|e| e.to_string())
 }
 
-/// Asset path of a converted model given its file name (`NavyCutterShip.glb`): GLBs live in `models/<category>/` (tools/models.py);
-/// the folder is found by scanning once, so mods may add models anywhere. Unknown names fall back to the asset root.
+/// The names the game looks sounds and models up by, found by scanning an asset root (the game's overlay, or a mod/base folder for
+/// `--check-mod`). One scan code for the runtime lookups (`audio::sound`, `model`) and the authoring checks.
+#[derive(Default)]
+pub struct AssetIndex {
+    /// Lower-case file stem of every `.ogg` under `sound/` and `maps/*/speech/` -> its path relative to the root.
+    pub sounds: HashMap<String, String>,
+    /// File name of every model under `models/` -> its path relative to the root.
+    pub models: HashMap<String, String>,
+}
+
+impl AssetIndex {
+    /// Sounds and models of `root`.
+    pub fn scan(root: &std::path::Path) -> AssetIndex {
+        AssetIndex { sounds: Self::scan_sounds(root), models: Self::scan_models(root) }
+    }
+    /// Sounds only: `sound/<kind>/` and each mission's `maps/<id>/speech/`, so mods may add sounds anywhere under those folders.
+    pub fn scan_sounds(root: &std::path::Path) -> HashMap<String, String> {
+        let mut files = vec![];
+        crate::modding::walk(&root.join("sound"), std::path::Path::new("sound"), &mut files);
+        for m in std::fs::read_dir(root.join("maps")).into_iter().flatten().flatten() {
+            let id = m.file_name();
+            crate::modding::walk(&m.path().join("speech"), &std::path::Path::new("maps").join(&id).join("speech"), &mut files);
+        }
+        files
+            .iter()
+            .filter(|p| p.extension().is_some_and(|e| e == "ogg"))
+            .filter_map(|p| Some((p.file_stem()?.to_str()?.to_lowercase(), p.to_string_lossy().replace('\\', "/"))))
+            .collect()
+    }
+    /// Models only: GLBs live in `models/<category>/` (tools/models.py), mods may add models anywhere under `models/`.
+    pub fn scan_models(root: &std::path::Path) -> HashMap<String, String> {
+        let mut files = vec![];
+        crate::modding::walk(&root.join("models"), std::path::Path::new("models"), &mut files);
+        files.iter().filter_map(|p| Some((p.file_name()?.to_str()?.to_string(), p.to_string_lossy().replace('\\', "/")))).collect()
+    }
+}
+
+/// Asset path of a converted model given its file name (`NavyCutterShip.glb`): found through [`AssetIndex`], scanned once.
+/// Unknown names fall back to the asset root.
 pub fn model(file: &str) -> String {
     static INDEX: OnceLock<HashMap<String, String>> = OnceLock::new();
-    let index = INDEX.get_or_init(|| {
-        let mut files = vec![];
-        crate::modding::walk(&crate::assets_dir().join("models"), std::path::Path::new("models"), &mut files);
-        files.iter().filter_map(|p| Some((p.file_name()?.to_str()?.to_string(), p.to_string_lossy().replace('\\', "/")))).collect()
-    });
+    let index = INDEX.get_or_init(|| AssetIndex::scan_models(crate::assets_dir()));
     index.get(file).cloned().unwrap_or_else(|| file.to_string())
 }
 
@@ -619,13 +652,36 @@ pub fn bullet_def(b: &Value) -> BulletDef {
 pub fn wot_flag(v: &Value) -> bool {
     v.as_str().is_some_and(|x| x.eq_ignore_ascii_case("TRUE"))
 }
-/// A JSON file the game cannot run without: panics with the import hint when it is missing or invalid.
+/// A JSON file the game cannot run without: panics when it is missing or invalid, naming the file, its mod and the parse position.
 pub fn read_json(path: &std::path::Path) -> Value {
-    serde_json::from_str(&std::fs::read_to_string(path).unwrap_or_else(|_| panic!("missing {path:?}; run tools/build_assets.sh"))).unwrap_or_else(|e| panic!("{path:?}: {e}"))
+    load::<Value>(path).unwrap_or_else(|e| panic!("{e}"))
 }
 /// An optional JSON file (settings, per-ship extras, data a feature can live without): `None` when missing or invalid.
+/// Missing is quiet; present but not valid JSON prints one `error:` line naming the file, its mod and the position.
 pub fn try_json(path: &std::path::Path) -> Option<Value> {
-    serde_json::from_str(&std::fs::read_to_string(path).ok()?).ok()
+    let bytes = std::fs::read(path).ok()?;
+    match serde_json::from_slice(&bytes) {
+        Ok(v) => Some(v),
+        Err(error) => {
+            let error = DataError::Parse { path: path.to_path_buf(), source_mod: mod_of(path), error };
+            eprintln!("error: {error}; ignoring the file");
+            None
+        }
+    }
+}
+/// An optional typed JSON asset under the asset root (`rel`): `None` when missing, invalid JSON (reported by `try_json`) or not a `T`.
+pub fn try_load<T: serde::de::DeserializeOwned>(rel: &str) -> Option<T> {
+    try_load_at(&crate::assets_dir().join(rel))
+}
+/// `try_load` for an explicit path.
+pub fn try_load_at<T: serde::de::DeserializeOwned>(path: &std::path::Path) -> Option<T> {
+    serde_json::from_value(try_json(path)?).ok()
+}
+/// `hud/hud.json` of the active asset root (the retail HUD layout, mod-overlaid), read once per process: the overlay is fixed after
+/// startup. `None` when missing or invalid (reported once, the HUD is not drawn).
+pub fn hud_json() -> Option<std::sync::Arc<Value>> {
+    static HUD: OnceLock<Option<std::sync::Arc<Value>>> = OnceLock::new();
+    HUD.get_or_init(|| load_asset::<Value>("hud/hud.json", "the HUD is not drawn").map(Into::into)).clone()
 }
 /// Writes `path` whole or not at all: a temp file next to it (`.tmp` extension), then a rename, so a crash never leaves half a file.
 pub fn write_atomic(path: &std::path::Path, contents: &str) -> std::io::Result<()> {
@@ -680,7 +736,7 @@ impl Library {
         for c in &classes {
             crate::boarding::register(&c.name, c.crew, &c.boarding_points);
         }
-        let names = ids.iter().filter_map(|n| Some((n.clone(), serde_json::from_value(try_json(&root.join(format!("ships/{n}/names.json")))?).ok()?))).collect();
+        let names = ids.iter().filter_map(|n| Some((n.clone(), try_load_at(&root.join(format!("ships/{n}/names.json")))?))).collect();
         Ok(Library { classes, guns, bullets, names, clips: crate::clips::load(root) })
     }
 }
@@ -1104,6 +1160,41 @@ mod load_or_base_tests {
         assert_eq!(load_or_base::<Bar>(&d.join("none.json"), None, "x"), None);
         std::fs::write(d.join("a.json"), r#"{"width": 3, "extra": [1]}"#).unwrap();
         assert_eq!(load_or_base::<Bar>(&d.join("a.json"), None, "x"), Some(Bar { width: 3.0 }));
+        std::fs::remove_dir_all(d).unwrap();
+    }
+
+    #[test]
+    fn try_json_keeps_its_results_for_missing_and_invalid_files() {
+        let d = dir("try");
+        std::fs::write(d.join("good.json"), r#"{"width": 3}"#).unwrap();
+        std::fs::write(d.join("bad.json"), "width: 3").unwrap();
+        std::fs::write(d.join("type.json"), r#"{"width": "wide"}"#).unwrap();
+        assert_eq!(try_json(&d.join("good.json")), Some(serde_json::json!({"width": 3})));
+        assert_eq!(try_json(&d.join("missing.json")), None);
+        assert_eq!(try_json(&d.join("bad.json")), None);
+        assert_eq!(try_load_at::<Bar>(&d.join("good.json")), Some(Bar { width: 3.0 }));
+        assert_eq!(try_load_at::<Bar>(&d.join("type.json")), None);
+        assert_eq!(try_load_at::<Bar>(&d.join("bad.json")), None);
+        assert_eq!(try_load_at::<Bar>(&d.join("missing.json")), None);
+        let e = std::panic::catch_unwind(|| read_json(&d.join("bad.json"))).unwrap_err();
+        let msg = e.downcast_ref::<String>().cloned().unwrap_or_default();
+        assert!(msg.contains("bad.json") && msg.contains("line 1 column"), "{msg}");
+        std::fs::remove_dir_all(d).unwrap();
+    }
+
+    #[test]
+    fn the_asset_index_finds_sounds_by_lower_case_stem_and_models_by_file_name() {
+        let d = dir("index");
+        for f in ["sound/ui/Click.ogg", "sound/ui/note.txt", "maps/m1/speech/Line_01.ogg", "maps/m1/other/Skip.ogg", "models/ships/Hull.glb"] {
+            std::fs::create_dir_all(d.join(f).parent().unwrap()).unwrap();
+            std::fs::write(d.join(f), "x").unwrap();
+        }
+        let index = AssetIndex::scan(&d);
+        let mut sounds: Vec<_> = index.sounds.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect();
+        sounds.sort();
+        assert_eq!(sounds, [("click", "sound/ui/Click.ogg"), ("line_01", "maps/m1/speech/Line_01.ogg")]);
+        assert_eq!(index.models.get("Hull.glb").map(String::as_str), Some("models/ships/Hull.glb"));
+        assert_eq!(index.models.len(), 1);
         std::fs::remove_dir_all(d).unwrap();
     }
 

@@ -372,7 +372,7 @@ pub fn plugin(app: &mut App) {
         fleet_size: FLEET_SIZE.default as usize,
         draw: 0,
         victory_limit: VICTORY_LIMIT.default,
-        map_json: Value::Null,
+        map_doc: Default::default(),
         error: None,
         dropdown: None,
         name_open: false,
