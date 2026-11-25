@@ -1065,6 +1065,52 @@ mod tests {
         assert_eq!(v["types"].as_array().unwrap().len(), RULE_TYPES.len());
     }
 
+    /// Fields an arm reads that its schema entry does not declare. The schema is the source of truth (retail spells some fields oddly on
+    /// purpose); each pair here is a known mismatch to settle with the maintainer, not to be silently extended.
+    const KNOWN_UNDECLARED_READS: &[(&str, &str)] = &[];
+
+    /// Every interpreter arm reads only fields its schema entry declares. The accessors (`s`, `f`, `b`, `given`) log the keys they
+    /// read; each Type runs once with every declared field filled in. Direct `v["Key"]` reads are not logged, and a read behind a guard
+    /// that the filled values do not reach is not seen: this finds typos, it does not prove there are none.
+    #[test]
+    fn every_key_an_arm_reads_is_declared_in_its_schema_entry() {
+        use serde_json::json;
+        let w = vec![];
+        let mut bad = vec![];
+        let mut seen = BTreeSet::new();
+        for t in RULE_TYPES.iter().filter(|t| t.handler == Handler::Interpreter) {
+            let mut entry = serde_json::Map::new();
+            entry.insert("Type".into(), json!(t.name));
+            for fld in t.fields {
+                let v = match fld.kind {
+                    Kind::Bool => json!("TRUE"),
+                    Kind::Number => json!(fld.range.map_or(1.0, |r| r.0 as f64)),
+                    Kind::Enum(list) => json!(list.first().copied().unwrap_or("")),
+                    Kind::Condition | Kind::ConditionList => continue,
+                    _ => json!("Sample"),
+                };
+                entry.insert(fld.name.into(), v);
+            }
+            let entry = Value::Object(entry);
+            let data = json!({"rules": [], "paths": {"Sample": [[0, 0, 0]]}, "volumes": [], "environment": {"point_sets": {"Sample": [{"pos": [0, 0, 0]}]}}});
+            let mut sc = crate::rules::Script::new(&data, Value::Null);
+            let read = crate::rules::read_log::record(|| match t.role {
+                Role::Condition => {
+                    sc.cond(&entry, &w, false);
+                }
+                Role::Action => sc.act(&entry, &w, &mut vec![], "t"),
+            });
+            seen.extend(read.iter().cloned());
+            for key in read {
+                if key != "Type" && t.field(&key).is_none() && !KNOWN_UNDECLARED_READS.contains(&(t.name, key.as_str())) {
+                    bad.push(format!("{} reads undeclared field '{key}'", t.name));
+                }
+            }
+        }
+        assert!(bad.is_empty(), "{bad:#?}");
+        assert!(seen.contains("Group Name") && seen.contains("Flag Name") && seen.len() > 100, "the read log works: {} keys", seen.len());
+    }
+
     #[test]
     fn every_type_has_one_entry() {
         // The enum is the vocabulary, the table describes it: one entry per variant, in its own role, spelled as the enum says.

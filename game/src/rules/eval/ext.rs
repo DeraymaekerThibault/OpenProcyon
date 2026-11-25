@@ -60,6 +60,8 @@ pub(in crate::rules) struct Ext {
 
 /// An optional field that was written: not missing and not the empty string an authoring tool writes for "nothing chosen".
 fn given<'a>(v: &'a Value, k: &str) -> Option<&'a Value> {
+    #[cfg(test)]
+    read_log::note(k);
     Some(&v[k]).filter(|x| !x.is_null() && x.as_str() != Some(""))
 }
 
