@@ -40,9 +40,9 @@ fn quick(sc: &mut Script, line: &str) -> (Vec<Fx>, Outcome) {
 #[test]
 fn rules_lists_every_rule_with_its_state() {
     let mut sc = script();
-    sc.ran[0] = true;
+    sc.mark_ran(0);
     sc.fired[0] = true;
-    sc.ran[1] = true;
+    sc.mark_ran(1);
     let text = quick(&mut sc, "rules").1.lines.join("\n");
     for (state, name) in [("fired", "Gate"), ("ran", "Patrol"), ("inactive", "Dormant"), ("never fired", "Never")] {
         assert!(text.lines().any(|l| l.starts_with(state) && l.contains(name)), "{state} {name}\n{text}");
