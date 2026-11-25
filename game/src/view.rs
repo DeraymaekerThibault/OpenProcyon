@@ -191,14 +191,14 @@ fn select_own(ray: Ray3d, scene: &ClickScene, fleets: &mut ship::Fleets, orbit: 
 }
 
 /// A left click that is not a selection: dock, pick a target or give a move order.
-fn left_click(c: &Controlled, ray: Ray3d, scene: &ClickScene, pointer: &mut Pointer, docks: &mut docking::Dockees, orders: &mut Orders) {
+fn left_click(c: &Controlled, ray: Ray3d, scene: &ClickScene, pointer: &mut Pointer, docks: &docking::Dockees, orders: &mut Orders) {
     let (actor, direct) = (c.actor, c.direct);
     // Attack Only Mode (held key): a click only picks targets, never a dock or a destination.
     let attack_only = pointer.binds.pressed(scene.keys, Act::AttackOnly);
     // An allied ship or base with dock points: left-click docks when it is dockable and in sight (the cursor shows whether it can).
     if let Some((e, ok)) = docks.under(ray, actor).filter(|_| !attack_only) {
         if ok {
-            docks.dock_as(actor, e);
+            orders.send(Kind::Dock { ship: actor, dockee: e, release: false });
         }
         return;
     }
@@ -251,7 +251,7 @@ pub fn input(
     mut target: ResMut<Target>,
     mut vtime: ResMut<Time<Virtual>>,
     ui: Res<crate::panels::UiClick>,
-    mut docks: docking::Dockees,
+    docks: docking::Dockees,
     (sensors, mission, mut sfx, lob, mut orders): (Res<environment::Sensors>, Option<Res<campaign::Mission>>, MessageWriter<audio::Sfx>, Res<combat::LobAim>, Orders),
     objects: ObjectQuery,
 ) {
@@ -274,7 +274,7 @@ pub fn input(
                 let scene =
                     ClickScene { keys: &keys, lib: &lib, sensors: &sensors, mission: mission.as_deref(), others: &others, objects: &objects, player_pos: player_tf.translation() };
                 if !armed_shot(direct, ray, &mut target, &lob, &mut sfx) && !select_own(ray, &scene, &mut pointer.fleets, &mut orbit) {
-                    left_click(&c, ray, &scene, &mut pointer, &mut docks, &mut orders);
+                    left_click(&c, ray, &scene, &mut pointer, &docks, &mut orders);
                 }
             }
         }

@@ -115,10 +115,10 @@ pub(super) fn harpoon_bears(lib: &Library, ship: &Ship, health: &Health, guns: O
     })
 }
 
-pub(super) fn cancel_grapple_order(keys: Res<ButtonInput<KeyCode>>, mut commands: Commands, player: Query<Entity, With<PlayerShip>>) {
+pub(super) fn cancel_grapple_order(keys: Res<ButtonInput<KeyCode>>, mut orders: crate::commands::Orders, player: Query<Entity, With<PlayerShip>>) {
     if keys.just_pressed(KeyCode::Backspace) {
         for e in &player {
-            commands.entity(e).remove::<GrappleOrder>();
+            orders.send(crate::commands::Kind::DropGrapple { ship: e });
         }
     }
 }

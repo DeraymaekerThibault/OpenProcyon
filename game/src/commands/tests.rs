@@ -195,6 +195,48 @@ fn stop_hold_and_cloak_do_what_the_menu_did() {
     assert!(!app.world().get::<crate::cloak::Cloak>(me).unwrap().stop_shown(), "Cloak Stop: decloaking");
 }
 
+/// Dock, tow, board and grapple orders reach docking and boarding as the messages the menu and the click sent; the menu's Dock,
+/// Tow Start and Board Start end a hold, the click's dock does not.
+#[test]
+fn dock_tow_board_and_grapple_orders_send_what_the_menu_sent() {
+    use crate::boarding::BoardMsg;
+    use crate::docking::DockMsg;
+    let mut app = battle();
+    app.add_message::<DockMsg>().add_message::<BoardMsg>();
+    let (me, captain, enemy) = fleet(&mut app);
+    loaded(&mut app);
+    let held = |app: &mut App| {
+        let held = app.world().get::<crate::ship::HoldPosition>(me).is_some();
+        app.world_mut().entity_mut(me).insert(crate::ship::HoldPosition);
+        held
+    };
+    held(&mut app);
+    let docks = |app: &mut App| app.world_mut().resource_mut::<Messages<DockMsg>>().drain().map(|m| format!("{m:?}")).collect::<Vec<_>>();
+    let boards = |app: &mut App| app.world_mut().resource_mut::<Messages<BoardMsg>>().drain().map(|m| format!("{m:?}")).collect::<Vec<_>>();
+    let cases: Vec<(Kind, bool, String, bool)> = vec![
+        (Kind::Dock { ship: me, dockee: captain, release: false }, true, format!("{:?}", DockMsg::Dock { docker: Some(me), dockee: captain }), true),
+        (Kind::Dock { ship: me, dockee: captain, release: true }, false, format!("{:?}", DockMsg::Dock { docker: Some(me), dockee: captain }), true),
+        (Kind::Tow { ship: me, towee: Some(captain) }, false, format!("{:?}", DockMsg::TowStart { tower: Some(me), towee: captain }), true),
+        (Kind::Tow { ship: me, towee: None }, true, format!("{:?}", DockMsg::TowBreak { tower: Some(me) }), true),
+        (Kind::CancelDock { ship: me }, true, format!("{:?}", DockMsg::CancelShip(me)), true),
+        (Kind::Board { ship: me, target: Some(enemy) }, false, format!("{:?}", BoardMsg::Board { boarder: Some(me), target: enemy }), false),
+        (Kind::Board { ship: me, target: None }, true, format!("{:?}", BoardMsg::Unboard { boarder: Some(me) }), false),
+        (Kind::Grapple { ship: me, target: Some(enemy) }, true, format!("{:?}", BoardMsg::Grapple { grappler: Some(me), target: enemy }), false),
+        (Kind::Grapple { ship: me, target: None }, true, format!("{:?}", BoardMsg::Ungrapple { grappler: Some(me) }), false),
+    ];
+    for (kind, keeps_hold, msg, dock) in cases {
+        send(&mut app, kind.clone());
+        frame(&mut app, 40);
+        assert_eq!(held(&mut app), keeps_hold, "{kind:?}");
+        let (d, b) = (docks(&mut app), boards(&mut app));
+        assert_eq!(if dock { (d, b) } else { (b, d) }, (vec![msg], vec![]), "{kind:?}");
+    }
+    app.world_mut().entity_mut(me).insert(crate::boarding::GrappleOrder(enemy));
+    send(&mut app, Kind::DropGrapple { ship: me });
+    frame(&mut app, 40);
+    assert!(app.world().get::<crate::boarding::GrappleOrder>(me).is_none());
+}
+
 #[test]
 fn a_command_keeps_its_meaning_through_the_file() {
     let mut app = battle();
@@ -210,6 +252,12 @@ fn a_command_keeps_its_meaning_through_the_file() {
         Kind::Stop { ship: me },
         Kind::Hold { ship: me, on: true },
         Kind::Cloak { ship: me, on: false },
+        Kind::Dock { ship: me, dockee: enemy, release: true },
+        Kind::Tow { ship: me, towee: None },
+        Kind::Board { ship: me, target: Some(enemy) },
+        Kind::Grapple { ship: me, target: None },
+        Kind::CancelDock { ship: me },
+        Kind::DropGrapple { ship: me },
     ];
     for kind in kinds {
         let saved = Saved::save(app.world(), &kind).unwrap();

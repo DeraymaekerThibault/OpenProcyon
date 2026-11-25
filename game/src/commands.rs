@@ -19,7 +19,8 @@
 //! itself (`--replay <file>` alone, however the lobby was set up); campaign missions started from the menus are still refused. Only
 //! the first battle of a run is recorded; a restart ends the recording.
 //!
-//! Routed so far: engine orders, target picks, move, course and cancel orders, and the right-click menu's Stop, Hold and Cloak. The other orders still change the battle directly and are not in a recording yet
+//! Routed so far: engine orders, target picks, move, course and cancel orders, the right-click menu's Stop, Hold, Cloak, Dock,
+//! Tow, Board and Grapple, and Backspace's dock and grapple cancels. The other orders still change the battle directly and are not in a recording yet
 //! (later PRs, one group each). PROVISIONAL: the file format (version 2; version 1, without the skirmish setup, still reads).
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
@@ -69,6 +70,19 @@ pub enum Kind {
     Hold { ship: Entity, on: bool },
     /// The menu's Cloak Start / Stop, for a ship that can cloak (`cloak::Cloak`).
     Cloak { ship: Entity, on: bool },
+    /// Dock with `dockee` (a left click on it, or the menu's Dock). `release`: the menu's Dock also ends a hold; the click does not.
+    Dock { ship: Entity, dockee: Entity, release: bool },
+    /// The menu's Tow Start (`Some`, which ends a hold) and Tow Stop (`None`). Tows are made in campaign missions only.
+    Tow { ship: Entity, towee: Option<Entity> },
+    /// The menu's Board Start (`Some`, which ends a hold) and Board Stop (`None`).
+    Board { ship: Entity, target: Option<Entity> },
+    /// The menu's Grapple Start (`Some`) and Grapple Stop (`None`).
+    Grapple { ship: Entity, target: Option<Entity> },
+    /// Backspace also ends the ship's dock routine in progress and its tow approach (`docking::DockMsg::CancelShip`), even while a
+    /// course is being plotted.
+    CancelDock { ship: Entity },
+    /// Backspace also drops the command ship's grapple order, even while a course is being plotted.
+    DropGrapple { ship: Entity },
 }
 
 /// One player order.
@@ -114,6 +128,7 @@ pub fn apply(world: &mut World, kind: &Kind) {
     match *kind {
         Kind::Move { .. } | Kind::Course { .. } | Kind::Cancel { .. } => apply_movement(world, kind),
         Kind::Stop { .. } | Kind::Hold { .. } | Kind::Cloak { .. } => apply_menu(world, kind),
+        Kind::Dock { .. } | Kind::Tow { .. } | Kind::Board { .. } | Kind::Grapple { .. } | Kind::CancelDock { .. } | Kind::DropGrapple { .. } => apply_links(world, kind),
         Kind::Engine { ship, engine } => {
             if let Some(mut s) = world.get_mut::<Ship>(ship) {
                 s.throttle = None;
@@ -147,11 +162,28 @@ fn direct(world: &World, ship: Entity) -> bool {
 
 /// A move ends a dock routine in progress and gives control back (original behaviour), and ends a hold (`ship::release_hold`).
 fn release(world: &mut World, ship: Entity) {
-    if let Some(mut msgs) = world.get_resource_mut::<Messages<crate::docking::DockMsg>>() {
-        msgs.write(crate::docking::DockMsg::CancelShip(ship));
-    }
+    dock_msg(world, crate::docking::DockMsg::CancelShip(ship));
+    release_hold(world, ship);
+}
+
+/// A move, dock, tow or board order ends a hold (`ship::release_hold`).
+fn release_hold(world: &mut World, ship: Entity) {
     if let Ok(mut e) = world.get_entity_mut(ship) {
         e.remove::<crate::ship::HoldPosition>();
+    }
+}
+
+/// Docking and towing act on their messages (`docking::handle_messages`, later in the same tick).
+fn dock_msg(world: &mut World, msg: crate::docking::DockMsg) {
+    if let Some(mut msgs) = world.get_resource_mut::<Messages<crate::docking::DockMsg>>() {
+        msgs.write(msg);
+    }
+}
+
+/// Boarding and grappling act on their messages (`boarding::fight::handle_messages`, later in the same tick).
+fn board_msg(world: &mut World, msg: crate::boarding::BoardMsg) {
+    if let Some(mut msgs) = world.get_resource_mut::<Messages<crate::boarding::BoardMsg>>() {
+        msgs.write(msg);
     }
 }
 
@@ -225,9 +257,7 @@ fn apply_menu(world: &mut World, kind: &Kind) {
             if let Some(mut p) = world.get_mut::<crate::ship::FleetPilot>(ship) {
                 p.cancel_actions();
             }
-            if let Some(mut msgs) = world.get_resource_mut::<Messages<crate::docking::DockMsg>>() {
-                msgs.write(crate::docking::DockMsg::CancelShip(ship));
-            }
+            dock_msg(world, crate::docking::DockMsg::CancelShip(ship));
         }
         Kind::Hold { ship, on: true } => {
             let Ok(mut e) = world.get_entity_mut(ship) else { return };
@@ -252,6 +282,39 @@ fn apply_menu(world: &mut World, kind: &Kind) {
                 } else {
                     c.stop();
                 }
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Dock, tow, board and grapple orders, and Backspace's dock and grapple cancels.
+fn apply_links(world: &mut World, kind: &Kind) {
+    use crate::boarding::BoardMsg;
+    use crate::docking::DockMsg;
+    match *kind {
+        Kind::Dock { ship, dockee, release } => {
+            if release {
+                release_hold(world, ship);
+            }
+            dock_msg(world, DockMsg::Dock { docker: Some(ship), dockee });
+        }
+        Kind::Tow { ship, towee: Some(towee) } => {
+            release_hold(world, ship);
+            dock_msg(world, DockMsg::TowStart { tower: Some(ship), towee });
+        }
+        Kind::Tow { ship, towee: None } => dock_msg(world, DockMsg::TowBreak { tower: Some(ship) }),
+        Kind::Board { ship, target: Some(target) } => {
+            release_hold(world, ship);
+            board_msg(world, BoardMsg::Board { boarder: Some(ship), target });
+        }
+        Kind::Board { ship, target: None } => board_msg(world, BoardMsg::Unboard { boarder: Some(ship) }),
+        Kind::Grapple { ship, target: Some(target) } => board_msg(world, BoardMsg::Grapple { grappler: Some(ship), target }),
+        Kind::Grapple { ship, target: None } => board_msg(world, BoardMsg::Ungrapple { grappler: Some(ship) }),
+        Kind::CancelDock { ship } => dock_msg(world, DockMsg::CancelShip(ship)),
+        Kind::DropGrapple { ship } => {
+            if let Ok(mut e) = world.get_entity_mut(ship) {
+                e.remove::<crate::boarding::GrappleOrder>();
             }
         }
         _ => {}
@@ -395,6 +458,12 @@ pub enum Saved {
     Stop { ship: NetId },
     Hold { ship: NetId, on: bool },
     Cloak { ship: NetId, on: bool },
+    Dock { ship: NetId, dockee: NetId, release: bool },
+    Tow { ship: NetId, towee: Option<NetId> },
+    Board { ship: NetId, target: Option<NetId> },
+    Grapple { ship: NetId, target: Option<NetId> },
+    CancelDock { ship: NetId },
+    DropGrapple { ship: NetId },
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -497,6 +566,12 @@ impl Saved {
             Kind::Stop { ship } => Saved::Stop { ship: id(ship)? },
             Kind::Hold { ship, on } => Saved::Hold { ship: id(ship)?, on },
             Kind::Cloak { ship, on } => Saved::Cloak { ship: id(ship)?, on },
+            Kind::Dock { ship, dockee, release } => Saved::Dock { ship: id(ship)?, dockee: id(dockee)?, release },
+            Kind::Tow { ship, towee } => Saved::Tow { ship: id(ship)?, towee: towee.map(id).transpose()? },
+            Kind::Board { ship, target } => Saved::Board { ship: id(ship)?, target: target.map(id).transpose()? },
+            Kind::Grapple { ship, target } => Saved::Grapple { ship: id(ship)?, target: target.map(id).transpose()? },
+            Kind::CancelDock { ship } => Saved::CancelDock { ship: id(ship)? },
+            Kind::DropGrapple { ship } => Saved::DropGrapple { ship: id(ship)? },
         })
     }
     /// The command for this world; None when an object it names is gone.
@@ -510,20 +585,28 @@ impl Saved {
                     SavedEngine::To(i) => Engine::To(EngineOrder::from_index(i as usize)?),
                 },
             },
-            Saved::Target { ship, target, spot } => {
-                let target = match target {
-                    Some(t) => Some(t.find(world)?),
-                    None => None,
-                };
-                Kind::Target { ship: ship.find(world)?, target, spot: spot.map(bevy_axes) }
-            }
+            Saved::Target { ship, target, spot } => Kind::Target { ship: ship.find(world)?, target: find(world, target)?, spot: spot.map(bevy_axes) },
             Saved::Move { ship, to, append } => Kind::Move { ship: ship.find(world)?, to: bevy_axes(to), append },
             Saved::Course { ship, ref points, release } => Kind::Course { ship: ship.find(world)?, points: points.iter().copied().map(bevy_axes).collect(), release },
             Saved::Cancel { ship } => Kind::Cancel { ship: ship.find(world)? },
             Saved::Stop { ship } => Kind::Stop { ship: ship.find(world)? },
             Saved::Hold { ship, on } => Kind::Hold { ship: ship.find(world)?, on },
             Saved::Cloak { ship, on } => Kind::Cloak { ship: ship.find(world)?, on },
+            Saved::Dock { ship, dockee, release } => Kind::Dock { ship: ship.find(world)?, dockee: dockee.find(world)?, release },
+            Saved::Tow { ship, towee } => Kind::Tow { ship: ship.find(world)?, towee: find(world, towee)? },
+            Saved::Board { ship, target } => Kind::Board { ship: ship.find(world)?, target: find(world, target)? },
+            Saved::Grapple { ship, target } => Kind::Grapple { ship: ship.find(world)?, target: find(world, target)? },
+            Saved::CancelDock { ship } => Kind::CancelDock { ship: ship.find(world)? },
+            Saved::DropGrapple { ship } => Kind::DropGrapple { ship: ship.find(world)? },
         })
+    }
+}
+
+/// An optional object of a command: Some(None) when the command names none, None when the one it names is gone.
+fn find(world: &mut World, id: Option<NetId>) -> Option<Option<Entity>> {
+    match id {
+        Some(id) => id.find(world).map(Some),
+        None => Some(None),
     }
 }
 

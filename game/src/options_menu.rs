@@ -12,7 +12,6 @@ use bevy::window::{CursorOptions, PrimaryWindow};
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use crate::audio::Sfx;
-use crate::boarding::BoardMsg;
 use crate::combat::{Health, Library, ray_hit, seg_sphere};
 use crate::commands::{Kind as CommandKind, Orders};
 use crate::docking::Dockees;
@@ -226,11 +225,10 @@ fn scenery_hit<'a>(
         .min_by(|a, b| a.1.total_cmp(&b.1))
 }
 
-/// Boarding and grappling: the tests for the slots and the messages the slots send.
+/// Boarding and grappling: what the slots test (the orders go through `commands`).
 #[derive(SystemParam)]
 struct MenuBoarding<'w, 's> {
     boarders: crate::boarding::Boarders<'w, 's>,
-    board: MessageWriter<'w, BoardMsg>,
     status: Res<'w, crate::boarding::BoardStatus>,
 }
 
@@ -239,19 +237,10 @@ fn is_tap(press: (Vec2, f32), cursor: Vec2, now: f32) -> bool {
     press.0.distance(cursor) <= CLICK_PX && now - press.1 <= CLICK_SECS
 }
 
-/// The sound of a left click on slot `act` and the boarding message it sends, after doing what the slot says for ship `actor`
-/// (Stop, Hold and Cloak are `commands` orders). A Focus slot the ship cannot see the target for comes in as `Unavailable`.
-fn run_slot(
-    act: Option<Act>,
-    target: Entity,
-    actor: Entity,
-    orders: &mut Orders,
-    commands: &mut Commands,
-    orbit: &mut Orbit,
-    docks: &mut Dockees,
-) -> (&'static str, Option<BoardMsg>) {
-    let mut msg = None;
-    let sound = match act {
+/// The sound of a left click on slot `act`, after doing what the slot says for ship `actor` (every slot but Focus is a `commands`
+/// order). A Focus slot the ship cannot see the target for comes in as `Unavailable`.
+fn run_slot(act: Option<Act>, target: Entity, actor: Entity, orders: &mut Orders, orbit: &mut Orbit, docks: &Dockees) -> &'static str {
+    match act {
         Some(Act::Focus) => {
             orbit.focus = Some(target);
             "HUD_Options_Focus"
@@ -274,39 +263,35 @@ fn run_slot(
             if on { "HUD_Options_CloakStart" } else { "HUD_Options_CloakStop" }
         }
         Some(Act::BoardStart) => {
-            crate::ship::release_hold(commands, actor);
-            msg = Some(BoardMsg::Board { boarder: Some(actor), target });
+            orders.send(CommandKind::Board { ship: actor, target: Some(target) });
             "HUD_Options_BoardStart"
         }
         Some(Act::BoardStop) => {
-            msg = Some(BoardMsg::Unboard { boarder: Some(actor) });
+            orders.send(CommandKind::Board { ship: actor, target: None });
             "HUD_Options_BoardStop"
         }
         Some(Act::GrappleStart) => {
-            msg = Some(BoardMsg::Grapple { grappler: Some(actor), target });
+            orders.send(CommandKind::Grapple { ship: actor, target: Some(target) });
             "HUD_Options_GrappleStart"
         }
         Some(Act::GrappleStop) => {
-            msg = Some(BoardMsg::Ungrapple { grappler: Some(actor) });
+            orders.send(CommandKind::Grapple { ship: actor, target: None });
             "HUD_Options_GrappleStop"
         }
         Some(Act::Dock) if docks.can_dock(actor, target) => {
-            crate::ship::release_hold(commands, actor);
-            docks.dock_as(actor, target);
+            orders.send(CommandKind::Dock { ship: actor, dockee: target, release: true });
             "HUD_Options_Dock"
         }
         Some(Act::TowStart) => {
-            crate::ship::release_hold(commands, actor);
-            docks.tow_as(actor, target);
+            orders.send(CommandKind::Tow { ship: actor, towee: Some(target) });
             "HUD_Options_TowStart"
         }
         Some(Act::TowStop) => {
-            docks.break_tow_as(actor);
+            orders.send(CommandKind::Tow { ship: actor, towee: None });
             "HUD_Options_TowStop"
         }
         Some(Act::Unavailable | Act::Dock) | None => "HUD_Options_NoSelection",
-    };
-    (sound, msg)
+    }
 }
 
 /// What a right click at `ray` opens the menu for: the target, the menu variant and whether Dock is enabled. None: nothing to open.
@@ -380,7 +365,7 @@ fn slot_hooks(scene: &MenuScene, boarding: &MenuBoarding, actor: Entity, target:
 fn menu(
     mut input: MenuInput,
     scene: MenuScene,
-    mut boarding: MenuBoarding,
+    boarding: MenuBoarding,
     mut bar: ResMut<BarMenuRequest>,
     mut target: ResMut<crate::combat::Target>,
     window: Single<&Window, With<PrimaryWindow>>,
@@ -390,7 +375,7 @@ fn menu(
     mut local: Local<Local2>,
     mut commands: Commands,
     mut orbit: ResMut<Orbit>,
-    mut docks: Dockees,
+    docks: Dockees,
     mut sfx: MessageWriter<Sfx>,
     mut orders: Orders,
 ) {
@@ -443,11 +428,7 @@ fn menu(
             Some(Act::Focus) if open.target != actor && !scene.sensors.in_sight(actor, open.target, mission) => Some(Act::Unavailable),
             act => act,
         };
-        let (sound, msg) = run_slot(act, open.target, actor, &mut orders, &mut commands, &mut orbit, &mut docks);
-        if let Some(msg) = msg {
-            boarding.board.write(msg);
-        }
-        sfx.write(Sfx::ui(sound));
+        sfx.write(Sfx::ui(run_slot(act, open.target, actor, &mut orders, &mut orbit, &docks)));
         return;
     }
     let Some(cursor) = cursor else { return };
