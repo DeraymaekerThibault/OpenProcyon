@@ -41,6 +41,10 @@ impl OptionsMenu {
     pub fn is_open(&self) -> bool {
         self.open.load(Ordering::Relaxed)
     }
+    #[cfg(test)]
+    pub(crate) fn set_open(&self, open: bool) {
+        self.open.store(open, Ordering::Relaxed);
+    }
 }
 
 #[derive(Default)]
@@ -638,8 +642,7 @@ fn context_cursor(
     cam: Single<(&Camera, &GlobalTransform)>,
     hud: Option<Res<HudData>>,
     lib: Res<Library>,
-    menu: Res<OptionsMenu>,
-    ui: Res<crate::panels::UiClick>,
+    focus: crate::panels::UiFocus,
     mission: Option<Res<crate::campaign::Mission>>,
     ships: Query<(Entity, &Transform, &Ship, &Health)>,
     objects: Query<
@@ -655,7 +658,7 @@ fn context_cursor(
     let mut aim = None;
     let want = (|| {
         hud.as_ref()?;
-        if crate::panels::cinematic(mission.as_deref()) || menu.open.load(Ordering::Relaxed) || ui.0 {
+        if focus.blocks_hover() {
             return None;
         }
         let cursor = window.cursor_position()?;

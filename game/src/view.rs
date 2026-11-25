@@ -313,7 +313,7 @@ pub fn input(
     lib: Res<Library>,
     mut target: ResMut<Target>,
     mut vtime: ResMut<Time<Virtual>>,
-    ui: Res<crate::panels::UiClick>,
+    focus: panels::UiFocus,
     mut docks: docking::Dockees,
     (sensors, mission, mut sfx, lob, mut orders): (Res<environment::Sensors>, Option<Res<campaign::Mission>>, MessageWriter<audio::Sfx>, Res<combat::LobAim>, Orders),
     objects: ObjectQuery,
@@ -321,7 +321,7 @@ pub fn input(
 ) {
     let Some(actor) = pointer.fleets.selected else { return };
     let direct = pointer.fleets.direct();
-    let clicking = mouse.just_pressed(MouseButton::Left) && !ui.0;
+    let clicking = mouse.just_pressed(MouseButton::Left) && !focus.blocks_world_click();
     let others: Vec<Clickable> =
         if clicking { ships.iter().map(|(e, s, tf, h, m, _)| (e, tf.compute_transform(), s.clone(), h.destroyed, m.is_none_or(|m| m.visible))).collect() } else { vec![] };
     let Ok((_, source, player_tf, _, _, source_pilot)) = ships.get(actor) else { return };
@@ -334,7 +334,7 @@ pub fn input(
         camera_input(&mouse, &keys, &pointer, &mut orbit, time.delta_secs(), radius);
         keyboard_orders(&mut c, &keys, &mut pointer, &mut target, &mut vtime, &mut commands, &mut orders);
         // Left click: an enemy ship selects it as target, otherwise set a destination on the plane (Shift appends).
-        if clicking && !docks.menu_swallows_click() {
+        if clicking {
             let (camera, gt) = *cam;
             if let Some(ray) = window.cursor_position().and_then(|cursor| cursor_ray(camera, gt, cursor)) {
                 let scene =
@@ -363,10 +363,9 @@ pub fn fleet_keys(
     mission: Option<Res<campaign::Mission>>,
     mut commands: Commands,
     mut sfx: MessageWriter<audio::Sfx>,
-    maps: Query<(), With<crate::starmap::Starmap>>,
-    menu: Option<Res<options_menu::OptionsMenu>>,
+    focus: panels::UiFocus,
 ) {
-    if menu.as_ref().is_some_and(|m| m.is_open()) || !maps.is_empty() || panels::cinematic(mission.as_deref()) || rules::locked(mission.as_deref()) {
+    if focus.blocks_fleet_keys() {
         return;
     }
     let mut picked = None;

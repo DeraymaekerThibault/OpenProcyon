@@ -51,9 +51,7 @@ fn close_on_leaving(mut console: ResMut<Console>, mut vtime: ResMut<Time<Virtual
 fn close(console: &mut Console, vtime: &mut Time<Virtual>) {
     console.open = false;
     console.line.clear();
-    if std::mem::take(&mut console.paused_by_us) {
-        vtime.unpause();
-    }
+    console.paused_by_us.release(vtime);
 }
 
 /// The console key (`Act::Console`, the backquote key by default; F12 always works) opens the console and pauses the battle; Escape or the console key closes it. While it is open typing goes to its line and the
@@ -84,10 +82,7 @@ fn keys(
         if !console.open {
             if toggle {
                 console.open = true;
-                if !vtime.is_paused() {
-                    vtime.pause();
-                    console.paused_by_us = true;
-                }
+                console.paused_by_us.claim(&mut vtime);
                 if console.log.is_empty() {
                     console.say("Developer console. `help` lists the commands; Escape or the console key closes it.");
                 }
