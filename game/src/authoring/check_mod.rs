@@ -28,7 +28,7 @@ pub fn check_mod(dir: &Path, base: Option<&Path>) -> Vec<Finding> {
 pub fn check_mod_with(dir: &Path, base: Option<&Path>, installed: &[Installed]) -> Vec<Finding> {
     // A folder with no `ships/` is not an import (an empty user folder): treat it as no assets.
     let base = base.filter(|b| b.join("ships").is_dir());
-    let mut c = Checker { dir, root: PathBuf::new(), have_base: base.is_some(), out: vec![], unchecked: 0 };
+    let mut c = Checker { dir, root: PathBuf::new(), base: base.map(Path::to_path_buf), have_base: base.is_some(), out: vec![], unchecked: 0 };
     if !dir.is_dir() {
         c.error("", "", format!("{} is not a folder", dir.display()));
         return c.out;
@@ -96,6 +96,8 @@ struct Checker<'a> {
     dir: &'a Path,
     /// The overlay folder (base + mods); empty until built.
     root: PathBuf,
+    /// The imported assets, when there are any.
+    base: Option<PathBuf>,
     have_base: bool,
     out: Vec<Finding>,
     /// Files that could not be merged without the game's own files.
@@ -354,6 +356,10 @@ impl Checker<'_> {
             let Some(ship) = crate::data::try_json(&self.root.join(&file)).filter(Value::is_object) else { continue };
             let before = self.out.iter().filter(|f| f.level == Level::Error).count();
             self.ship_names(&id, &file, &ship);
+            let new = self.base.as_ref().is_some_and(|b| !b.join(&file).is_file()) && !crate::data::try_json(&self.dir.join(&file)).is_some_and(|m| m.get("extends").is_some());
+            if new {
+                self.new_ship_fields(&file, &ship);
+            }
             let errors_here = self.out.iter().filter(|f| f.level == Level::Error).count() > before;
             // What the checks above did not see: whatever else the loader refuses (a wrong type, a bad `crew_nodes` name).
             if let (false, Some(Ok((guns, _)))) = (errors_here, &loaded)
@@ -361,6 +367,26 @@ impl Checker<'_> {
             {
                 let message = self.tidy(&e);
                 self.error(&file, "", format!("the game cannot load this ship: {message}"));
+            }
+        }
+    }
+
+    /// PROVISIONAL: a ship that extends nothing (`data::SHIP_REQUIRED_NEW`) must state the fields the loader would otherwise fill in
+    /// silently, each missing one at its own place, and a non-empty `race`. `ship` is the merged file.
+    fn new_ship_fields(&mut self, file: &str, ship: &Value) {
+        for key in crate::authoring::required_new(file) {
+            let path = key.split('.').fold(JsonPath::default(), |p, k| p.key(k));
+            let value = key.split('.').try_fold(ship, |v, k| v.get(k));
+            match value {
+                None => self.error(file, path, format!("a new ship must state `{key}` (the loader would silently default it; a ship that extends another one inherits it)")),
+                Some(v) if key == "race" && v.as_str().is_some_and(|r| r.trim().is_empty()) => {
+                    self.error(
+                        file,
+                        path,
+                        "`race` is empty: the race picks the ship's crew faces and voices, outfits, sails and trails, so a new ship must name one (such as Navy or Pirate)".into(),
+                    );
+                }
+                Some(_) => {}
             }
         }
     }
@@ -695,6 +721,13 @@ mod tests {
             "VerticalMinAngle": 0, "VerticalMaxAngle": 1, "Mount Type": "Medium Mount"})
     }
 
+    /// A new ship's `ship.json`: every field of `SHIP_REQUIRED_NEW`, then `extra` over it.
+    fn new_ship(extra: Value) -> Value {
+        let mut ship =
+            json!({"race": "Navy", "core_hp": 10, "points": 5, "physics": {"Mass": 1, "MaxThrust": 1, "MaxSpeed": 1, "RotationalFriction": 1, "MaxAngularAcceleration": 1}});
+        ship.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
+        ship
+    }
     fn bullet() -> Value {
         json!({"lifetime": 1, "impact_vol": 1, "impact_max": 1, "impact_snd": {"Wood": ["real"]}, "damage": {"Wood": [1, 2, 0, 0, 0]}, "hit_fx": "Real"})
     }
@@ -877,21 +910,23 @@ mod tests {
         put_json(
             &mod_dir,
             "ships/Ship_M/ship.json",
-            json!({
+            new_ship(json!({
                 "explosion_fx": "Nofx", "engine_snd": ["real", "gone"],
                 "guns": {"Turret_1": {"gun": "Gun", "arc_deg": 60}, "Mount_B": {"gun": "Gunn", "arc_deg": 60}, "Free": {"gun": "Gun", "arc_deg": 1, "pos": [0, 0, 0], "rot": [0, 0, 0], "parent_layer": "Nowhere"}}
-            }),
+            })),
         );
         put_json(
             &mod_dir,
             "ships/Ship_S/ship.json",
-            json!({"sections": {"Deck": {"layer": "Hulll", "material": "Wood", "hp": 1, "core_pct": 1, "vital_ship": true, "vital_speed": false, "vital_turn": false, "adjacent": ["Hull", "Ghost"]}}}),
+            new_ship(
+                json!({"sections": {"Deck": {"layer": "Hulll", "material": "Wood", "hp": 1, "core_pct": 1, "vital_ship": true, "vital_speed": false, "vital_turn": false, "adjacent": ["Hull", "Ghost"]}}}),
+            ),
         );
         put(&mod_dir, "ships/Ship_S/model.glb", small_model(false));
         put(&mod_dir, "ships/Ship_Ok/model.glb", small_model(false));
-        put_json(&mod_dir, "ships/Ship_Ok/ship.json", json!({"core_hp": 10}));
+        put_json(&mod_dir, "ships/Ship_Ok/ship.json", new_ship(json!({})));
         put(&mod_dir, "ships/Ship_Bad/model.glb", small_model(false));
-        put_json(&mod_dir, "ships/Ship_Bad/ship.json", json!({"core_hp": "lots"}));
+        put_json(&mod_dir, "ships/Ship_Bad/ship.json", new_ship(json!({"core_hp": "lots"})));
         put_json(
             &mod_dir,
             "data/weapons/guns.json",
@@ -935,6 +970,42 @@ mod tests {
         assert!(!all.contains("'Island.glb'"), "{all}");
         let ship_m_errors = found.iter().filter(|f| f.level == Level::Error && f.file == m && f.message.contains("cannot load")).count();
         assert_eq!(ship_m_errors, 0, "the loader is asked only about a ship the other checks found no error in");
+        std::fs::remove_dir_all(base).unwrap();
+        std::fs::remove_dir_all(mod_dir).unwrap();
+    }
+
+    #[test]
+    fn a_new_ship_must_state_what_the_loader_would_default_and_one_that_extends_or_changes_a_retail_ship_need_not() {
+        let (base, mod_dir) = (scratch("newship"), scratch("newship-mod"));
+        put_json(&base, "data/weapons/guns.json", json!({"Gun": gun()}));
+        put_json(&base, "data/weapons/bullets.json", json!({"B": bullet()}));
+        put(&base, "ships/readme.txt", "x");
+        put_json(&base, "ships/Ship_Retail/ship.json", new_ship(json!({})));
+        for id in ["Ship_Empty", "Ship_Extends", "Ship_Retail", "Ship_NoRace", "Ship_Full"] {
+            put(&mod_dir, &format!("ships/{id}/model.glb"), small_model(false));
+        }
+        // the tester's file: a brand-new ship that says only race "", points and skirmish
+        put_json(&mod_dir, "ships/Ship_Empty/ship.json", json!({"race": "", "points": 0, "skirmish": false}));
+        put_json(&mod_dir, "ships/Ship_Extends/ship.json", json!({"extends": "Ship_Retail", "points": 100}));
+        put_json(&mod_dir, "ships/Ship_Retail/ship.json", json!({"points": 7}));
+        let mut no_race = new_ship(json!({}));
+        no_race.as_object_mut().unwrap().remove("race");
+        put_json(&mod_dir, "ships/Ship_NoRace/ship.json", no_race);
+        put_json(&mod_dir, "ships/Ship_Full/ship.json", new_ship(json!({})));
+        let found = check_mod_with(&mod_dir, Some(&base), &[]);
+        let all = lines(&found).join("\n");
+        let mut empty: Vec<&str> = found.iter().filter(|f| f.file == "ships/Ship_Empty/ship.json" && f.level == Level::Error).map(|f| f.pointer.as_str()).collect();
+        empty.sort();
+        let mut want = vec!["/race", "/core_hp", "/physics/Mass", "/physics/MaxThrust", "/physics/MaxSpeed", "/physics/RotationalFriction", "/physics/MaxAngularAcceleration"];
+        want.sort();
+        assert_eq!(empty, want, "{all}");
+        assert!(has(&found, Level::Error, "ships/Ship_Empty/ship.json", "race", "`race` is empty"), "{all}");
+        assert!(has(&found, Level::Error, "ships/Ship_Empty/ship.json", "core_hp", "a new ship must state `core_hp`"), "{all}");
+        assert!(has(&found, Level::Error, "ships/Ship_NoRace/ship.json", "race", "a new ship must state `race`"), "{all}");
+        for ok in ["Ship_Extends", "Ship_Retail", "Ship_Full"] {
+            assert!(!found.iter().any(|f| f.file == format!("ships/{ok}/ship.json") && f.level == Level::Error), "{ok}: {all}");
+        }
+        assert_eq!(crate::authoring::required_new("ships/X/ship.json"), crate::data::SHIP_REQUIRED_NEW);
         std::fs::remove_dir_all(base).unwrap();
         std::fs::remove_dir_all(mod_dir).unwrap();
     }

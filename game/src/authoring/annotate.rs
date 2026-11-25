@@ -2,12 +2,13 @@
 //!
 //! - `x-origin`: `"retail"` (the original has the value; the importer writes it) or `"engine"` (an extension for mods; the keys of
 //!   `ENGINE_SHIP_KEYS` / `ENGINE_GUN_KEYS`, plus `$schema` and `set`, which are no data of the game).
-//! - `x-required-new` (set in `authoring::schemas`, on the entry of `guns.json` / `bullets.json`): the fields a NEW entry must set.
+//! - `x-required-new` (guns and bullets: set in `authoring::schemas`, on the entry; the ship: here, on the schema's root, from
+//!   `SHIP_REQUIRED_NEW`, PROVISIONAL): the fields a NEW entry must set.
 //! - `x-default-from`: where the engine takes the value when the file leaves the key out, from the `SHIP_FILLS` table next to the
 //!   ship loader (`data/ships.rs`): `model`, `race_and_size`, `navy_cutter`, `hull`, `weapon_panel`.
 use serde_json::Value;
 
-use crate::data::{ENGINE_GUN_KEYS, ENGINE_SHIP_KEYS, SHIP_FILLS};
+use crate::data::{ENGINE_GUN_KEYS, ENGINE_SHIP_KEYS, SHIP_FILLS, SHIP_REQUIRED_NEW};
 
 /// Ship keys the schema lists that are not game data: the editor hint and the overlay merge's `set`.
 const FILE_ONLY: [&str; 2] = ["$schema", "set"];
@@ -39,6 +40,7 @@ fn mark(props: &mut Value, engine: &dyn Fn(&str) -> bool) {
 
 /// `ship.schema.json`: origins of every key, and `x-default-from` on every key (and nested key) of `SHIP_FILLS`.
 pub fn ship(schema: &mut Value) {
+    schema["x-required-new"] = SHIP_REQUIRED_NEW.into();
     mark(&mut schema["properties"], &|k| ENGINE_SHIP_KEYS.contains(&k) || FILE_ONLY.contains(&k));
     for (path, fill) in SHIP_FILLS {
         let mut parts = path.split('.');

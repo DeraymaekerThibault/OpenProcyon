@@ -139,17 +139,22 @@ pub fn schemas() -> Vec<(&'static str, Value)> {
 
 /// The fields (dotted, going into the objects they hold, such as `visual.pivot`) that the loader needs of a whole entry of
 /// `data/weapons/guns.json` or `bullets.json` (a file name, or its path); what a new entry must set, since an entry that changes a
-/// retail one needs none. Empty for any other file. The list is the `x-required-new` of the published schema.
+/// retail one needs none; and of a whole `ships/<id>/ship.json` (PROVISIONAL list, `data::SHIP_REQUIRED_NEW`) that extends no existing
+/// ship. Empty for any other file. The list is the `x-required-new` of the published schema.
 pub fn required_new(file: &str) -> Vec<String> {
-    let name = match file.rsplit('/').next() {
-        Some("guns.json") => "guns.schema.json",
-        Some("bullets.json") => "bullets.schema.json",
+    let (name, entry) = match file.rsplit('/').next() {
+        Some("guns.json") => ("guns.schema.json", true),
+        Some("bullets.json") => ("bullets.schema.json", true),
+        Some("ship.json") => ("ship.schema.json", false),
         _ => return vec![],
     };
     schemas()
         .iter()
         .find(|(n, _)| *n == name)
-        .and_then(|(_, s)| s["$defs"]["entry"]["x-required-new"].as_array().map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect()))
+        .and_then(|(_, s)| {
+            let list = if entry { &s["$defs"]["entry"]["x-required-new"] } else { &s["x-required-new"] };
+            list.as_array().map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+        })
         .unwrap_or_default()
 }
 

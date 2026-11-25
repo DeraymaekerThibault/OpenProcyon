@@ -179,6 +179,14 @@ pub const SHIP_FILLS: &[(&str, Fill)] = &[
     ("tow", Fill::Hull),
     ("homing", Fill::Hull),
 ];
+/// PROVISIONAL: what a NEW ship (one that extends no existing ship and has no retail entry of the same id) must state in `ship.json`,
+/// dotted. Each of these is a key the loader would otherwise fill in silently (`race` as "", `core_hp` from the model or 100, `points` as
+/// 0, `physics` as the Navy Cutter's numbers) with something a playable hull rarely wants, so `--check-mod` asks the author to say it.
+/// `race` must also be non-empty: the class's race picks its crew faces and voices, outfits, sails and trails, so an empty one finds none.
+/// The loader itself still accepts a file without them; a ship that extends a retail one inherits them. The annotation `x-required-new`
+/// on the published ship schema is this list.
+pub const SHIP_REQUIRED_NEW: &[&str] =
+    &["race", "core_hp", "points", "physics.Mass", "physics.MaxThrust", "physics.MaxSpeed", "physics.RotationalFriction", "physics.MaxAngularAcceleration"];
 /// What fills `key` (a path of [`SHIP_FILLS`]) when `ship.json` leaves it out.
 pub fn fill_of(key: &str) -> Option<Fill> {
     SHIP_FILLS.iter().find(|(k, _)| *k == key).map(|(_, f)| *f)

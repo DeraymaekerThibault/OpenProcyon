@@ -137,6 +137,12 @@ What a *new* gun or bullet must set is listed apart, as the annotation `"x-requi
 `bullets.schema.json` (dotted fields such as `visual.pivot`; validators ignore it, and a test keeps it equal to what the loader needs);
 `authoring::required_new("data/weapons/guns.json")` returns the same list. `--check-mod` uses it: a new entry gets every missing field
 listed at once, each at its own place (`data/weapons/guns.json`, `/Gun_X/visual/pivot`), and a change to a retail entry gets nothing.
+The ship schema carries the same annotation on its root, `"x-required-new"` (`authoring::required_new("ships/<Id>/ship.json")`), PROVISIONAL:
+`race` (not empty), `core_hp`, `points` and the five `physics` numbers (`Mass`, `MaxThrust`, `MaxSpeed`, `RotationalFriction`,
+`MaxAngularAcceleration`). The loader would fill each of them silently (no race, the model's core HP, 0 points, the Navy Cutter's physics),
+so `--check-mod` asks a *new* ship (one with no `extends` and no retail ship of that id) to state them, each missing one as its own error
+(`/physics/Mass`); an empty `race` is an error, since the race picks the crew faces and voices, outfits, sails and trails. A ship that
+`extends` another one, or changes a retail ship, inherits them and gets none of these errors. Needs the imported assets, like the guns and bullets.
 
 In VS Code, either name the schema in the file (the loader ignores a `$schema` key):
 
