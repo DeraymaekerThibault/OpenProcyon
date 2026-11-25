@@ -18,6 +18,10 @@
 //!   the unknown-key warnings of any document with the nearest known key.
 //! - [`merge_rule`] / [`extends_parent`] / [`MERGED`]: how a mod file combines with the overlay below it, and what an `extends` file
 //!   is laid over.
+//! - [`keyed_lists`] / [`extend`] / [`merge_keyed`]: which lists of a map or mission file merge by key (and by which field), and the
+//!   whole `extends` merge (keyed lists, `merge`, `$remove`, `set`) a mod file gets over its parent.
+//! - [`scenery_transform`] / [`game_rotation`]: a map object's `pos` / `rot` as the world transform the map spawner places it at.
+//! - [`Formation`] / [`formation_slots`]: the fleet formations and their slot offsets in the leader's frame.
 //! - [`game_to_bevy`] / [`bevy_to_game`] / [`mount_rotation`] / [`mount_rot`]: the files' axes and `rot` triples as the loader reads them.
 //! - [`resolved_ship`]: a ship as the loader sees it ([`ResolvedShip`]): speed, thrust, mass, hit points, mounts and every hardpoint
 //!   in game axes, each value with its [`Source`] (a JSON pointer into `ship.json`, a model node, or a fallback rule), serializable.
@@ -219,6 +223,42 @@ pub fn mount_rot(rotation: bevy::math::Quat) -> [f64; 3] {
     [y as f64, -z as f64, x as f64]
 }
 
+/// The lists of the file `rel` (its path inside the assets, `/` separators: `maps/<id>/map.json`) that an `extends` file merges by
+/// key rather than replacing whole, as `(JSON pointer, key field)` pairs: `("/objects", "id")`. Empty for every other file. The very
+/// table [`extend`] uses (PROVISIONAL, docs/modding.md "Changing one entry of a list"); a `merge` key in the diff can add lists to it
+/// or switch one off, which this table does not show.
+pub fn keyed_lists(rel: &str) -> Vec<(&'static str, &'static str)> {
+    crate::modding::keyed_defaults(rel).to_vec()
+}
+
+/// What an `extends` file `diff` makes of its `parent` (the parsed file it extends), for the file `rel`: the merge the loader runs on
+/// a mod file. Objects merge deep, everything else replaces, except the [`keyed_lists`] of `rel` and those the diff names in `merge`,
+/// which merge by key (`$remove` drops an entry); then `set` pointers apply, and `extends`, `merge` and `set` are dropped. Returns the
+/// merged document and the warnings (a `$remove` of an entry the parent lacks). The error is the loader's message; the loader then
+/// skips the file.
+pub fn extend(rel: &str, parent: Value, diff: &Value) -> Result<(Value, Vec<String>), String> {
+    crate::modding::extend(parent, diff, rel)
+}
+
+/// The keyed merge on its own: `entries` merged into the list at the JSON pointer `ptr` of `base`, matched by the field `field`. A
+/// matching entry is deep-merged, a new one appended, `{"<field>": k, "$remove": true}` removes one. Returns the warnings; errors as
+/// for [`extend`] (`base` may be left half changed then).
+pub fn merge_keyed(base: &mut Value, ptr: &str, field: &str, entries: &[Value]) -> Result<Vec<String>, String> {
+    let mut warnings = vec![];
+    crate::modding::merge_keyed(base, ptr, field, entries, &mut warnings)?;
+    Ok(warnings)
+}
+
+/// A `rot` of a map object (the nine native matrix values) as the rotation the spawner uses (Bevy axes).
+pub use crate::scenario::game_rotation;
+/// A map object (`maps/<id>/map.json` `objects` entry: `pos`, `rot`, `type`, optional `scene_origin`) placed in the world: the
+/// transform the map spawner gives it (Bevy axes), from `rotation` (see [`game_rotation`]) and `docks` (the parsed
+/// `data/docks.json`, whose first dock point sets the default origin). Anchoring on the first dock is PROVISIONAL
+/// (docs/re/scenery-placement.md).
+pub use crate::scenario::scenery_transform;
+/// The fleet formations and the slot offsets of each, in the leader's frame (Bevy axes); `radii` are the ships' bounding-sphere radii.
+pub use crate::ship::{Formation, formation_slots};
+
 pub use crate::data::crew_nodes::{CREW_KINDS, crew_kind};
 pub use crate::data::derive::CREW_NODE;
 
@@ -229,6 +269,67 @@ pub use crate::rules::check::known_names;
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn keyed_lists_are_the_loaders_table() {
+        assert_eq!(keyed_lists("maps/x/map.json")[0], ("/objects", "id"));
+        assert!(keyed_lists("maps/x/mission.json").contains(&("/points", "Name")));
+        assert!(keyed_lists("maps/x/script.json").contains(&("/rules", "name")));
+        assert!(keyed_lists("ships/A/ship.json").is_empty());
+        assert!(keyed_lists("maps/x/other.json").is_empty());
+    }
+
+    #[test]
+    fn extend_merges_keyed_lists_removes_and_sets() {
+        let parent = json!({"name": "P", "objects": [{"id": 1, "pos": [0, 0, 0]}, {"id": 2, "pos": [1, 1, 1]}], "tags": ["a", "b"]});
+        let diff = json!({"extends": "p", "objects": [{"id": 2, "pos": [9, 9, 9]}, {"id": 1, "$remove": true}, {"id": 3, "pos": [3, 3, 3]}, {"id": 7, "$remove": true}], "set": {"/tags/1": "z"}});
+        let (out, warnings) = extend("maps/m/map.json", parent.clone(), &diff).unwrap();
+        assert_eq!(out["objects"], json!([{"id": 2, "pos": [9, 9, 9]}, {"id": 3, "pos": [3, 3, 3]}]));
+        assert_eq!(out["tags"], json!(["a", "z"]));
+        assert!(out.get("extends").is_none() && out.get("set").is_none());
+        assert_eq!(warnings.len(), 1, "{warnings:?}");
+        // another file replaces the list whole, unless `merge` names it
+        let (out, _) = extend("ships/A/ship.json", parent.clone(), &diff).unwrap();
+        assert_eq!(out["objects"].as_array().unwrap().len(), 4);
+        let by_id = json!({"merge": {"/objects": "id"}, "objects": [{"id": 2, "pos": [5, 5, 5]}]});
+        let (out, _) = extend("ships/A/ship.json", parent.clone(), &by_id).unwrap();
+        assert_eq!(out["objects"], json!([{"id": 1, "pos": [0, 0, 0]}, {"id": 2, "pos": [5, 5, 5]}]));
+        // errors are the loader's
+        let bad = json!({"set": {"/nope": 1}});
+        assert!(extend("maps/m/map.json", parent, &bad).unwrap_err().contains("does not exist"));
+    }
+
+    #[test]
+    fn merge_keyed_alone() {
+        let mut base = json!({"rules": [{"name": "a", "x": 1}]});
+        let w = merge_keyed(&mut base, "/rules", "name", &[json!({"name": "a", "x": 2}), json!({"name": "b"}), json!({"name": "c", "$remove": true})]).unwrap();
+        assert_eq!(base["rules"], json!([{"name": "a", "x": 2}, {"name": "b"}]));
+        assert_eq!(w.len(), 1);
+        assert!(merge_keyed(&mut base, "/rules", "name", &[json!({"x": 1})]).is_err());
+    }
+
+    #[test]
+    fn scenery_is_placed_as_the_spawner_places_it() {
+        let docks = json!({"Rock": {"points": [{"pos": [0, 0, 4]}]}});
+        let object = json!({"type": "Rock", "pos": [10, 20, 30], "rot": [0, 1, 0, -1, 0, 0, 0, 0, 1]});
+        let q = game_rotation(&object["rot"]);
+        let tf = scenery_transform(&object, q, &docks);
+        let origin = bevy::math::Vec3::Y * 4.0;
+        assert!((tf.translation - (game_to_bevy([10.0, 20.0, 30.0]) - q * origin)).length() < 1e-4);
+        // a quarter turn about game z: the game's +y (forward) leads to Bevy's -z
+        assert!((q * bevy::math::Vec3::NEG_Z - bevy::math::Vec3::X).length() < 1e-4 || (q * bevy::math::Vec3::NEG_Z + bevy::math::Vec3::X).length() < 1e-4);
+        // a missing rot is the identity
+        assert!(game_rotation(&json!(null)).angle_between(bevy::math::Quat::IDENTITY) < 1e-5);
+    }
+
+    #[test]
+    fn formations_give_one_slot_per_ship() {
+        let slots = formation_slots(Formation::Column, &[10.0, 5.0, 5.0]);
+        assert_eq!(slots.len(), 3);
+        assert_eq!(slots[0], bevy::math::Vec3::ZERO);
+        assert!(slots[1].z > 0.0 && slots[2].z > slots[1].z);
+        assert_eq!(Formation::BUTTONS.len(), 6);
+    }
 
     fn scratch(tag: &str) -> PathBuf {
         let dir = std::env::temp_dir().join(format!("procyon-authoring-{tag}-{}", std::process::id()));
