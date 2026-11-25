@@ -14,7 +14,7 @@ use serde_json::Value;
 
 use crate::data::derive;
 use crate::modding::{self, Installed};
-use crate::rules::check::{Finding, JsonPath, Level, did_you_mean, missing_scenery, nearest, outside_world, unused_definitions};
+use crate::rules::check::{Finding, JsonPath, Level, did_you_mean, duplicate_ids, missing_scenery, nearest, nebula_agreement, outside_world, unused_definitions};
 
 /// Checks the mod in `dir` against the imported assets in `base` (`None`: nothing imported, so only the mod's own files are looked
 /// at and one warning says what was skipped). The mods `dir` lists in `requires` are laid under it when they are installed. Writes
@@ -549,10 +549,21 @@ impl Checker<'_> {
         let base_models = std::cell::OnceCell::new();
         for id in ids {
             let dir = self.root.join("maps").join(&id);
-            let Some(rules) = crate::rules::cli::rules_file(&dir) else { continue };
-            let rules_name = rules.file_name().map_or_else(String::new, |n| n.to_string_lossy().into_owned());
             // The same map in the base game, when the mod touches a retail one: its own warnings are not the mod's.
             let base_dir = self.base.as_ref().map(|b| b.join("maps").join(&id)).filter(|d| d.is_dir());
+            let Some(rules) = crate::rules::cli::rules_file(&dir) else {
+                // A map with no rules: only what `map.json` alone can say.
+                if base_dir.as_ref().is_some_and(|bd| same_file(&dir.join("map.json"), &bd.join("map.json"))) {
+                    continue;
+                }
+                let mut found = found_in(&dir, &id);
+                if let Some(bd) = &base_dir {
+                    mark_inherited(&mut found, &found_in(bd, &id));
+                }
+                self.out.extend(found);
+                continue;
+            };
+            let rules_name = rules.file_name().map_or_else(String::new, |n| n.to_string_lossy().into_owned());
             if let Some(bd) = &base_dir
                 && ["map.json", "media.json", rules_name.as_str()].iter().all(|f| same_file(&dir.join(f), &bd.join(f)))
             {
@@ -594,12 +605,26 @@ fn map_findings(root: &Path, dir: &Path, id: &str, rules_name: &str, sounds: Opt
     out.extend(unused_definitions(&mission).into_iter().map(|f| f.with_file(&mission_file)));
     // Findings of `rules::check` name `map.json` or nothing (the rules file); here they get the map folder.
     let map_file = format!("maps/{id}/map.json");
-    let placed = outside_world(&mission, &map).into_iter().chain(models.map(|m| missing_scenery(&map, m)).unwrap_or_default());
+    let placed = outside_world(&mission, &map)
+        .into_iter()
+        .chain(models.map(|m| missing_scenery(&map, m)).unwrap_or_default())
+        .chain(duplicate_ids(&mission, &map))
+        .chain(nebula_agreement(&mission, &map));
     out.extend(placed.map(|f| {
         let file = if f.file == "map.json" { map_file.clone() } else { mission_file.clone() };
         f.with_file(&file)
     }));
     Ok(out)
+}
+
+/// What `map.json` alone can say about a map folder `id` that has no rules file: repeated world object ids.
+fn map_only_findings(map: &Value, id: &str) -> Vec<Finding> {
+    duplicate_ids(&Value::Null, map).into_iter().map(|f| f.with_file(&format!("maps/{id}/map.json"))).collect()
+}
+
+/// [`map_only_findings`] of the folder `dir`'s own `map.json`.
+fn found_in(dir: &Path, id: &str) -> Vec<Finding> {
+    crate::data::try_json(&dir.join("map.json")).map(|map| map_only_findings(&map, id)).unwrap_or_default()
 }
 
 /// Both files are missing, or both are there with the same bytes.
@@ -893,6 +918,38 @@ mod tests {
         assert_eq!((direct[0].pointer.as_str(), direct[0].suggestion.as_deref(), direct[0].file.as_str()), ("/sigth", Some("sight"), "ships/S/ship.json"));
         // --check-mod --json prints the field
         assert!(serde_json::to_value(&direct[0]).unwrap()["pointer"] == "/sigth");
+        std::fs::remove_dir_all(mod_dir).unwrap();
+    }
+
+    #[test]
+    fn repeated_world_object_ids_and_disagreeing_nebulae_are_warnings_in_the_mods_files() {
+        let mod_dir = scratch("ids-nebulae");
+        // a map with no rules at all: repeated ids are still found
+        put_json(&mod_dir, "maps/bare/map.json", json!({"objects": [{"id": 3, "type": "Rock"}, {"id": 3, "type": "Isle"}], "mines": [{"id": 3, "type": "M"}]}));
+        let tri = json!([[0, 0], [10, 0], [10, 10]]);
+        put_json(
+            &mod_dir,
+            "maps/storm/map.json",
+            json!({"ships": [{"id": 1, "type": "S"}], "objects": [{"id": 1, "type": "Rock"}], "nebulae": [{"name": "Cloud", "polygon": tri}, {"name": "Orphan", "polygon": tri}]}),
+        );
+        put_json(
+            &mod_dir,
+            "maps/storm/mission.json",
+            json!({"players": ["P"], "ships": [], "rules": [], "volumes": {"Cloud": [[0, 0], [10, 0], [10, 12]]},
+                   "environment": {"nebulae": [{"New Nebula Name": "Cloud", "Polygon Name": "Cloud"}]}}),
+        );
+        put_json(&mod_dir, "maps/storm/media.json", json!({}));
+        let found = check_mod_with(&mod_dir, None, &[]);
+        let all = lines(&found).join("\n");
+        for (file, path, needle) in [
+            ("maps/bare/map.json", "objects[1].id", "id 3 is also used by map.json /objects/0"),
+            ("maps/bare/map.json", "mines[0].id", "id 3 is also used by map.json /objects/0"),
+            ("maps/storm/map.json", "ships[0].id", "id 1 is also used by map.json /objects/0"),
+            ("maps/storm/map.json", "nebulae[1].name", "nebula 'Orphan' has no record"),
+            ("maps/storm/mission.json", "volumes.Cloud", "differs from the polygon of nebula 'Cloud' (map.json /nebulae/0/polygon)"),
+        ] {
+            assert!(has(&found, Level::Warning, file, path, needle), "missing {file} {path} {needle:?} in\n{all}");
+        }
         std::fs::remove_dir_all(mod_dir).unwrap();
     }
 
