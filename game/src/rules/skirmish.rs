@@ -6,7 +6,7 @@ use serde_json::Value;
 use std::collections::HashMap;
 
 use super::eval::schema;
-use super::systems::{RuleShip, apply};
+use super::systems::{RuleShip, WorldKind, apply, build_world};
 use super::*;
 use crate::combat::Destroyed;
 use crate::{Ship, Side};
@@ -59,24 +59,6 @@ pub fn plugin(app: &mut App) {
     app.add_systems(Update, run.in_set(crate::FrameRules).run_if(in_state(crate::menu::Screen::Battle)).run_if(resource_exists::<SkirmishScript>));
 }
 
-/// The ECS access the shared effect application (`systems::apply`) needs besides the ships and animals.
-#[derive(bevy::ecs::system::SystemParam)]
-struct SkirmishFx<'w, 's> {
-    bases: apply::Bases<'w, 's>,
-    mines: apply::Mines<'w, 's>,
-    dragons: Query<'w, 's, &'static mut crate::dragons::Dragon>,
-    difficulty: Option<Res<'w, crate::scenario::Difficulty>>,
-    dock: MessageWriter<'w, crate::docking::DockMsg>,
-    board: MessageWriter<'w, crate::boarding::BoardMsg>,
-    asteroids: MessageWriter<'w, crate::combat::AsteroidSetup>,
-    meteors: MessageWriter<'w, crate::nebula::MeteorRoute>,
-    detonate: MessageWriter<'w, crate::combat::Detonate>,
-    event_fx: Query<'w, 's, (Entity, &'static super::systems::EventFx)>,
-    fxlib: Option<Res<'w, crate::fx::FxLib>>,
-    sfx: Option<ResMut<'w, Messages<crate::audio::Sfx>>>,
-    toggles: Option<ResMut<'w, crate::panels::Toggles>>,
-}
-
 #[allow(clippy::too_many_arguments)]
 fn run(
     mut sk: ResMut<SkirmishScript>,
@@ -87,33 +69,12 @@ fn run(
     mut ships: Query<RuleShip>,
     mut animals: Query<(Entity, &mut crate::environment::SpaceAnimal, &mut Transform, &mut Visibility), Without<Ship>>,
     rocks: Query<(Entity, &Transform, &crate::combat::Asteroid), (Without<Ship>, Without<crate::environment::SpaceAnimal>)>,
-    mut fx: SkirmishFx,
+    mut fx: apply::FxParam,
     assets: Res<AssetServer>,
     mut commands: Commands,
 ) {
     let sk = &mut *sk;
-    let mut world: Vec<Unit> = ships
-        .iter()
-        .map(|s| Unit {
-            name: s.mission.name.as_str().into(),
-            owner: s.mission.owner.as_str().into(),
-            alive: !s.health.destroyed,
-            visible: s.mission.visible,
-            primary: s.primary,
-            flag: s.mission.flag.clone(),
-            attack: s.mission.attack.clone(),
-            heading: s.ship.heading,
-            speed: Some(s.ship.speed.abs()),
-            cloaked: s.cloak.is_some_and(|c| c.state == crate::cloak::State::Full),
-            ..Unit::new(s.entity, s.mission.id, super::systems::sim_pos(s.transform, s.interp))
-        })
-        .collect();
-    sk.script.keep_sunk(&mut world);
-    world.extend(animals.iter().map(|(e, a, tf, _)| a.unit(e, tf)));
-    // Moving belts: the rocks are units too, tagged with the script's groups by their world-object id.
-    world.extend(rocks.iter().map(|(e, tf, a)| a.unit(e, tf)));
-    world.extend(fx.mines.iter().map(|(e, tf, m, _)| m.unit(e, tf)));
-    sk.script.tag(&mut world);
+    let world = build_world(&mut sk.script, WorldKind::Skirmish, &ships, &animals, &rocks, &fx, &lib);
     for d in killed.read() {
         if let Some(by) = world.iter().find(|u| u.e == d.by) {
             sk.script.record_destroyed(&by.owner.clone(), d.victim);
@@ -124,33 +85,9 @@ fn run(
     }
     let (fxs, voice) = sk.script.step(&world, time.delta_secs(), false);
     if let Some(file) = voice {
-        commands.spawn((
-            crate::Scenario,
-            crate::briefing::Voice,
-            AudioPlayer::new(assets.load(crate::audio::sound(&file))),
-            PlaybackSettings::DESPAWN.with_volume(bevy::audio::Volume::Linear(crate::menu::volume(crate::menu::Setting::Dialogue))),
-        ));
+        apply::spawn_voice(&mut commands, &assets, &file);
     }
-    let mut env = apply::FxEnv {
-        script: &mut sk.script,
-        paths: &sk.paths,
-        lib: &lib,
-        bases: &mut fx.bases,
-        dragons: &mut fx.dragons,
-        dock: &mut fx.dock,
-        board: &mut fx.board,
-        asteroids: &mut fx.asteroids,
-        meteors: &mut fx.meteors,
-        detonate: &mut fx.detonate,
-        event_fx: &fx.event_fx,
-        fxlib: fx.fxlib.as_deref(),
-        sfx: fx.sfx.as_deref_mut(),
-        toggles: fx.toggles.as_deref_mut(),
-        difficulty: fx.difficulty.as_deref().copied().unwrap_or_default().0,
-        orbit: None,
-        sides: Some(&sk.sides),
-        mines: Some(&mut fx.mines),
-    };
+    let mut env = fx.env(&mut sk.script, &sk.paths, &lib, None, Some(&sk.sides));
     apply::apply(fxs, &mut env, &mut commands, &mut ships, &mut animals);
 }
 

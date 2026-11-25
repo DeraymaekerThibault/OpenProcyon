@@ -49,6 +49,70 @@ pub(in crate::rules) struct FxEnv<'a, 'w, 's> {
     pub mines: Option<&'a mut Mines<'w, 's>>,
 }
 
+/// The ECS access `apply` needs besides the ships and animals: one `SystemParam` for the campaign's `update`, the skirmish
+/// script's `run` and the dev console, which build their `FxEnv` from it.
+#[derive(bevy::ecs::system::SystemParam)]
+pub(in crate::rules) struct FxParam<'w, 's> {
+    pub bases: Bases<'w, 's>,
+    /// Not retail: the mines a custom mission's (or a skirmish map's) map places (`mines`), which its rules hand to players and address by group.
+    pub mines: Mines<'w, 's>,
+    pub dragons: Query<'w, 's, &'static mut crate::dragons::Dragon>,
+    pub difficulty: Option<Res<'w, crate::scenario::Difficulty>>,
+    pub dock: MessageWriter<'w, DockMsg>,
+    pub board: MessageWriter<'w, crate::boarding::BoardMsg>,
+    pub asteroids: MessageWriter<'w, crate::combat::AsteroidSetup>,
+    pub meteors: MessageWriter<'w, crate::nebula::MeteorRoute>,
+    pub detonate: MessageWriter<'w, crate::combat::Detonate>,
+    pub event_fx: Query<'w, 's, (Entity, &'static EventFx)>,
+    pub fxlib: Option<Res<'w, crate::fx::FxLib>>,
+    pub sfx: Option<ResMut<'w, Messages<crate::audio::Sfx>>>,
+    pub toggles: Option<ResMut<'w, crate::panels::Toggles>>,
+}
+
+impl<'w, 's> FxParam<'w, 's> {
+    /// The effect environment for `script`'s effects. The campaign passes its orbit camera and no side table; a skirmish map's script
+    /// passes its map players' sides and no camera (`apply` reads `sides.is_some()` as "this is a skirmish").
+    pub fn env<'a>(
+        &'a mut self,
+        script: &'a mut Script,
+        paths: &'a Value,
+        lib: &'a Library,
+        orbit: Option<&'a mut Orbit>,
+        sides: Option<&'a HashMap<String, Side>>,
+    ) -> FxEnv<'a, 'w, 's> {
+        FxEnv {
+            script,
+            paths,
+            lib,
+            bases: &mut self.bases,
+            dragons: &mut self.dragons,
+            dock: &mut self.dock,
+            board: &mut self.board,
+            asteroids: &mut self.asteroids,
+            meteors: &mut self.meteors,
+            detonate: &mut self.detonate,
+            event_fx: &self.event_fx,
+            fxlib: self.fxlib.as_deref(),
+            sfx: self.sfx.as_deref_mut(),
+            toggles: self.toggles.as_deref_mut(),
+            difficulty: self.difficulty.as_deref().copied().unwrap_or_default().0,
+            orbit,
+            sides,
+            mines: Some(&mut self.mines),
+        }
+    }
+}
+
+/// Starts the speech line a `Script::step` returned (a sound file name) as a one-shot voice at the dialogue volume.
+pub(in crate::rules) fn spawn_voice(commands: &mut Commands, assets: &AssetServer, file: &str) {
+    commands.spawn((
+        Scenario,
+        crate::briefing::Voice,
+        AudioPlayer::new(assets.load(crate::audio::sound(file))),
+        PlaybackSettings::DESPAWN.with_volume(bevy::audio::Volume::Linear(crate::menu::volume(crate::menu::Setting::Dialogue))),
+    ));
+}
+
 /// Applies `fxs` to the world.
 pub(in crate::rules) fn apply(
     fxs: Vec<Fx>,

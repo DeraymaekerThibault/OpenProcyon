@@ -188,11 +188,7 @@ pub(super) fn run(
     // `Extra` holds the read side of `Cheats` (the points gate in `update`), so changes go through the command queue.
     let mut god = extra.cheats.as_ref().is_some_and(|c| c.god);
     // The unit list as `update` builds it each frame.
-    let mut world = units(&ships, &lib);
-    world.extend(animals.iter().map(|(e, a, tf, _)| a.unit(e, tf)));
-    world.extend(extra.bases.iter_mut().map(|(e, b, tf, armed)| super::base_unit(&b, e, tf, armed, &lib)));
-    world.extend(rocks.iter().map(|(e, tf, a)| a.unit(e, tf)));
-    script.tag(&mut world);
+    let mut world = build_world(script, WorldKind::Console, &ships, &animals, &rocks, &extra.fx, &lib);
     if console.open {
         console.names = script.console_names(&world);
     }
@@ -257,7 +253,8 @@ pub(super) fn run(
         restart.0 |= outcome.restart;
         apply_view(&outcome.view, &mut console, &mut dev, settings.as_deref_mut());
         each_ship(&mut ships, outcome.repair, |s| crate::docking::repair(&lib, &s.ship, &mut s.health, true));
-        apply_fx(fx, script, paths, sides, &mut commands, &mut ships, &mut animals, &mut extra, &mut orbit, &lib);
+        let mut env = extra.fx.env(script, paths, &lib, Some(&mut orbit), sides);
+        apply::apply(fx, &mut env, &mut commands, &mut ships, &mut animals);
     }
 }
 
