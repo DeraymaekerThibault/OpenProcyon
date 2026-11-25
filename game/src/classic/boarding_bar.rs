@@ -13,7 +13,7 @@ const BAR_SIZE: Vec2 = Vec2::new(171.0, 40.0);
 const BAR_INNER: (Vec2, Vec2) = (Vec2::new(40.0, 13.0), Vec2::new(130.0, 29.0));
 
 pub fn plugin(app: &mut App) {
-    app.add_systems(Update, board_bars.after(crate::input).run_if(in_state(crate::menu::Screen::Battle)).run_if(crate::menu::overlay_closed));
+    app.add_systems(Update, board_bars.after(crate::input).in_set(crate::battle::BattleActive));
 }
 
 #[derive(Component)]

@@ -254,25 +254,14 @@ pub fn plugin(app: &mut App) {
     // dock (7.1); the dock's glide is part of the ship's movement (7.2); the routine's decisions and the AI's repair and tow decisions
     // run after collision (8); the repair heal is an upkeep armed by the dock decision.
     app.add_message::<DockMsg>()
-        .add_systems(FixedUpdate, handle_messages.in_set(crate::BattleSet::Commands).run_if(in_state(crate::menu::Screen::Battle)).run_if(crate::menu::overlay_closed))
-        .add_systems(FixedUpdate, docked_hold.in_set(crate::BattleSet::Forces).run_if(in_state(crate::menu::Screen::Battle)).run_if(crate::menu::overlay_closed))
-        .add_systems(
-            FixedUpdate,
-            dock_glide
-                .in_set(crate::BattleSet::Simulate)
-                .after(crate::collision::sail)
-                .before(crate::out_of_map)
-                .run_if(in_state(crate::menu::Screen::Battle))
-                .run_if(crate::menu::overlay_closed),
-        )
-        .add_systems(
-            FixedUpdate,
-            (ai_repair_dock, routine, tow_routine).chain().in_set(crate::BattleSet::Ai).run_if(in_state(crate::menu::Screen::Battle)).run_if(crate::menu::overlay_closed),
-        )
+        .add_systems(FixedUpdate, handle_messages.in_set(crate::BattleSet::Commands).in_set(crate::battle::BattleActive))
+        .add_systems(FixedUpdate, docked_hold.in_set(crate::BattleSet::Forces).in_set(crate::battle::BattleActive))
+        .add_systems(FixedUpdate, dock_glide.in_set(crate::BattleSet::Simulate).after(crate::collision::sail).before(crate::out_of_map).in_set(crate::battle::BattleActive))
+        .add_systems(FixedUpdate, (ai_repair_dock, routine, tow_routine).chain().in_set(crate::BattleSet::Ai).in_set(crate::battle::BattleActive))
         .add_systems(FixedUpdate, docks_lost.in_set(crate::BattleSet::Combat).run_if(in_state(crate::menu::Screen::Battle)))
-        .add_systems(FixedUpdate, docked_repair.in_set(crate::BattleSet::Combat).run_if(in_state(crate::menu::Screen::Battle)).run_if(crate::menu::overlay_closed))
+        .add_systems(FixedUpdate, docked_repair.in_set(crate::BattleSet::Combat).in_set(crate::battle::BattleActive))
         .add_systems(Update, play_cranes.run_if(in_state(crate::menu::Screen::Battle)))
-        .add_systems(Update, (cancel_input, markers).chain().before(crate::input).run_if(in_state(crate::menu::Screen::Battle)).run_if(crate::menu::overlay_closed));
+        .add_systems(Update, (cancel_input, markers).chain().before(crate::input).in_set(crate::battle::BattleActive));
 }
 
 /// Where a base's crane clips are: `CRANES` (one set, any dock) or `CRANESnn` (the set of dock point nn) run from their first frame

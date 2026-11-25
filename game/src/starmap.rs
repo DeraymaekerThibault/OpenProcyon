@@ -63,8 +63,7 @@ pub struct StarmapContents {
 pub struct StarmapSet;
 
 pub fn plugin(app: &mut App) {
-    app.init_resource::<StarmapContents>()
-        .add_systems(Update, (toggle, describe).chain().in_set(StarmapSet).run_if(in_state(crate::menu::Screen::Battle)).run_if(crate::menu::overlay_closed));
+    app.init_resource::<StarmapContents>().add_systems(Update, (toggle, describe).chain().in_set(StarmapSet).in_set(crate::battle::BattleActive));
 }
 
 /// Run after `panels::hud_input`: while the map is open every click belongs to it.
