@@ -306,12 +306,16 @@ pub(in crate::rules) fn base(spec: &str) -> &str {
     spec.split(',').next().unwrap_or(spec)
 }
 pub(in crate::rules) const PLAYER: &str = "Player0 Group";
-/// 'Group,Unit' selects a single unit. Bare names select a TWT group, or an owner if no such group exists.
-pub(in crate::rules) fn matches(u: &Unit, spec: &str) -> bool {
+/// The one selector rule. 'Group,Unit' selects a single unit by name (or the human's command ship). A bare name selects a TWT group the
+/// unit is in, or an owner if no such group exists: `owner_counts` says the owner name is usable as a selector for this unit.
+pub(in crate::rules) fn selects(spec: &str, name: &str, primary: bool, owner: &str, owner_counts: bool, in_group: impl FnOnce() -> bool) -> bool {
     match spec.split_once(',') {
-        Some((_, unit)) => u.name == unit || (unit == "HUMAN CONTROLLED COMMAND SHIP" && u.primary),
-        None => (!u.owner_is_named_group && u.owner == spec) || u.groups.iter().any(|g| g == spec),
+        Some((_, unit)) => name == unit || (unit == "HUMAN CONTROLLED COMMAND SHIP" && primary),
+        None => (owner_counts && owner == spec) || in_group(),
     }
+}
+pub(in crate::rules) fn matches(u: &Unit, spec: &str) -> bool {
+    selects(spec, &u.name, u.primary, &u.owner, !u.owner_is_named_group, || u.groups.iter().any(|g| g == spec))
 }
 pub(in crate::rules) fn members<'a>(w: &'a [Unit], spec: &str) -> Vec<&'a Unit> {
     w.iter().filter(|u| matches(u, spec)).collect()

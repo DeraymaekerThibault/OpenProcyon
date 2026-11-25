@@ -219,10 +219,9 @@ impl Script {
     }
     /// Whether a unit (TWT id, owner, name; `primary` for the human's command ship) answers to a rule spec, as `matches` does.
     pub fn answers(&self, id: i64, owner: &str, name: &str, primary: bool, spec: &str) -> bool {
-        match spec.split_once(',') {
-            Some((_, unit)) => name == unit || (unit == "HUMAN CONTROLLED COMMAND SHIP" && primary),
-            None => ((!self.named_group(owner) || owner == self.player) && owner == spec) || self.groups.get(&id).is_some_and(|g| g.iter().any(|g| g == spec)),
-        }
+        // `tag` lets the human's own name select its fleet even where a named group shadows it, as the owner clause here does.
+        let owner_counts = !self.named_group(owner) || owner == self.player;
+        selects(spec, name, primary, owner, owner_counts, || self.groups.get(&id).is_some_and(|g| g.iter().any(|g| g == spec)))
     }
     /// Talking-head sprite of the line being spoken: the TWT speech event's FaceTexture (media `face`), if exported.
     pub(in crate::rules) fn face(&self) -> Option<&str> {
