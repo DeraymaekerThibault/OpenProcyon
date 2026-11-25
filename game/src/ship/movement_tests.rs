@@ -175,16 +175,33 @@ fn all_layouts_custom_and_rotated_following_preserve_altitude_and_limits() {
     let leader = w.get::<Transform>(ids[0]).unwrap();
     let expected = leader.translation + leader.rotation * slot;
     assert!(w.get::<Ship>(ids[1]).unwrap().waypoints[0].distance(expected) < 0.001);
-    assert!((0.0..=1.0).contains(&w.get::<Ship>(ids[1]).unwrap().throttle.unwrap()));
+    assert!((0.0..=2.0).contains(&w.get::<Ship>(ids[1]).unwrap().throttle.unwrap()));
     w.get_mut::<Transform>(ids[1]).unwrap().translation.y = 25.0;
     w.get_mut::<Ship>(ids[1]).unwrap().cap = 0.2;
     w.get_mut::<Health>(ids[1]).unwrap().sections.iter_mut().for_each(|h| *h *= 0.25);
     fleet_follow(&mut w);
     assert_eq!(w.get::<Ship>(ids[1]).unwrap().waypoints[0].y, 25.0);
     assert_eq!(w.get::<Ship>(ids[1]).unwrap().cap, 0.2);
-    assert!((0.0..=1.0).contains(&w.get::<Ship>(ids[1]).unwrap().throttle.unwrap()));
+    assert!((0.0..=2.0).contains(&w.get::<Ship>(ids[1]).unwrap().throttle.unwrap()));
     set_formation(&mut w, "Player", Some(Formation::None), false);
     assert!(ids[1..4].iter().all(|e| !w.get::<FleetPilot>(*e).unwrap().hold));
+}
+
+#[test]
+#[ignore = "needs imported assets"]
+fn a_follower_closes_on_its_slot_at_its_own_emergency_speed() {
+    // Retail: the formation follower's top speed is its speed at full throttle, i.e. Emergency (a Cutter closed at ~9, twice its Ahead
+    // Full), so it keeps up with a leader sailing at Emergency.
+    let (mut w, ids) = fleet_world();
+    set_formation(&mut w, "Player", Some(Formation::Column), true);
+    let slot = w.get::<Transform>(ids[0]).unwrap().translation + w.get::<FleetPilot>(ids[1]).unwrap().slot;
+    w.get_mut::<Transform>(ids[1]).unwrap().translation = slot + Vec3::Z * 200.0; // well behind its slot, facing it
+    w.get_mut::<Ship>(ids[0]).unwrap().speed = 8.0;
+    w.get_mut::<FleetPilot>(ids[1]).unwrap().replan_in = 0.0;
+    w.get_mut::<Ship>(ids[1]).unwrap().heading = w.get::<Ship>(ids[0]).unwrap().heading;
+    fleet_follow(&mut w);
+    let s = w.get::<Ship>(ids[1]).unwrap();
+    assert_eq!((s.order, s.ordered()), (EngineOrder::Emergency, EngineOrder::Emergency.fraction()), "{:?} {:?}", s.order, s.throttle);
 }
 
 #[test]

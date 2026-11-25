@@ -150,11 +150,32 @@ one, carried along at the leader's velocity then (`SlotPlan`), which tracks a st
 observed. A least-squares fit of that model against the turn run did not separate it from "aim at the live slot" (both ~10 degrees off,
 best offsets at the edge of the search grid, ahead of the leader), so the aiming rule during turns is still open.
 
+**Follower speed (read from the original's formation routine; one point confirmed by the run above).** Each think, a held follower
+works out a wanted speed and passes it on as a share of **its own top speed at full throttle**, clamped to at most 1. Full throttle is
+the Emergency order (the order buttons send 0.25, 0.5 and 1 of full throttle for Slow, Full and Emergency), and the top speed carries
+the follower's own damage, crew and order factors. So a follower closes on its slot at its own Emergency speed (the Cutter above ran
+~9, twice its Ahead Full of 4.53: this is the confirming value) and can keep up with a leader at Emergency as long as its own Emergency
+speed is not lower. The wanted speed:
+- the leader is docking: 0;
+- *catching up* (the follower is behind its slot, more than 90 degrees off the leader's heading seen from the slot, and heads within 90
+  degrees of the leader; or it is more than 300 units from the slot) and *not in the slot* (farther than two of its own bounding radii):
+  its top speed; catching up and in the slot: the leader's speed;
+- not catching up, in the slot: 0.9 x the leader's speed;
+- not catching up, not in the slot: 0 (it stops) when its heading is within 5 degrees of the leader's; otherwise 0.1 x its top speed,
+  aimed at a point ahead of itself along the leader's heading.
+The follower aims at its slot in the leader's current pose plus 30 s of the leader's velocity. A share under 0.001 stops it (throttle and
+rudder 0). Remake: `ship::fleet_follow` divides by the follower's Emergency speed (order Emergency above its Ahead Full) and
+`follow_speed` keeps its measured shape (full speed to 4.5 units, then the leader's speed; 0.2 of top speed while turned more than 5
+degrees off). PROVISIONAL / open: the 0.9 and 0.1 speeds, the stop when ahead and aligned, the two-radii slot test and the 30 s look-ahead
+are not built; the run above stopped 4 units from its slot, which a two-radii test (about 34 units for that member size) does not explain,
+so the slot test's radius or the follower's own arrival stop needs reading first. Scripted mission followers ("Group to follow path")
+use path following, not this routine; their speed is not covered here.
+
 Not modelled: how the original aims during a turn (look-ahead on the leader's velocity is documented from the static side only).
 Remake: `follow_speed` gates on a 5 degree error with a 0.2 throttle, turn-in-place and the start delay come from the shared ship model (the delay is not modelled, PROVISIONAL). One run, one follower; whether
 the controller treats the leader's turns with a look-ahead is not yet separated from this data.
 
-**Unknown:** exact look-ahead/catch-up/heading thresholds, collision/path-planner interplay, member reassignment after casualty or primary change, whether every position-locked ship is excluded by each fleet command, and native size-field equivalence. These are calibration tasks, not a reason to implement None/Custom/Column as LineAbreast.
+**Unknown:** collision/path-planner interplay, member reassignment after casualty or primary change, whether every position-locked ship is excluded by each fleet command, and native size-field equivalence. These are calibration tasks, not a reason to implement None/Custom/Column as LineAbreast.
 
 ### Mission evidence that needs real consumers
 
