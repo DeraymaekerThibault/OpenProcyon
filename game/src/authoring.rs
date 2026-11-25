@@ -28,6 +28,8 @@
 //!   It is built from the merged document the loader hands back, so which of `ship.json` and the model wins is decided once.
 //! - [`ship_art`]: the command-bar icon and weapon-panel outline (PNG bytes) and each gun's bank the engine generates for a ship from a
 //!   model, with nothing written.
+//! - [`templates`] / [`expand_template`] / [`template_schema`]: the mission templates of `content/templates/` (dialogue, cutscene, failsafe,
+//!   reach a point, ambush on arrival, escort, sink a group) and their expansion into plain rules and tasks.
 //! - [`crew_kind`] / [`CREW_KINDS`] / [`CREW_NODE`]: crew node names, and the kind of a model's crew nodes in `data::derive::Facts`.
 //!
 //! Shared code: no UI and no view imports.
@@ -43,6 +45,7 @@ mod extensions;
 mod json;
 #[cfg(test)]
 mod keyed_tests;
+mod templates;
 /// Whether a model's mesh layer is a damage variant (`<A>Damage_<B>`, swapped in when the section `<A>_<B>` is destroyed) rather than
 /// part of the intact hull: true when the name contains `Damage_`. The one rule the game, `--check-mod` and the ship art use, so a tool
 /// listing a model's sections must skip these layers too.
@@ -52,6 +55,7 @@ pub use art::{GunBank, ShipArt, ship_art};
 pub use check_mod::{check_mod, check_mod_with, unknown_key_findings, unknown_keys};
 pub use extensions::{Extension, ExtensionKind, extensions};
 pub use json::to_json_string;
+pub use templates::{Expansion, PARAMETER_KINDS, Parameter, Template, expand_template, template_schema, templates};
 
 pub use crate::data::DataError;
 pub use crate::modding::{MERGED, MergeRule, ModEntry, ModReport, extends_parent, merge_rule};

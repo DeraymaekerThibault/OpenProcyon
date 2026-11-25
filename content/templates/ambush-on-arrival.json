@@ -1,0 +1,38 @@
+{
+  "id": "ambush-on-arrival",
+  "title": "Ambush on arrival",
+  "kind": "mission",
+  "description": "When a group enters an area the camera shows the ambushers, a task to sink them starts, they attack, and a counter rule counts the ships the player sinks. This is rule 2 and 3 and the second task of the `gate-ambush` example (docs/examples/gate-ambush.mission.json); with its names and a count of 1 it gives the same rules.",
+  "parameters": [
+    {"name": "name", "kind": "text", "label": "Rule name", "default": "Arrive at the gate"},
+    {"name": "group", "kind": "group", "label": "Group that arrives (the player)"},
+    {"name": "volume", "kind": "volume", "label": "Area that springs the ambush"},
+    {"name": "ambushers", "kind": "group", "label": "Ambushing group"},
+    {"name": "task", "kind": "text", "label": "Task name", "default": "Clear the gate"},
+    {"name": "task_text", "kind": "text", "label": "Task text", "default": "Sink both raiders."},
+    {"name": "counter", "kind": "text", "label": "Counter name", "default": "raiders sunk"},
+    {"name": "more_than", "kind": "number", "label": "Done when the count is more than", "default": "1"}
+  ],
+  "mission": {"victory": "objectives"},
+  "tasks": [
+    {"Name": "{task}", "text": "{task_text}", "Active": false, "required": true,
+     "complete_when": [{"Type": "OP Counter Condition", "Counter Name": "{counter}", "Equivalence": "Greater Than", "Value": "{more_than}"}],
+     "fail_when": [{"Type": "Group Destroyed", "Group Name": "{group}"}]}
+  ],
+  "rules": [
+    {"name": "{name}", "Run Once": true, "Is Active": true,
+     "conditions": [{"Type": "Enter Volume", "Group Name": "{group}", "Volume Name": "{volume}"}],
+     "actions": [
+       {"Type": "NIS Start"},
+       {"Type": "NIS Focus camera on Group/Unit", "GroupUnit Name": "{ambushers}"},
+       {"Type": "OP Wait", "Seconds": 4},
+       {"Type": "NIS End"},
+       {"Type": "Set Objective Task Active State", "Objective Task": "{task}", "Active State": "TRUE"},
+       {"Type": "GroupA to attack GroupB", "Attack Group": "{ambushers}", "Target Group": "{group}"},
+       {"Type": "OP Set Rule Active", "Rule Name": "Count {counter}", "Boolean": "TRUE"}
+     ]},
+    {"name": "Count {counter}", "Run Once": false, "Is Active": false,
+     "conditions": [{"Type": "Player Killed A Object", "Player Name": "{group}", "World Object Type": "Ship"}],
+     "actions": [{"Type": "OP Add To Counter", "Counter Name": "{counter}", "Value": 1}]}
+  ]
+}

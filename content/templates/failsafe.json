@@ -1,0 +1,31 @@
+{
+  "id": "failsafe",
+  "title": "Failsafe",
+  "kind": "block",
+  "description": "Keeps a mission from stalling: a timer starts with the mission; when it runs out or a group is destroyed, and that group is not in the area yet, one rule is switched off and another switched on (`OP Set Rule Active`). Both rules must exist in the mission.",
+  "parameters": [
+    {"name": "name", "kind": "text", "label": "Rule name", "default": "Failsafe"},
+    {"name": "timer", "kind": "text", "label": "Timer name", "default": "Failsafe Timer"},
+    {"name": "seconds", "kind": "number", "label": "Give up after (seconds)", "default": "300"},
+    {"name": "group", "kind": "group", "label": "Group that must arrive"},
+    {"name": "volume", "kind": "volume", "label": "Area it must reach"},
+    {"name": "switch_off", "kind": "rule", "label": "Rule to switch off"},
+    {"name": "switch_on", "kind": "rule", "label": "Rule to switch on"}
+  ],
+  "rules": [
+    {"name": "{name} Arm", "Run Once": true, "Is Active": true, "conditions": [{"Type": "World Initialize"}],
+     "actions": [{"Type": "Start Timer", "Timer Name": "{timer}"}]},
+    {"name": "{name}", "Run Once": true, "Is Active": true,
+     "conditions": [
+       {"Type": "OP Any Of", "Conditions": [
+         {"Type": "Timer Condition", "Timer Name": "{timer}", "Equivalence": "Greater Than", "Time in seconds": "{seconds}"},
+         {"Type": "Group Destroyed", "Group Name": "{group}"}
+       ]},
+       {"Type": "OP Not", "Condition": {"Type": "Is Group In Volume", "Group Name": "{group}", "Volume Name": "{volume}", "Entire Group": "FALSE"}}
+     ],
+     "actions": [
+       {"Type": "OP Set Rule Active", "Rule Name": "{switch_off}", "Boolean": "FALSE"},
+       {"Type": "OP Set Rule Active", "Rule Name": "{switch_on}", "Boolean": "TRUE"}
+     ]}
+  ]
+}
