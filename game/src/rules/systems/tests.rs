@@ -765,6 +765,7 @@ fn the_console_dispatch_is_the_same_in_a_campaign_mission() {
     assert!(!log.contains("needs"), "a mission serves every need: {log}");
     app.update();
     assert!(app.world().get::<Transform>(hero).unwrap().translation.distance(Vec3::new(30.0, 0.0, -10.0)) < 1.0);
+}
 
 /// 'Player Killed A Object' of kind Ship holds when a ship of another player sinks under the player's guns (`combat::deaths` sends
 /// `Destroyed`); a hull of the player's own does not count. Asset-free.

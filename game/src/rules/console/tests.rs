@@ -585,15 +585,49 @@ fn what_each_command_needs_follows_what_it_touches() {
         assert_eq!(needs(line), Needs::Nothing, "{line}: the view and the help run on any screen");
     }
     for line in [
-        "god", "repair", "kill", "reveal", "tp 1 2", "tp 1 2 3", "ships", "inspect", "where", "mark spot", "damage 0.5", "restart", "cam player",
+        "god",
+        "repair",
+        "kill",
+        "reveal",
+        "tp 1 2",
+        "tp 1 2 3",
+        "ships",
+        "inspect",
+        "where",
+        "mark spot",
+        "damage 0.5",
+        "restart",
+        "cam player",
         r#"act {"Type": "Destroy Group/Unit", "Group Name": "Hero"}"#,
         r#"cond {"Type": "Group has X members", "Group Name": "Hero", "Equivalence": "Equal To", "number": 1}"#,
     ] {
         assert_eq!(needs(line), Needs::World, "{line}: only the battle's ships");
     }
     for line in [
-        "tp Harbour", "fire gate", "why gate", "flags", "timers", "tasks", "counters", "rules", "skip", "list groups", "find x", "show volumes", "hide all", "set key", "timer t start",
-        "task Escape complete", "counter k 3", "attack A B", "stance A aggressive", "ally A B", "hostile A B", "tow A B", "untow A B", "say Opening",
+        "tp Harbour",
+        "fire gate",
+        "why gate",
+        "flags",
+        "timers",
+        "tasks",
+        "counters",
+        "rules",
+        "skip",
+        "list groups",
+        "find x",
+        "show volumes",
+        "hide all",
+        "set key",
+        "timer t start",
+        "task Escape complete",
+        "counter k 3",
+        "attack A B",
+        "stance A aggressive",
+        "ally A B",
+        "hostile A B",
+        "tow A B",
+        "untow A B",
+        "say Opening",
         r#"act {"Type": "Set Flag Action", "Flag Name": "x", "Boolean Value": true}"#,
     ] {
         assert_eq!(needs(line), Needs::Rules, "{line}: reads or writes the rules' state");
@@ -676,11 +710,7 @@ fn a_skirmish_script_runs_the_rule_commands_but_not_the_campaigns() {
     for line in ["win", "lose", "nis end", "primary Hero,Escort", "cam follow Hero", "music Battle"] {
         let (fx, o) = run_in(skirmish, &mut sc, line, &mut w, None);
         let word = line.split(' ').next().unwrap();
-        assert_eq!(
-            o.lines,
-            vec![format!("{word}: needs a campaign mission (this battle is a skirmish: its own rules do not hand over levels, cutscenes or the ship)")],
-            "{line}"
-        );
+        assert_eq!(o.lines, vec![format!("{word}: needs a campaign mission (this battle is a skirmish: its own rules do not hand over levels, cutscenes or the ship)")], "{line}");
         assert!(o.rejected && fx.is_empty(), "{line} must not run");
     }
     // The same lines run in a campaign mission.

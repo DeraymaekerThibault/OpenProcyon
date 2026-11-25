@@ -354,14 +354,8 @@ impl Default for Caps {
 }
 
 /// The action Types that only change the ships and the world; every other Type records into the rules' state or steers the rules' AI.
-const WORLD_ACTS: &[&str] = &[
-    "Set Group/Unit Vulnerability",
-    "Damage Group/Unit by X percent",
-    "Destroy Group/Unit",
-    "Set Group/Unit Visibility",
-    "Teleport Group/Unit",
-    "Set Group Throttle Percent",
-];
+const WORLD_ACTS: &[&str] =
+    &["Set Group/Unit Vulnerability", "Damage Group/Unit by X percent", "Destroy Group/Unit", "Set Group/Unit Visibility", "Teleport Group/Unit", "Set Group Throttle Percent"];
 
 /// What one raw rule action needs: the schema marks the campaign-only Types; `Play Music Track` is read by the campaign's music system.
 fn act_needs(a: &Value) -> Needs {
@@ -475,7 +469,14 @@ pub static TABLE: &[Entry] = &[
     entry("repair", Group::Cheats, "repair [group]", "full repair of the player's fleet, or of a group (no rule action exists for it)", "repair", true),
     entry("kill", Group::Cheats, "kill", "destroy the current target (Destroy Group/Unit)", "kill", true),
     entry("reveal", Group::Cheats, "reveal", "show every hidden unit (Set Group/Unit Visibility)", "reveal", true),
-    entry("tp", Group::Cheats, "tp <x> <y> [z] | tp <point set>", "move the player's ship to game coordinates (any battle) or to a point set of the map's script", "tp 120 -40", true),
+    entry(
+        "tp",
+        Group::Cheats,
+        "tp <x> <y> [z] | tp <point set>",
+        "move the player's ship to game coordinates (any battle) or to a point set of the map's script",
+        "tp 120 -40",
+        true,
+    ),
     entry("fire", Group::State, "fire <rule>", "run a rule's actions now, as --fire-rule does; a part of the name is enough", "fire \"Open the gate\"", true),
     entry("set", Group::State, "set <flag> [on|off]", "Set Flag Action", "set key off", true),
     entry("timer", Group::State, "timer <name> start|stop", "Start Timer / Stop Timer", "timer t start", true),
