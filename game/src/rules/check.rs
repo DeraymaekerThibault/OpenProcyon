@@ -1006,8 +1006,12 @@ pub fn outside_world(mission: &Value, map: &Value) -> Vec<Finding> {
 /// one. Looks at `map.json` `objects`, `ships` and `mines` and the mission's `ships`, `environment.animals` and `environment.dragons`
 /// (an entry with no integer `id` is decoration and never counts). One warning per entry that repeats an earlier id, at that
 /// entry's `id`, its message naming the earlier entry's file and JSON pointer (`map.json /objects/2`; `mission /ships/0`). `file` is
-/// "map.json" for a map entry and empty for a mission one, as for [`outside_world`]. PROVISIONAL: a warning rather than an error
-/// because no retail file could be read to see whether the originals ever repeat an id.
+/// "map.json" for a map entry and empty for a mission one, as for [`outside_world`]. An entry of the mission (or skirmish `script.json`)
+/// that has the same id and the same `type` as one of `map.json` is the same entity described twice, not a clash: the script's
+/// `ships` name the map's ships by id (`SkirmishScript::ship_names`), and a mission ship of a hull with no ship class (a wreck) only
+/// adds group and rule membership to the map's object. A repeat within one file, or with a different type, still warns. PROVISIONAL:
+/// a warning rather than an error because no retail file could be read to see whether the originals ever repeat an id; the
+/// same-entity rule is read from the spawn code, not from the original.
 pub fn duplicate_ids(mission: &Value, map: &Value) -> Vec<Finding> {
     let lists: [(&str, &Value, &str, &[&str]); 6] = [
         ("map.json", map, "objects", &["objects"]),
@@ -1017,7 +1021,8 @@ pub fn duplicate_ids(mission: &Value, map: &Value) -> Vec<Finding> {
         ("", mission, "mission", &["environment", "animals"]),
         ("", mission, "mission", &["environment", "dragons"]),
     ];
-    let mut seen: std::collections::HashMap<i64, String> = Default::default();
+    // Where each id was seen: its description, its file and its `type`.
+    let mut seen: std::collections::HashMap<i64, Vec<(String, &str, Option<String>)>> = Default::default();
     let mut out = vec![];
     for (file, doc, label, keys) in lists {
         let list = keys.iter().fold(doc, |v, k| &v[*k]);
@@ -1025,14 +1030,15 @@ pub fn duplicate_ids(mission: &Value, map: &Value) -> Vec<Finding> {
             let Some(id) = entry["id"].as_i64() else { continue };
             let path = keys.iter().fold(JsonPath::default(), |p, k| p.key(*k)).index(i);
             let here = format!("{} {}", if file.is_empty() { label } else { file }, path.pointer());
-            match seen.get(&id) {
-                Some(first) => {
-                    out.push(Finding::in_file(Level::Warning, file, path.key("id"), format!("id {id} is also used by {first}; groups and rules address a placed thing by its id")))
-                }
-                None => {
-                    seen.insert(id, here);
-                }
+            let kind = entry["type"].as_str().map(String::from);
+            let earlier = seen.entry(id).or_default();
+            // The same entity described in both files: a skirmish script.json ship repeats the map.json ship it names, a mission
+            // ship repeats the map.json object (a wreck) that has no ship class of its own, each with the same id and type.
+            let clash = earlier.iter().find(|(_, f, k)| *f == file || kind.is_none() || *k != kind);
+            if let Some((first, ..)) = clash {
+                out.push(Finding::in_file(Level::Warning, file, path.key("id"), format!("id {id} is also used by {first}; groups and rules address a placed thing by its id")));
             }
+            earlier.push((here, file, kind));
         }
     }
     out
@@ -1562,6 +1568,22 @@ mod tests {
         assert!(found[3].message.contains("id 5 is also used by mission /ships/0"), "{}", found[3].message);
         assert!(duplicate_ids(&json!({}), &json!({"objects": [{"id": 1}, {"id": 2}]})).is_empty());
         assert!(duplicate_ids(&Value::Null, &Value::Null).is_empty());
+    }
+
+    #[test]
+    fn the_same_entity_in_map_and_script_or_mission_is_not_a_duplicate_but_a_real_clash_is() {
+        // A skirmish script.json ship repeats a map.json ship; a mission ship repeats a map.json wreck object.
+        let map = json!({"ships": [{"id": 3, "type": "Ship_A"}], "objects": [{"id": 8, "type": "Wreck_B"}]});
+        let script = json!({"ships": [{"id": 3, "type": "Ship_A", "name": "N"}, {"id": 8, "type": "Wreck_B"}]});
+        assert!(duplicate_ids(&script, &map).is_empty(), "{:?}", duplicate_ids(&script, &map));
+        // Same id, different type.
+        let other = json!({"ships": [{"id": 3, "type": "Ship_Z"}]});
+        assert_eq!(duplicate_ids(&other, &map).len(), 1);
+        // Same id and type, but twice in one file.
+        let twice = json!({"ships": [{"id": 3, "type": "Ship_A"}], "objects": [{"id": 3, "type": "Ship_A"}]});
+        assert_eq!(duplicate_ids(&Value::Null, &twice).len(), 1);
+        let mission_twice = json!({"ships": [{"id": 3, "type": "Ship_A"}, {"id": 3, "type": "Ship_A"}]});
+        assert_eq!(duplicate_ids(&mission_twice, &map).len(), 1);
     }
 
     #[test]
