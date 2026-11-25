@@ -344,34 +344,15 @@ impl Saved {
 /// argument that takes a path (`--mod <dir>` among them: mods are compared by folder name, and a file meant for bug reports must not
 /// carry the player's folders).
 pub fn scenario_args(args: &[String]) -> Vec<String> {
-    const WITH_VALUE: [&str; 19] = [
-        "--script",
-        "--replay",
-        "--speed",
-        "--shot",
-        "--shot-frame",
-        "--late-frame",
-        "--dist",
-        "--yaw",
-        "--pitch",
-        "--cam",
-        "--look",
-        "--mod",
-        "--rule-report",
-        "--game",
-        "--out",
-        "--assets",
-        "--crashed",
-        "--setup-shot",
-        "--check-mod",
-    ];
-    const FLAGS: [&str; 4] = ["--fixed-step", "--autolaunch", "--console", "--starmap"];
     let mut out = vec![];
     let mut it = args.iter().skip(1);
     while let Some(a) = it.next() {
-        if WITH_VALUE.contains(&a.as_str()) {
-            it.next();
-        } else if !FLAGS.contains(&a.as_str()) {
+        // The flags of the run's presentation, timing, scripts and paths (`cli::FLAGS`, not `recorded`) are left out with their value.
+        if let Some(flag) = crate::cli::flag_named(a).filter(|f| !f.recorded) {
+            if flag.value {
+                it.next();
+            }
+        } else {
             out.push(a.clone());
         }
     }
@@ -595,7 +576,7 @@ pub fn plugin(app: &mut App) {
         .add_systems(FixedUpdate, apply_tick.in_set(crate::BattleSet::Tick).after(crate::tick_start))
         .add_systems(PostUpdate, apply_paused)
         .add_systems(Last, record_frame);
-    let args: Vec<String> = std::env::args().collect();
+    let args = crate::cli::args();
     let seed = crate::combat::SimRng::configured_seed();
     if let Some(path) = args.iter().position(|a| a == "--replay").and_then(|i| args.get(i + 1)) {
         let read = std::fs::File::open(path).map_err(|e| e.to_string()).and_then(|f| Replay::read(std::io::BufReader::new(f)));
@@ -603,7 +584,7 @@ pub fn plugin(app: &mut App) {
             eprintln!("error: --replay {path}: {e}");
             crate::exit::quit(2)
         });
-        if let Some(why) = mismatch(&header, &args, seed, &mod_names()) {
+        if let Some(why) = mismatch(&header, args, seed, &mod_names()) {
             eprintln!("error: --replay {path}: {why}");
             crate::exit::quit(2);
         }
@@ -619,7 +600,7 @@ pub fn plugin(app: &mut App) {
     if let Ok(path) = std::env::var("PROCYON_COMMANDS") {
         let file = std::fs::File::create(&path).unwrap_or_else(|e| panic!("PROCYON_COMMANDS: cannot write {path}: {e}"));
         let mut rec = Recorder { out: std::io::BufWriter::new(file), frames: vec![], warned: false };
-        let scenario = scenario_args(&args);
+        let scenario = scenario_args(args);
         let from_menu = !sets_up_battle(&scenario);
         if from_menu {
             warn!("PROCYON_COMMANDS: the battle will be set up in the menus, which a recording does not hold yet: --replay will refuse it");

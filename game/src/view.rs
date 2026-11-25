@@ -581,8 +581,7 @@ pub fn camera(
     // `--look x,y[,z]` (game axes) aims screenshots at a world point instead of the player's ship.
     static LOOK: std::sync::OnceLock<Option<Vec3>> = std::sync::OnceLock::new();
     let look = LOOK.get_or_init(|| {
-        let a: Vec<String> = std::env::args().collect();
-        let v: Vec<f32> = a.windows(2).find(|w| w[0] == "--look")?.get(1)?.split(',').filter_map(|x| x.parse().ok()).collect();
+        let v: Vec<f32> = crate::cli::value("--look")?.split(',').filter_map(|x| x.parse().ok()).collect();
         Some(Vec3::new(*v.first()?, *v.get(2).unwrap_or(&0.0), -*v.get(1)?))
     });
     let tracked = orbit.focus.filter(|e| !contacts.contains(*e) || sensors.player_sees(*e, mission.as_deref()));

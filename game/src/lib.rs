@@ -188,7 +188,7 @@ pub fn assets_dir() -> &'static std::path::Path {
 /// --lobby <spec>: play a skirmish setup through the lobby model instead of the --ship/--allies/--enemies shortcut. A named function,
 /// not a closure: Bevy names every non-capturing closure plugin alike, so a second one panics at startup ("already added").
 fn lobby_scenario(app: &mut App) {
-    if let Some(spec) = std::env::args().skip_while(|a| a != "--lobby").nth(1) {
+    if let Some(spec) = cli::value("--lobby") {
         match menu::LobbyScenario::parse(&spec) {
             Ok(scenario) => {
                 app.insert_resource(scenario);
@@ -203,19 +203,19 @@ fn lobby_scenario(app: &mut App) {
 
 /// The command line starts a battle, a menu screen or a screenshot directly (no player is there to use the import screen).
 fn is_scripted(args: &[String]) -> bool {
-    args.iter().any(|a| matches!(a.as_str(), "--shot" | "--script" | "--menu" | "--map" | "--mission"))
+    args.iter().any(|a| cli::flag_named(a).is_some_and(|f| f.scripted))
 }
 
 /// Runs the game with one presentation (a view plugin such as the binary's `classic::plugin`); without imported assets it opens
 /// the first-run import screen instead (`setup.rs`, drawn by `setup_view`), which starts the game again once the import is done.
 pub fn run(view: fn(&mut App), setup_view: fn(&mut App)) {
-    let args: Vec<String> = std::env::args().collect();
+    let args = cli::args();
     // Mission authoring (docs/modding.md): the rule schema needs no assets.
-    if let Some(code) = rules::cli::dump_schema(&args) {
+    if let Some(code) = rules::cli::dump_schema(args) {
         exit::quit(code);
     }
     // `--version` and `--dump-schemas <dir>` need neither a window nor assets.
-    if let Some(code) = cli::quick(&args) {
+    if let Some(code) = cli::quick(args) {
         exit::quit(code);
     }
     let script = args.iter().position(|a| a == "--script").map(|i| {
@@ -224,7 +224,7 @@ pub fn run(view: fn(&mut App), setup_view: fn(&mut App)) {
             exit::quit(2);
         })
     });
-    let mods = modding::mod_args(&args).unwrap_or_else(|error| {
+    let mods = modding::mod_args(args).unwrap_or_else(|error| {
         eprintln!("error: {error}");
         exit::quit(2);
     });
@@ -237,7 +237,7 @@ pub fn run(view: fn(&mut App), setup_view: fn(&mut App)) {
         false if base.join("ships").is_dir() => setup::Imported::Ready,
         false => setup::Imported::Missing,
     };
-    if status != setup::Imported::Ready && is_scripted(&args) {
+    if status != setup::Imported::Ready && is_scripted(args) {
         // A scripted run (tools/smokes.sh, shot.sh) has nobody to answer the import screen: fail at once with the hint.
         eprintln!("No imported assets in {} ({status:?}). Import your copy of the game first: make assets ARGS=\"--game <install dir>\" (or set PROCYON_ASSETS).", base.display());
         exit::quit(1);
@@ -251,7 +251,7 @@ pub fn run(view: fn(&mut App), setup_view: fn(&mut App)) {
     }
     // `--only-mod` never even lists the player's installed mods; `mods.json` is read by the normal path only and written by neither.
     let installed = if args.iter().skip(1).any(|a| a == modding::ONLY_MOD) { vec![] } else { modding::installed(bundled_mods_dir().as_deref()) };
-    let (all_mods, dirs) = modding::pick_mods(&args, installed, mods.clone()).unwrap_or_else(|error| {
+    let (all_mods, dirs) = modding::pick_mods(args, installed, mods.clone()).unwrap_or_else(|error| {
         eprintln!("error: {error}");
         exit::quit(2)
     });
@@ -261,7 +261,7 @@ pub fn run(view: fn(&mut App), setup_view: fn(&mut App)) {
     let (root, report) = modding::overlay_report(&base, &layers, own_overlay());
     report.without(&content_dir()).log();
     let _ = ASSETS.set(root);
-    if let Some(code) = rules::cli::apply(&args) {
+    if let Some(code) = rules::cli::apply(args) {
         exit::quit(code);
     }
     // Bad ship or weapon data (a mod's ship.json) ends the launch here with the message, not with a panic while the app is built.
@@ -269,9 +269,9 @@ pub fn run(view: fn(&mut App), setup_view: fn(&mut App)) {
         eprintln!("error: {error}");
         exit::quit(1);
     }
-    let arg = |k: &str| args.iter().position(|a| a == k).and_then(|i| args.get(i + 1)).cloned();
+    let arg = |k: &str| cli::value_of(args, k);
     let shot = arg("--shot");
-    FIXED_STEP.store(wants_fixed_step(&args, std::env::var("PROCYON_FIXED_STEP").ok().as_deref()), std::sync::atomic::Ordering::Relaxed);
+    FIXED_STEP.store(wants_fixed_step(args, std::env::var("PROCYON_FIXED_STEP").ok().as_deref()), std::sync::atomic::Ordering::Relaxed);
     // Debug aids for mission authors: fire named rules at the start (repeatable) and place the primary ship (x,y in game units).
     let at: Option<Vec<f32>> = arg("--start-at").map(|v| v.split(',').filter_map(|x| x.parse().ok()).collect());
     campaign::set_start(args.windows(2).filter(|w| w[0] == "--fire-rule").map(|w| w[1].clone()).collect(), at.and_then(|c| (c.len() == 2).then(|| (c[0], c[1]))));

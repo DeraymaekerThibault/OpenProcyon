@@ -93,7 +93,7 @@ fn toggle(
     }
     *over = hovered;
     // `--starmap` opens the map on the first frame (screenshots).
-    let first = auto.is_none_or(|a| !a) && std::env::args().any(|a| a == "--starmap");
+    let first = auto.is_none_or(|a| !a) && crate::cli::has("--starmap");
     *auto = Some(true);
     let click = mouse.just_pressed(MouseButton::Left);
     if let Ok(root) = open.single() {

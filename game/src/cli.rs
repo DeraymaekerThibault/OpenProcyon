@@ -4,6 +4,95 @@
 use std::io::Write;
 use std::path::Path;
 
+/// What the game knows about one command-line flag besides its help text (`HELP`, which a test keeps in step with this table).
+#[derive(Debug, Clone, Copy)]
+pub struct Flag {
+    pub name: &'static str,
+    /// The next argument is the flag's value.
+    pub value: bool,
+    /// The flag starts a battle, a menu screen or a screenshot on its own, so no player is there to answer the first-run import screen.
+    pub scripted: bool,
+    /// Kept in a command recording's scenario arguments (`commands::scenario_args`); the others are the run's presentation, timing,
+    /// scripts, paths and tools, which a recording leaves out.
+    pub recorded: bool,
+}
+const fn flag(name: &'static str, value: bool, scripted: bool, recorded: bool) -> Flag {
+    Flag { name, value, scripted, recorded }
+}
+/// The flags the game knows by kind. Flags that only need their text in `HELP` and are read where they are used are not listed.
+pub const FLAGS: [Flag; 27] = [
+    flag("--script", true, true, false),
+    flag("--replay", true, false, false),
+    flag("--speed", true, false, false),
+    flag("--shot", true, true, false),
+    flag("--shot-frame", true, false, false),
+    flag("--late-frame", true, false, false),
+    flag("--dist", true, false, false),
+    flag("--yaw", true, false, false),
+    flag("--pitch", true, false, false),
+    flag("--cam", true, false, false),
+    flag("--look", true, false, false),
+    flag("--mod", true, false, false),
+    flag("--rule-report", true, false, false),
+    flag("--game", true, false, false),
+    flag("--out", true, false, false),
+    flag("--assets", true, false, false),
+    flag("--crashed", true, false, false),
+    flag("--setup-shot", true, false, false),
+    flag("--check-mod", true, false, false),
+    flag("--fixed-step", false, false, false),
+    flag("--autolaunch", false, false, false),
+    flag("--console", false, false, false),
+    flag("--starmap", false, false, false),
+    flag("--menu", true, true, true),
+    flag("--map", true, true, true),
+    flag("--mission", true, true, true),
+    flag("--seed", true, false, true),
+];
+
+/// The table entry of an argument, if it is one of the listed flags.
+pub fn flag_named(arg: &str) -> Option<&'static Flag> {
+    FLAGS.iter().find(|f| f.name == arg)
+}
+
+/// The environment variables the game reads, with what they do (a test checks each is still read somewhere in the sources).
+/// Reads stay where they are used; this is the one list.
+pub const ENV_VARS: [(&str, &str); 15] = [
+    ("PROCYON_ASSETS", "folder of the imported assets (default: the checkout's assets/, else the per-user folder)"),
+    ("PROCYON_OVERLAY", "where this launch builds its overlay of assets, content and mods"),
+    ("PROCYON_FIXED_STEP", "1 or 0: one 33 ms tick per frame (also --fixed-step); 0 switches it off even for --shot"),
+    ("PROCYON_AUTOPLAY", "<game seconds>: an unattended mission run (tools/autoplay.py); also lets the speed cap grow with the speed"),
+    ("PROCYON_PROFILE", "frame-time logging, and vsync off"),
+    ("PROCYON_SEED", "the battle's random seed when --seed is not given"),
+    ("PROCYON_COMMANDS", "<file>: record the battle's commands there (replay with --replay)"),
+    ("PROCYON_CONSOLE", "open the developer console in a release build (also --console)"),
+    ("PROCYON_RULE_TRACE", "1: log why rules have not fired (also --rule-trace)"),
+    ("PROCYON_TRACE", "<file.csv>: log every ship and shell once per simulation step"),
+    ("PROCYON_REPORT", "<game seconds>: watch a skirmish and log one summary line when a side is gone or the time is up"),
+    ("PROCYON_END_SHOT", "<png>: a screenshot 3 s after the mission ends, then quit"),
+    ("PROCYON_NIS_SHOT", "<png>: a screenshot 4 s into a cutscene, then quit"),
+    ("PROCYON_AUTOINVULN", "autopilot: the player's fleet cannot be sunk or boarded"),
+    ("PROCYON_AUTOKILL", "autopilot: sink the pirate once the player is close"),
+];
+
+/// The process's arguments, read once. The readers of single flags below use it instead of scanning `std::env::args()` each.
+pub fn args() -> &'static [String] {
+    static ARGS: std::sync::OnceLock<Vec<String>> = std::sync::OnceLock::new();
+    ARGS.get_or_init(|| std::env::args().collect())
+}
+/// The argument after the first `flag`, if any (the lookup `--seed N`, `--look x,y`, `--lobby spec` use).
+pub fn value_of(args: &[String], flag: &str) -> Option<String> {
+    args.iter().position(|a| a == flag).and_then(|i| args.get(i + 1)).cloned()
+}
+/// `value_of` over the process's arguments.
+pub fn value(flag: &str) -> Option<String> {
+    value_of(args(), flag)
+}
+/// Whether the process was given `flag`.
+pub fn has(flag: &str) -> bool {
+    args().iter().any(|a| a == flag)
+}
+
 /// What `--help` / `-h` print: every flag the game reads, grouped by use (`the_help_names_every_flag_the_game_reads` fails when a flag
 /// in the source is missing here; the importer's own helper flags are `INTERNAL`). The developer flags are explained in docs/development.md.
 const HELP: &str = "\
@@ -102,7 +191,7 @@ fn check_mod(dir: Option<&String>, json: bool) -> i32 {
     // Warnings the base game's own files have too are not the mod's: they do not count and are listed only with --verbose.
     let inherited = findings.iter().filter(|f| f.inherited).count();
     let warnings = findings.len() - errors - inherited;
-    let verbose = std::env::args().any(|a| a == "--verbose");
+    let verbose = has("--verbose");
     // A closed pipe (`| head`) is not an error.
     let out = &mut std::io::stdout();
     if json {
@@ -209,6 +298,44 @@ mod tests {
             }
         }
         assert!(missing.is_empty(), "flags read by the game but not in --help: {missing:?}");
+    }
+
+    #[test]
+    fn the_flag_table_agrees_with_the_help_and_the_scripted_flags() {
+        for f in FLAGS {
+            assert!(HELP.contains(f.name) || INTERNAL.contains(&f.name), "{} is in the table but neither in --help nor internal", f.name);
+        }
+        let scripted: Vec<&str> = FLAGS.iter().filter(|f| f.scripted).map(|f| f.name).collect();
+        assert_eq!(scripted, ["--script", "--shot", "--menu", "--map", "--mission"]);
+        assert_eq!(flag_named("--seed").map(|f| (f.value, f.recorded)), Some((true, true)));
+        assert!(flag_named("nonsense").is_none());
+    }
+
+    #[test]
+    fn every_listed_environment_variable_is_read_somewhere() {
+        fn sources(dir: &Path, out: &mut String) {
+            for entry in std::fs::read_dir(dir).unwrap().flatten() {
+                let path = entry.path();
+                if path.is_dir() {
+                    sources(&path, out);
+                } else if path.extension().is_some_and(|e| e == "rs") && path.file_name().is_some_and(|n| n != "cli.rs") {
+                    out.push_str(&std::fs::read_to_string(&path).unwrap());
+                }
+            }
+        }
+        let mut all = String::new();
+        sources(&Path::new(env!("CARGO_MANIFEST_DIR")).join("src"), &mut all);
+        for (name, _) in ENV_VARS {
+            assert!(all.contains(&format!("\"{name}\"")), "{name} is listed but no longer read");
+        }
+    }
+
+    #[test]
+    fn value_of_reads_the_argument_after_the_first_flag() {
+        let a = args(&["game", "--seed", "7", "--seed", "9"]);
+        assert_eq!(value_of(&a, "--seed").as_deref(), Some("7"));
+        assert_eq!(value_of(&a, "--map"), None);
+        assert_eq!(value_of(&args(&["game", "--seed"]), "--seed"), None, "a flag last has no value");
     }
 
     #[test]

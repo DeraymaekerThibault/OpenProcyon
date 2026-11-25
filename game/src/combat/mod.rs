@@ -209,9 +209,7 @@ impl SimRng {
     }
     /// The seed of the next battle: `--seed N`, else `PROCYON_SEED`, else `DEFAULT_SEED`.
     pub fn configured_seed() -> u64 {
-        let args: Vec<String> = std::env::args().collect();
-        let arg = args.iter().position(|a| a == "--seed").and_then(|i| args.get(i + 1)).cloned();
-        arg.or_else(|| std::env::var("PROCYON_SEED").ok()).and_then(|s| s.trim().parse().ok()).unwrap_or(Self::DEFAULT_SEED)
+        crate::cli::value("--seed").or_else(|| std::env::var("PROCYON_SEED").ok()).and_then(|s| s.trim().parse().ok()).unwrap_or(Self::DEFAULT_SEED)
     }
 }
 

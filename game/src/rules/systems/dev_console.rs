@@ -11,7 +11,7 @@ use crate::rules::skirmish::SkirmishScript;
 /// Whether the console is on without the Display option "Developer Console": debug builds, `--console` or `PROCYON_CONSOLE` in the
 /// environment. A release build otherwise leaves it to the option (off by default), so a stray `~` never hands a player the cheats.
 pub fn enabled() -> bool {
-    cfg!(debug_assertions) || std::env::args().any(|a| a == "--console") || std::env::var_os("PROCYON_CONSOLE").is_some()
+    cfg!(debug_assertions) || crate::cli::has("--console") || std::env::var_os("PROCYON_CONSOLE").is_some()
 }
 
 /// The rules script the console works on in a battle that runs none (a skirmish map without a `script.json`, a lobby battle): empty, so the
