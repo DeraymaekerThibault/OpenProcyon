@@ -8,8 +8,14 @@
 // the current never breaks. Dense gas turns to the second colour and climbs past 1 so it blooms; slow swells run down the
 // current, so the flow direction reads at a glance; a few glints ride downstream faster than the gas. The retail texture stays
 // underneath in part, scrolled here at the strip's retail speed by the frame clock, as the retail game scrolls it.
+// The river rolls (engine choice, no retail current does): the vertex stage lifts the strip (a denser copy of the retail one, cut in
+// currents.rs `refine`; its tangent is the flow's direction) into a few swells running downstream, sharp-crested and broad in the
+// troughs, a little skewed across so the crests are not ruler-straight, lower toward the edges. Only up and down, so the outline
+// seen from above is the retail one. The normals come from the same formula, so the crests catch the sun and the far slopes dim.
 import bevy_pbr::render::{
-    forward_io::{VertexOutput, FragmentOutput},
+    forward_io::{Vertex, VertexOutput, FragmentOutput, decompress_vertex},
+    mesh_functions,
+    view_transformations::position_world_to_clip,
     pbr_fragment::pbr_input_from_standard_material,
     mesh_view_bindings::view,
 };
@@ -21,10 +27,13 @@ struct Current {
     look: vec4<f32>,
     // rgb: colour of thin gas, w: share of the retail texture kept
     color: vec4<f32>,
-    // x: the strip's scroll speed (texture heights a second), y: pulse strength, z: fill (gas the middle always holds)
+    // x: the strip's scroll speed (texture heights a second), y: pulse strength, z: fill (gas the middle always holds), w: world
+    // units per texture height along the strip
     params: vec4<f32>,
-    // rgb: colour of dense gas
+    // rgb: colour of dense gas, w: the strip's width (world units)
     high: vec4<f32>,
+    // x: wave height (world units, crest above the mean), y: the main swell's length, z: its speed downstream, w: crest light
+    wave: vec4<f32>,
 }
 
 @group(constants::MATERIAL_BIND_GROUP) @binding(100) var<uniform> current: Current;
@@ -53,6 +62,69 @@ fn gas(x: f32, v: f32, h: f32, flow: f32, t: f32) -> f32 {
     return smoothstep(0.47, 0.8, raw + body) * smoothstep(1.0, 0.45, abs(x));
 }
 
+// the swells' shape: sharp crests (1) and broad, shallow troughs (about -0.6); `.y` its slope per radian
+fn swell_shape(a: f32) -> vec2<f32> {
+    let e = exp(sin(a));
+    return vec2<f32>((e - 1.266) / 1.452, cos(a) * e / 1.452);
+}
+
+// the surface's lift at `x` across (-1..1) and `s` world units along the flow: x the height (world units), y its slope along s,
+// z its slope across x (per unit of x), w the height as a share of the crest (about -0.6..1)
+fn wave_at(x: f32, s: f32, t: f32) -> vec4<f32> {
+    let height = current.wave.x;
+    let k = 6.2831853 / max(current.wave.y, 1.0);
+    let c = current.wave.z;
+    // three swells of different lengths and speeds, each a little skewed across
+    let ks = vec3<f32>(k, k * 1.73, k * 0.61);
+    let a = vec3<f32>(ks.x * (s - c * t) + 0.35 * x, ks.y * (s - 1.2 * c * t) - 0.6 * x + 1.3, ks.z * (s - 0.8 * c * t) + 0.9 * x + 4.1);
+    let amp = vec3<f32>(1.0, 0.45, 0.25);
+    let skew = vec3<f32>(0.35, -0.6, 0.9);
+    let w0 = swell_shape(a.x);
+    let w1 = swell_shape(a.y);
+    let w2 = swell_shape(a.z);
+    let shape = (amp.x * w0.x + amp.y * w1.x + amp.z * w2.x) / 1.7;
+    let d_s = (amp.x * w0.y * ks.x + amp.y * w1.y * ks.y + amp.z * w2.y * ks.z) / 1.7;
+    let d_x = (amp.x * w0.y * skew.x + amp.y * w1.y * skew.y + amp.z * w2.y * skew.z) / 1.7;
+    // lower toward the edges, so the strip's edge stays near the retail one
+    let env = 1.0 - 0.55 * x * x;
+    return vec4<f32>(height * env * shape, height * env * d_s, height * (env * d_x - 1.1 * x * shape), env * shape);
+}
+
+@vertex
+fn vertex(vertex_in: Vertex) -> VertexOutput {
+    var out: VertexOutput;
+    let v = decompress_vertex(vertex_in, vertex_in.instance_index);
+    let world_from_local = mesh_functions::get_world_from_local(vertex_in.instance_index);
+    var wp = mesh_functions::mesh_position_local_to_world(world_from_local, vec4<f32>(v.position, 1.0));
+    var n = vec3<f32>(0.0, 1.0, 0.0);
+@if(VERTEX_UVS_A) {
+    let x = v.uv.x * 2.0 - 1.0;
+    let lift = wave_at(x, v.uv.y * current.params.w, frame.clock.y);
+    wp.y += lift.x;
+@if(VERTEX_TANGENTS) {
+    // the flow's direction and the strip's left-to-right one (world, level)
+    let along = normalize((world_from_local * vec4<f32>(v.tangent.xyz, 0.0)).xyz + vec3<f32>(0.0, 0.0, 1.0e-6));
+    let side = vec3<f32>(-along.z, 0.0, along.x);
+    // the slope over the level plane: along s, and across (x runs -1..1 over the width)
+    let grad = along * lift.y + side * lift.z * 2.0 / max(current.high.w, 1.0);
+    n = normalize(vec3<f32>(-grad.x, 1.0, -grad.z));
+    // w carries the lift (no normal map reads it), so the fragment can find the level strip under the swell
+    out.world_tangent = vec4<f32>(along, lift.x);
+}
+    out.uv = v.uv;
+}
+    out.world_position = wp;
+    out.position = position_world_to_clip(wp.xyz);
+    out.world_normal = n;
+@if(VERTEX_COLORS)
+    out.color = v.color;
+@if(VERTEX_OUTPUT_INSTANCE_INDEX)
+    out.instance_index = vertex_in.instance_index;
+@if(VISIBILITY_RANGE_DITHER)
+    out.visibility_range_dither = mesh_functions::get_visibility_range_dither_level(vertex_in.instance_index, world_from_local[3]);
+    return out;
+}
+
 @fragment
 fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> FragmentOutput {
     // the retail scroll: the texture slides back along v at the strip's speed (environment.rs `flow_currents`)
@@ -68,8 +140,13 @@ fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> Fragment
 
     // how far a point one world unit above the strip, seen through this pixel, lies from it across and along (in x and v): the
     // strip's own axes in the world, from how position and uv change over the screen
-    let px = dpdx(in.world_position.xyz);
-    let py = dpdy(in.world_position.xyz);
+    // measured on the level strip under the swells: a swell's own slope, which steps from one triangle to the next, would tear the
+    // layers apart
+    var level = in.world_position.xyz;
+@if(VERTEX_TANGENTS)
+    level.y -= in.world_tangent.w;
+    let px = dpdx(level);
+    let py = dpdy(level);
     let ux = dpdx(in.uv);
     let uy = dpdy(in.uv);
     let det = ux.x * uy.y - ux.y * uy.x;
@@ -100,6 +177,23 @@ fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> Fragment
     // slow swells running down the current
     let swell = 0.5 + 0.5 * sin((v - flow * 2.6) * 6.2831853 * 0.8);
     light *= 1.0 - 0.5 * current.params.y + current.params.y * swell * swell;
+
+    // the crests catch the sun, the slopes facing away dim, and the tops of the crests glow a little (none on a flat strip)
+    if current.wave.x > 0.0 {
+        let n = normalize(in.world_normal);
+        let to_sun = select(normalize(vec3<f32>(0.3, 0.8, 0.5)), -normalize(frame.sun.xyz), frame.sun.w > 0.0);
+        let dir = normalize(in.world_position.xyz - view.world_position);
+        let crest = wave_at(x, v * current.params.w, t).w;
+        let facing = dot(n, to_sun) - to_sun.y;
+        let gain = current.wave.w;
+        // only the glint the tilt adds over a level strip, so a flat stretch seen from above does not wash out
+        let half = normalize(to_sun - dir);
+        let sheen = max(pow(max(dot(n, half), 0.0), 8.0) - pow(max(half.y, 0.0), 8.0), 0.0);
+        // all of it scales the gas that is there (never a glow of its own) and within bounds, so the wisps stay readable through the
+        // swells and the crests do not bloom into bands
+        let crest_light = 0.4 * (smoothstep(-0.3, 1.0, crest) - 0.4);
+        light *= clamp(1.0 + gain * (1.5 * facing + crest_light + 0.6 * sheen), 0.35, 1.7);
+    }
 
     // a few glints ride downstream faster than the gas
     let glint = smoothstep(0.74, 0.8, bake(vec3<f32>(x * current.look.y * 0.9, (v - flow * 4.0) * current.look.y * 2.4, 0.3)).r);
