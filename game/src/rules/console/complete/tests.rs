@@ -135,11 +135,12 @@ fn script() -> Script {
         "tasks": [{"Name": "Escape", "text": "x", "Active": true}],
         "volumes": null, "ships": []
     });
-    Script::new(&data, Value::Null)
+    crate::rules::fixtures::script_with(data)
 }
 fn world() -> Vec<Unit> {
-    let unit = |n: u32, name: &str, owner: &str| Unit { name: name.into(), owner: owner.into(), primary: n == 1, ..Unit::new(Entity::from_raw_u32(n).unwrap(), -1, Vec3::ZERO) };
-    vec![unit(1, "Flagship", "Hero"), unit(2, "Raider", "Raiders")]
+    let mut w = crate::rules::fixtures::hero_world();
+    w.remove(1);
+    w
 }
 fn answer(sc: &mut Script, line: &str) -> (bool, String) {
     let cmd = parse(line, "Hero", false).unwrap_or_else(|e| panic!("{line}: {e}"));

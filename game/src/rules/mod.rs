@@ -8,6 +8,8 @@ pub mod check;
 pub mod cli;
 pub mod console;
 mod eval;
+#[cfg(test)]
+mod fixtures;
 pub mod refs;
 pub mod skirmish;
 mod systems;

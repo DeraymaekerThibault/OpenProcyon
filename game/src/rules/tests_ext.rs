@@ -7,7 +7,7 @@ use serde_json::{Value, json};
 fn script(data: Value, media: Value) -> Script {
     let mut data = data;
     data["ships"] = json!([]);
-    Script::new(&data, media)
+    super::fixtures::script_with_media(data, media)
 }
 
 fn rule(name: &str, once: bool, conds: Value, acts: Value) -> Value {
@@ -31,7 +31,7 @@ fn counter_is(name: &str, eq: &str, v: f64) -> Value {
 }
 
 fn ship_at(owner: &str, x: f32, y: f32) -> Unit {
-    let mut u = Unit::new(Entity::from_raw_u32(1).unwrap(), -1, Vec3::new(x, 0.0, -y));
+    let mut u = Unit::new(e(1), -1, Vec3::new(x, 0.0, -y));
     u.owner = owner.into();
     u
 }
@@ -520,9 +520,7 @@ fn unit(n: u32, owner: &str, x: f32, y: f32) -> Unit {
     u.speed = Some(0.0);
     u
 }
-fn e(n: u32) -> Entity {
-    Entity::from_raw_u32(n).unwrap()
-}
+use super::fixtures::e;
 /// Runs one world-initialise rule whose only action is `action` and returns what the interpreter asked the world to do.
 fn effects(action: Value, extra: Value, w: &[Unit]) -> (Script, Vec<Fx>) {
     let mut data = json!({"rules": [rule("go", true, json!([{"Type": "World Initialize"}]), json!([action]))]});
@@ -889,4 +887,37 @@ fn the_rule_report_says_what_each_rule_did() {
     let text = serde_json::to_string_pretty(&report).unwrap();
     assert!(text.contains("\"outcome\": \"quit\"") && !text.contains("null"), "{text}");
     assert_eq!(serde_json::from_str::<RuleReport>(&text).unwrap(), report);
+}
+
+#[test]
+fn script_answers_agrees_with_tagged_unit_matches() {
+    // Ids 1..=3: Hero's ships (1 also in group "Squad"), id 4: Raiders in group "Raiders" (a named group shadowing its owner),
+    // id 5: Raiders outside it, id 6: Hero in group "Hero" (the player's name shadowed by a named group).
+    let mut s = script_with_data(json!({"player_start": {"name": "Hero"}, "rules": []}));
+    s.groups = [(1, vec!["Squad".into()]), (4, vec!["Raiders".into()]), (6, vec!["Hero".into()])].into_iter().collect();
+    s.group_names = ["Squad", "Raiders", "Hero"].into_iter().map(String::from).collect();
+    let ships = [
+        (1, "Flagship", "Hero", true),
+        (2, "Escort", "Hero", false),
+        (3, "Gull", "Raiders", false),
+        (4, "Cutpurse", "Raiders", false),
+        (5, "Lone", "Raiders", false),
+        (6, "Lad", "Hero", false),
+    ];
+    let mut w: Vec<Unit> = ships.iter().map(|&(id, name, owner, primary)| Unit { id, primary, ..super::fixtures::unit(id as u32, name, owner) }).collect();
+    s.tag(&mut w);
+    let specs = ["Hero", "Raiders", "Squad", "Nobody", "Hero,Flagship", "Raiders,Cutpurse", "Anything,HUMAN CONTROLLED COMMAND SHIP", "Raiders,Missing"];
+    for u in &w {
+        for spec in specs {
+            assert_eq!(s.answers(u.id, &u.owner, &u.name, u.primary, spec), matches(u, spec), "unit {} against {spec}", u.id);
+        }
+    }
+    // The player's own name selects the player's fleet even where a named group shadows it; other owners lose to the group.
+    assert!(matches(&w[1], "Hero"), "player ship outside the named group");
+    assert!(!matches(&w[2], "Raiders"), "a named group shadows its owner's other ships");
+    assert!(matches(&w[3], "Raiders"));
+}
+
+fn script_with_data(data: Value) -> Script {
+    script(data, Value::Null)
 }
