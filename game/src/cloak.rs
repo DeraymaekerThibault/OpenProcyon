@@ -215,7 +215,7 @@ fn ai(
     lib: Res<Library>,
     fleets: Res<Fleets>,
     targets: Option<Res<crate::ship::CaptainTargets>>,
-    mut ships: Query<(Entity, &mut Cloak, &Ship, &Transform, &Health, Has<PlayerShip>, Option<&ScanFactor>)>,
+    mut ships: Query<(Entity, &mut Cloak, &Ship, &Transform, &Health, Has<crate::commands::Commander>, Option<&ScanFactor>)>,
     others: Query<(Entity, &Ship, &Transform, &Health)>,
 ) {
     for (e, mut c, ship, tf, health, primary, scan) in &mut ships {

@@ -8,7 +8,16 @@ pub(super) fn mission_ai(
     mission: Option<Res<Mission>>,
     lib: Res<Library>,
     rocks: Query<(Entity, &Transform, &Asteroid), Without<Ship>>,
-    mut ships: Query<(Entity, &mut Ship, &mut Transform, &Health, &mut MissionShip, Has<PlayerShip>, Option<&crate::ship::FleetPilot>, Has<crate::lifeboats::Abandoned>)>,
+    mut ships: Query<(
+        Entity,
+        &mut Ship,
+        &mut Transform,
+        &Health,
+        &mut MissionShip,
+        Has<crate::commands::Commander>,
+        Option<&crate::ship::FleetPilot>,
+        Has<crate::lifeboats::Abandoned>,
+    )>,
     busy: Query<(), crate::ship::CaptainBusy>,
     boats: Query<(), With<crate::lifeboats::Lifeboat>>,
     sensors: Res<crate::environment::Sensors>,
@@ -245,7 +254,7 @@ pub fn leash(sc: &Script, zone: &str, home: Option<Vec3>, pos: Vec3) -> Option<V
 
 /// The human's command ship on a border zone (missions 3, 9): steered back inside with the helmsman's off-course line.
 /// PROVISIONAL: the retail helm takeover is not decoded; the ship turns for the zone and resumes the player's orders inside.
-pub(super) fn leash_player(mut mission: ResMut<Mission>, mut ships: Query<(&mut Ship, &Transform, &MissionShip, &Health), With<PlayerShip>>, mut out: Local<bool>) {
+pub(super) fn leash_player(mut mission: ResMut<Mission>, mut ships: Query<(&mut Ship, &Transform, &MissionShip, &Health), With<crate::commands::Commander>>, mut out: Local<bool>) {
     let Ok((mut ship, tf, ms, h)) = ships.single_mut() else { return };
     let back = ms.border.as_deref().filter(|_| !h.destroyed).and_then(|z| leash(&mission.script, z, ms.return_point, tf.translation));
     match back {

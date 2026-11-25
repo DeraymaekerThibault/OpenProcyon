@@ -1,5 +1,6 @@
 use super::*;
 use crate::EngineOrder;
+use crate::PlayerShip;
 
 #[test]
 fn rule_keys_latch_until_a_tick_and_opening_skip_is_not_queued_twice() {

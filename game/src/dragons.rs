@@ -132,7 +132,7 @@ fn think(
     fxl: Option<Res<crate::fx::FxLib>>,
     mut commands: Commands,
     mut dragons: Query<(Entity, &mut Dragon, &mut SpaceAnimal, &Transform, &mut Visibility), Without<Ship>>,
-    ships: Query<(Entity, &Transform, &Ship, &Health, Option<&MissionShip>, Has<crate::PlayerShip>)>,
+    ships: Query<(Entity, &Transform, &Ship, &Health, Option<&MissionShip>, Has<crate::commands::Commander>)>,
     mut sfx: MessageWriter<crate::audio::Sfx>,
     mut shoot: MessageWriter<crate::combat::Shoot>,
 ) {

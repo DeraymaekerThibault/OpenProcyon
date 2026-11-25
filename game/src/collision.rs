@@ -435,7 +435,7 @@ pub fn sail(
     mut rocks: Query<(Entity, &mut crate::combat::Asteroid, &mut Transform, &mut Obstacle, &mut Drift, Option<&Visibility>), Without<crate::Ship>>,
     mission: Option<Res<crate::campaign::Mission>>,
     mut cables: Local<HashMap<(Entity, Entity), f32>>,
-    human: Query<(), With<crate::PlayerShip>>,
+    human: Query<(), With<crate::commands::Commander>>,
     boats: Query<(), With<crate::lifeboats::Lifeboat>>,
     mut ships: Query<(Entity, &mut crate::Ship, &mut Transform, &crate::Health, &mut Drift, Option<&crate::docking::Docker>)>,
     mut sfx: Option<ResMut<Messages<crate::audio::Sfx>>>,

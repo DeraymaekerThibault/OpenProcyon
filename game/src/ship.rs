@@ -159,8 +159,18 @@ impl Ship {
     }
 }
 
+/// The local player's ship, for the view (camera, HUD, crew lines). The simulation's mark of a human's command ship is
+/// `commands::Commander`: in single-player it follows this marker (player 0), in every world, by these hooks.
 #[derive(Component)]
+#[component(on_add = command_ship_added, on_remove = command_ship_removed)]
 pub struct PlayerShip;
+
+fn command_ship_added(mut world: bevy::ecs::world::DeferredWorld, ctx: bevy::ecs::lifecycle::HookContext) {
+    world.commands().entity(ctx.entity).try_insert(crate::commands::Commander(crate::commands::PlayerId(0)));
+}
+fn command_ship_removed(mut world: bevy::ecs::world::DeferredWorld, ctx: bevy::ecs::lifecycle::HookContext) {
+    world.commands().entity(ctx.entity).try_remove::<crate::commands::Commander>();
+}
 
 /// 'AI_LOCK_POSITION' (right-click menu Hold): the ship's captain keeps it where it is; it still fires.
 #[derive(Component)]
@@ -304,7 +314,7 @@ fn choose_target(held: Option<(Entity, f32)>, candidates: &[(Entity, f32)], vali
 pub fn ai(
     cfg: Res<Config>,
     mission: Option<Res<campaign::Mission>>,
-    mut ships: Query<(Entity, &Transform, &mut Ship, &Health, Has<PlayerShip>, Option<&FleetPilot>, Option<&FleetMember>, Option<&combat::GunStates>)>,
+    mut ships: Query<(Entity, &Transform, &mut Ship, &Health, Has<crate::commands::Commander>, Option<&FleetPilot>, Option<&FleetMember>, Option<&combat::GunStates>)>,
     busy: Query<(), CaptainBusy>,
     sensors: Res<crate::environment::Sensors>,
     held: Query<(), With<HoldPosition>>,

@@ -39,6 +39,13 @@ const OLDEST_FORMAT: u32 = 1;
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PlayerId(pub u8);
 
+/// The simulation's mark of a human's command ship: the ship that player commands directly (its engines, its own target, panic fire,
+/// indirect shots), where an order to any other ship of the fleet is a captain's order. `PlayerShip` stays the local player's
+/// ship, for the view. Single-player has one human, player 0, so `Commander(PlayerId(0))` follows `PlayerShip` (its hooks, `ship.rs`).
+/// PROVISIONAL until lock-step gives each human's command ship its own.
+#[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Commander(pub PlayerId);
+
 /// An engine order: a step up or down the dial (the speed keys) or straight to one setting (the dial, its tabs).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Engine {
@@ -139,9 +146,9 @@ pub struct Clock {
 
 /// Applies one command. Validation stays what the UI already checks (#369 design: single-player behaviour does not change); a command
 /// whose ship is gone does nothing.
-pub fn apply(world: &mut World, kind: &Kind) {
+pub fn apply(world: &mut World, player: PlayerId, kind: &Kind) {
     match *kind {
-        Kind::Move { .. } | Kind::Course { .. } | Kind::Cancel { .. } => apply_movement(world, kind),
+        Kind::Move { .. } | Kind::Course { .. } | Kind::Cancel { .. } => apply_movement(world, player, kind),
         Kind::Stop { .. } | Kind::Hold { .. } | Kind::Cloak { .. } => apply_menu(world, kind),
         Kind::Dock { .. } | Kind::Tow { .. } | Kind::Board { .. } | Kind::Grapple { .. } | Kind::CancelDock { .. } | Kind::DropGrapple { .. } => apply_links(world, kind),
         Kind::Formation { formation, hold } => {
@@ -156,14 +163,14 @@ pub fn apply(world: &mut World, kind: &Kind) {
             crate::ship::promote(world, ship, false);
         }
         Kind::PanicFire { ship } => {
-            if direct(world, ship)
+            if direct(world, ship, player)
                 && let Some(mut t) = world.get_resource_mut::<crate::combat::Target>()
             {
                 t.2.panic = true;
             }
         }
         Kind::Lob { ship, shot } => {
-            if direct(world, ship)
+            if direct(world, ship, player)
                 && let Some(mut t) = world.get_resource_mut::<crate::combat::Target>()
             {
                 t.2.shot = shot;
@@ -180,7 +187,7 @@ pub fn apply(world: &mut World, kind: &Kind) {
             }
         }
         Kind::Target { ship, target, spot } => {
-            if direct(world, ship) {
+            if direct(world, ship, player) {
                 if let Some(mut t) = world.get_resource_mut::<crate::combat::Target>() {
                     t.0 = target;
                     t.1 = spot;
@@ -200,9 +207,10 @@ fn local_fleet(world: &World) -> crate::names::Owner {
     world.get_resource::<crate::ship::Fleets>().map(|f| f.local.clone()).unwrap_or_default()
 }
 
-/// Direct control is the fleet's command ship (`Fleets::direct`, what the input handlers decided on before).
-fn direct(world: &World, ship: Entity) -> bool {
-    world.get_resource::<crate::ship::Fleets>().is_some_and(|f| f.primary() == Some(ship))
+/// Direct control: `ship` is the command ship of the player who gave the order (`Commander`); an order to any other ship is a
+/// captain's order (`Fleets::direct`, what the input handlers decided on, for the local player).
+fn direct(world: &World, ship: Entity, player: PlayerId) -> bool {
+    world.get::<Commander>(ship).is_some_and(|c| c.0 == player)
 }
 
 /// A move ends a dock routine in progress and gives control back (original behaviour), and ends a hold (`ship::release_hold`).
@@ -241,11 +249,11 @@ fn sail_on(ship: &mut Ship) {
 }
 
 /// Move, course and cancel orders.
-fn apply_movement(world: &mut World, kind: &Kind) {
+fn apply_movement(world: &mut World, player: PlayerId, kind: &Kind) {
     match kind {
         &Kind::Move { ship, to, append } => {
             release(world, ship);
-            if direct(world, ship) {
+            if direct(world, ship, player) {
                 if let Some(mut s) = world.get_mut::<Ship>(ship) {
                     if !append {
                         s.waypoints.clear();
@@ -267,7 +275,7 @@ fn apply_movement(world: &mut World, kind: &Kind) {
             }
         }
         &Kind::Cancel { ship } => {
-            let direct = direct(world, ship);
+            let direct = direct(world, ship, player);
             if let Ok(mut e) = world.get_entity_mut(ship) {
                 e.remove::<crate::boarding::GrappleOrder>();
             }
@@ -411,7 +419,7 @@ pub fn apply_tick(world: &mut World) {
         let todo = replayed(world, At::Tick(tick)).unwrap_or(sent);
         for c in todo {
             record(world, At::Tick(tick), &c);
-            apply(world, &c.kind);
+            apply(world, c.player, &c.kind);
         }
         let mut clock = world.resource_mut::<Clock>();
         clock.tick += 1;
@@ -419,7 +427,7 @@ pub fn apply_tick(world: &mut World) {
     } else {
         // Not counted (a world without the frame clock: unit tests): applied as they come.
         for c in sent {
-            apply(world, &c.kind);
+            apply(world, c.player, &c.kind);
         }
     }
 }
@@ -438,7 +446,7 @@ fn apply_paused(world: &mut World) {
     };
     for c in todo {
         record(world, At::Frame(frame), &c);
-        apply(world, &c.kind);
+        apply(world, c.player, &c.kind);
     }
 }
 
@@ -886,16 +894,17 @@ fn replayed(world: &mut World, at: At) -> Option<Vec<PlayerCommand>> {
     if world.resource::<Clock>().battle != 0 {
         return None;
     }
-    let saved: Vec<Saved> = world.get_resource::<Replay>().filter(|r| !r.finished)?.commands.iter().filter(|(a, _)| *a == at).map(|(_, s)| s.clone()).collect();
+    let saved: Vec<(PlayerId, Saved)> =
+        world.get_resource::<Replay>().filter(|r| !r.finished)?.commands.iter().filter(|(a, ..)| *a == at).map(|(_, p, s)| (*p, s.clone())).collect();
     Some(
         saved
             .iter()
-            .filter_map(|s| {
+            .filter_map(|(player, s)| {
                 let kind = s.load(world);
                 if kind.is_none() {
                     warn!("--replay: a command at {at:?} names an object this battle does not have: {s:?}");
                 }
-                kind.map(|kind| PlayerCommand { player: PlayerId(0), kind })
+                kind.map(|kind| PlayerCommand { player: *player, kind })
             })
             .collect(),
     )
@@ -906,7 +915,8 @@ fn replayed(world: &mut World, at: At) -> Option<Vec<PlayerCommand>> {
 pub struct Replay {
     /// Each battle frame's game-time advance and tick count.
     frames: Vec<(Duration, u32)>,
-    commands: Vec<(At, Saved)>,
+    /// When, by whom, what.
+    commands: Vec<(At, PlayerId, Saved)>,
     finished: bool,
 }
 
@@ -940,7 +950,7 @@ impl Replay {
                         replay.frames.extend(std::iter::repeat_n((Duration::from_nanos(ns), ticks), repeat));
                     }
                 }
-                Line::Command { at, order, .. } => replay.commands.push((at, order)),
+                Line::Command { at, player, order } => replay.commands.push((at, player, order)),
                 Line::Unrecorded { .. } => unrecorded += 1,
             }
         }

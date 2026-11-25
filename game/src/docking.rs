@@ -335,7 +335,7 @@ fn cancel_input(keys: Res<ButtonInput<KeyCode>>, fleets: Res<crate::ship::Fleets
 fn handle_messages(
     mut msgs: MessageReader<DockMsg>,
     mut commands: Commands,
-    player: Query<Entity, With<PlayerShip>>,
+    player: Query<Entity, With<crate::commands::Commander>>,
     pos: Query<&Transform, With<Ship>>,
     mut dockables: Query<&mut Dockable>,
     dockers: Query<&Docker>,
@@ -778,7 +778,7 @@ fn routine(
     mut commands: Commands,
     mut sfx: MessageWriter<Sfx>,
     mut mission: Option<ResMut<Mission>>,
-    mut dockers: Query<(Entity, &Transform, &mut Ship, &Health, &mut Docker, Has<PlayerShip>, Option<&DockTime>)>,
+    mut dockers: Query<(Entity, &Transform, &mut Ship, &Health, &mut Docker, Has<crate::commands::Commander>, Option<&DockTime>)>,
     mut dockees: Query<(&Transform, &mut Dockable, Option<&Ship>, Option<&Health>), Without<Docker>>,
 ) {
     let dt = time.delta_secs();
@@ -907,7 +907,7 @@ fn ai_repair_dock(
     mission: Option<Res<Mission>>,
     mut msg: MessageWriter<DockMsg>,
     sensors: Option<Res<crate::environment::Sensors>>,
-    ships: Query<(Entity, &Ship, &Health, &Transform, Option<&crate::campaign::MissionShip>, Option<&Docker>), Without<PlayerShip>>,
+    ships: Query<(Entity, &Ship, &Health, &Transform, Option<&crate::campaign::MissionShip>, Option<&Docker>), Without<crate::commands::Commander>>,
     docks: Query<(Entity, &Transform, &Dockable, Option<&Ship>, Option<&crate::campaign::MissionShip>, Option<&MissionBase>)>,
 ) {
     let script = mission.as_deref().map(|m| &m.script);
