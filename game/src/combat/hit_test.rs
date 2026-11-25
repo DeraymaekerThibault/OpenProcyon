@@ -125,7 +125,5 @@ pub(super) fn seg_mesh_hit(a: Vec3, b: Vec3, s: &Section) -> Option<(f32, Vec3)>
 
 /// Distance from `p` to the segment `a`-`b`.
 pub(super) fn segment_distance(p: Vec3, a: Vec3, b: Vec3) -> f32 {
-    let ab = b - a;
-    let t = if ab.length_squared() > 0.0 { ((p - a).dot(ab) / ab.length_squared()).clamp(0.0, 1.0) } else { 0.0 };
-    p.distance(a + ab * t)
+    crate::geom::segment_distance(p, a, b)
 }

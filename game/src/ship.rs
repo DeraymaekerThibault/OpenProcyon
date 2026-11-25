@@ -993,7 +993,7 @@ pub(crate) fn follow_speed(hold: bool, distance: f32, leader_speed: f32, max: f3
 /// original's follower pathing is unknown; this only keeps followers from driving through the ship they follow and shoving it.
 pub(crate) fn steer_round(from: Vec3, goal: Vec3, leader: Vec3, clearance: f32) -> Vec3 {
     let (d, rel) = ((goal - from).with_y(0.0), (leader - from).with_y(0.0));
-    let t = if d.length_squared() > 0.0 { (rel.dot(d) / d.length_squared()).clamp(0.0, 1.0) } else { 0.0 };
+    let t = crate::geom::segment_t(rel, d);
     let off = (from + d * t - leader).with_y(0.0);
     if off.length() >= clearance || (goal - leader).with_y(0.0).length() < clearance {
         return goal;

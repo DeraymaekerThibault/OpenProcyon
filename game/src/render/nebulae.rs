@@ -418,9 +418,7 @@ impl Bolt {
         if self.left <= 0.0 {
             return 0.0;
         }
-        let span = self.to - self.from;
-        let along = ((self.eye - self.from).dot(span) / span.length_squared().max(1e-3)).clamp(0.0, 1.0);
-        let distance = self.eye.distance(self.from + span * along);
+        let distance = self.eye.distance(crate::geom::nearest_on_segment_floored(self.eye, self.from, self.to, 1e-3));
         let t = ((distance / reach.max(1.0) - 1.0) * 0.5).clamp(0.0, 1.0);
         self.left * self.left * (1.0 - t * t * (3.0 - 2.0 * t))
     }
