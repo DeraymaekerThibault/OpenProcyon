@@ -12,6 +12,8 @@
 //! - [`schemas`]: JSON Schemas of `ship.json`, `guns.json`, `bullets.json`, `data/crew_nodes.json` and `mod.json` (`--dump-schemas <dir>`).
 //! - [`extensions`]: the engine's additions to the original (the table of docs/modding.md), as data.
 //! - [`check_mission`] / [`known_names`]: the mission checker behind `--check-mission`, on JSON values in memory.
+//! - [`defined_names`] / [`accepted_names`]: the names a mission defines per kind of rule field, and exactly the names a field of
+//!   that kind accepts (derived from the checker's own test, so a `group` field also offers players and placed ships' groups).
 //! - [`Finding`]: what the checkers find, located by `path` (printed) and `pointer` (a JSON pointer); [`unknown_key_findings`] gives
 //!   the unknown-key warnings of any document with the nearest known key.
 //! - [`merge_rule`] / [`extends_parent`] / [`MERGED`]: how a mod file combines with the overlay below it, and what an `extends` file
@@ -19,8 +21,14 @@
 //! - [`game_to_bevy`] / [`bevy_to_game`] / [`mount_rotation`] / [`mount_rot`]: the files' axes and `rot` triples as the loader reads them.
 //! - [`resolved_ship`]: a ship as the game loads it (points, speed, sections, guns, engines, ...), each value with its [`Source`]: the
 //!   file, the model or a default.
+//! - [`loaded::resolved_ship`]: a second view of the same ship, built from the merged document the loader hands back
+//!   ([`loaded::ResolvedShip`]): speed, thrust, mass, hit points, mounts and every hardpoint in game axes, each with its source (a
+//!   JSON pointer into `ship.json`, a model node, or a fallback rule), serializable. PROVISIONAL: two branches added a
+//!   `resolved_ship`; both are kept until the maintainer picks one.
 //! - [`ship_art`]: the command-bar icon and weapon-panel outline (PNG bytes) and each gun's bank the engine generates for a ship from a
 //!   model, with nothing written.
+//! - [`game_content_in`]: the files of a mod that are equal in meaning to the player's import ([`ContentMatch`], [`MatchKind`]):
+//!   game content a mod must not ship (what `tools/compare_assets.py` does by meaning; PROVISIONAL limits in `authoring/content.rs`).
 //! - [`crew_kind`] / [`CREW_KINDS`] / [`CREW_NODE`]: crew node names, and the kind of a model's crew nodes in `data::derive::Facts`.
 //!
 //! Shared code: no UI and no view imports.
@@ -32,6 +40,7 @@ use serde_json::Value;
 mod annotate;
 mod art;
 mod check_mod;
+mod content;
 mod extensions;
 mod json;
 mod resolved;
@@ -41,13 +50,21 @@ mod resolved;
 pub use crate::data::derive::is_damage_layer;
 pub use art::{GunBank, ShipArt, ship_art};
 pub use check_mod::{check_mod, check_mod_with, unknown_key_findings, unknown_keys};
+pub use content::{ContentMatch, MatchKind, game_content_in};
 pub use extensions::{Extension, ExtensionKind, extensions};
 pub use json::to_json_string;
 pub use resolved::{ResolvedEngine, ResolvedFlag, ResolvedGun, ResolvedPost, ResolvedSection, ResolvedShip, ResolvedWake, Source, resolved_ship};
 
 pub use crate::data::DataError;
 pub use crate::modding::{MERGED, MergeRule, ModEntry, ModReport, extends_parent, merge_rule};
-pub use crate::rules::check::{Finding, JsonPath, Level, Problem, Segment, defined_names};
+pub use crate::rules::check::{Finding, JsonPath, Level, Problem, Segment, accepted_names, defined_names};
+
+/// A ship as the loader sees it, from the merged document `ships::build` hands back: every hardpoint in game axes with its
+/// [`Source`](loaded::Source) (a JSON pointer, a model node or a fallback rule). PROVISIONAL: a second `resolved_ship` next to the
+/// top-level one (the two came from separate branches); the maintainer keeps one.
+pub mod loaded {
+    pub use crate::data::resolved::{Hardpoint, HardpointKind, ResolvedMount, ResolvedSection, ResolvedShip, Source, Sourced, resolved_ship};
+}
 
 /// The version of this engine (the crate version).
 pub const ENGINE_VERSION: &str = env!("CARGO_PKG_VERSION");

@@ -11,7 +11,7 @@ mod ships;
 mod weapons;
 pub use crew::{CrewMember, roster};
 pub(crate) use ships::mount_rotation;
-pub use ships::{CREW_POSTS, Fill, SHIP_FILLS, derive, fill_of, load_class, try_load_class};
+pub use ships::{CREW_POSTS, Fill, SHIP_FILLS, derive, fill_of, load_class, resolved, try_load_class};
 pub(crate) use weapons::lenient;
 pub use weapons::{bullet_from_value, gun_from_value, try_load_weapons};
 
@@ -587,6 +587,10 @@ pub fn num(v: &Value) -> f32 {
 /// Game frame (x starboard, y bow, z up) -> Bevy (x, z, -y), the same map as the GLB export.
 pub fn conv(x: f32, y: f32, z: f32) -> Vec3 {
     Vec3::new(x, z, -y)
+}
+/// Bevy (x, y, z) -> game frame (x, -z, y): the inverse of [`conv`].
+pub fn unconv(v: Vec3) -> [f64; 3] {
+    [v.x as f64, -v.z as f64, v.y as f64]
 }
 pub fn conv_v(v: &Value) -> Vec3 {
     conv(num(&v[0]), num(&v[1]), num(&v[2]))
