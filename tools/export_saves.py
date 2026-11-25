@@ -8,7 +8,7 @@ from pathlib import Path
 
 from tools import cli
 from tools.gamefs import ci_files
-from tools.jsonio import dump
+from tools.jsonio import write
 
 
 def counters(text):
@@ -38,7 +38,7 @@ def main(root, out):
     )  # campaign files may be missing or removed
     for n, c in sorted(found.items()):
         save = {"name": f"Mission {n:02} (start)", "mission": f"mission{n:02}", **c}
-        (out / f"mission{n:02}.json").write_text(dump(save), encoding="utf-8")
+        write(out / f"mission{n:02}.json", save)
         print(save["name"], c["points"], len(c["crew"]), len(c["arms"]))
 
 

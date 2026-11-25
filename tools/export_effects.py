@@ -13,7 +13,7 @@ from tools import cli
 from tools.eft import load
 from tools.export_combat import fx_names
 from tools.gamefs import ci_file, ci_files
-from tools.jsonio import dump
+from tools.jsonio import write
 from tools.mdb_to_glb import convert
 from tools.models import model_path
 
@@ -147,7 +147,7 @@ def main(root, outdir, ship_jsons):
             missing.append(n)
             continue
         export_morph_meshes(root, outdir, j)
-        (fx / f"{n}.json").write_text(dump(j), encoding="utf-8")
+        write(fx / f"{n}.json", j)
         done.append(n)
         t = set()
         textures(j, t)
@@ -160,7 +160,7 @@ def main(root, outdir, ship_jsons):
                 print("warning: missing effect texture", tex, file=sys.stderr)
                 continue
             Image.open(src[0]).convert("RGBA").save(dst)
-    (fx / "index.json").write_text(dump(done), encoding="utf-8")
+    write(fx / "index.json", done)
     print(f"exported {len(done)} effects; missing: {missing}")
 
 

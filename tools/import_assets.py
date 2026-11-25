@@ -27,7 +27,7 @@ from pathlib import Path
 
 from tools import importlog
 from tools.gamefs import ci_files
-from tools.jsonio import dump
+from tools.jsonio import write
 from tools.paths import REPO
 from tools.skirmish_ships import SKIRMISH_SHIPS
 
@@ -212,7 +212,7 @@ def export_ships(root, out, want, part=lambda i, k: None):
             importlog.skipped(f"WorldObjects/{s}.wot", f"no mesh for scene {scene}")
             continue
         ships.append(s)
-    (out / "ships.json").write_text(dump(ships), encoding="utf-8")
+    write(out / "ships.json", ships)
 
 
 def model(root, scene, glb):
@@ -381,7 +381,7 @@ def main(argv):
             run()
         except StepFailed as e:
             sys.exit(f"import failed at step {name!r}: {e}")
-    (target / "importer.json").write_text(dump(dict(format=FORMAT)), encoding="utf-8")
+    write(target / "importer.json", dict(format=FORMAT))
     if target != out:
         try:
             swap_in(target, out)

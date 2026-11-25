@@ -17,7 +17,7 @@ from PIL import Image
 
 from tools import cli
 from tools.gamefs import ci_file, ci_files
-from tools.jsonio import dump
+from tools.jsonio import write
 from tools.mdb_to_glb import convert
 from tools.models import model_path
 from tools.msb import parse_scene_file
@@ -399,10 +399,10 @@ def main(root, out):
             im = tiles(root, m["backdrop"])
             if im:
                 im.save(out / "menu" / f"{m['backdrop'].lower()}.png")
-        (out / "maps" / f"{mid}.json").write_text(dump(m), encoding="utf-8")
+        write(out / "maps" / f"{mid}.json", m)
         index.append({"id": mid, "name": m["name"], "assemble": m["assemble"]})
         print(f"{f.stem}: {len(m['players'])} players, {len(m['objects'])} objects")
-    (out / "maps" / "index.json").write_text(dump(index), encoding="utf-8")
+    write(out / "maps" / "index.json", index)
     for n in [
         "FrontEndScreen0",
         "FrontEndScreen1",
@@ -424,9 +424,7 @@ def main(root, out):
         els = parse_tst(
             ci_file(root / "Screens", f"{n}.tst").read_text(encoding="latin1")
         )
-        (out / "menu" / f"{re.sub(chr(32), '_', n).lower()}.json").write_text(
-            dump(els), encoding="utf-8"
-        )
+        write(out / "menu" / f"{re.sub(chr(32), '_', n).lower()}.json", els)
     # Menu strings used by the front end (Screens/*.tst text IDs).
     keep = {
         k: v
@@ -441,7 +439,7 @@ def main(root, out):
             )
         )
     }
-    (out / "menu" / "strings.json").write_text(dump(keep), encoding="utf-8")
+    write(out / "menu" / "strings.json", keep)
 
 
 if __name__ == "__main__":

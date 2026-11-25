@@ -11,7 +11,7 @@ from pathlib import Path
 
 from tools import cli
 from tools.gamefs import ci_files
-from tools.jsonio import dump
+from tools.jsonio import write
 from tools.msb import parse_scene
 
 
@@ -84,7 +84,7 @@ def export(root, out):
             layers = lone_leaf_layers(scene)
             scenes[msb.stem] = [rounded(c, names, layers) for c in scene["animations"]]
     (Path(out) / "data").mkdir(exist_ok=True)
-    (Path(out) / "data/animations.json").write_text(dump(scenes), encoding="utf-8")
+    write(Path(out) / "data/animations.json", scenes)
     print(
         "animations:", sum(map(len, scenes.values())), "clips in", len(scenes), "scenes"
     )

@@ -21,7 +21,7 @@ import shutil
 from pathlib import Path
 
 from tools import cli
-from tools.jsonio import dump
+from tools.jsonio import write
 
 
 def _read(p):
@@ -52,23 +52,23 @@ def pack_ships(assets):
         d.mkdir(parents=True, exist_ok=True)
         j = json.loads((data / "ships" / f"{s}.json").read_text(encoding="utf-8"))
         j["geometry"], j["model"] = s, owner[j["scene"]]
-        (d / "ship.json").write_text(dump(j), encoding="utf-8")
+        write(d / "ship.json", j)
         (data / "ships" / f"{s}.json").unlink()
         shutil.move(data / "geometry" / f"{s}.json", d / "geometry.json")
         glb = assets / "models/ships" / f"{j['scene']}.glb"
         if owner[j["scene"]] == s and glb.exists():
             shutil.move(glb, d / "model.glb")
         if s in names:
-            (d / "names.json").write_text(dump(names.pop(s)), encoding="utf-8")
+            write(d / "names.json", names.pop(s))
         if s in docks:
-            (d / "docks.json").write_text(dump(docks.pop(s)), encoding="utf-8")
+            write(d / "docks.json", docks.pop(s))
     for sub in ("ships", "geometry"):
         if (data / sub).is_dir() and not any((data / sub).iterdir()):
             (data / sub).rmdir()
     (data / "ship_names.json").unlink(missing_ok=True)
     (assets / "ships.json").unlink(missing_ok=True)
     if docks:
-        (data / "docks.json").write_text(dump(docks), encoding="utf-8")
+        write(data / "docks.json", docks)
 
 
 def pack_maps(assets):
@@ -83,7 +83,7 @@ def pack_maps(assets):
         d.mkdir(exist_ok=True)
         if f.stem in listed:
             m["skirmish"] = True
-        (d / "map.json").write_text(dump(m), encoding="utf-8")
+        write(d / "map.json", m)
         f.unlink()
         for src, dst in (
             (assets / "campaign" / f"{f.stem}.json", "mission.json"),

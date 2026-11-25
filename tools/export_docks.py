@@ -12,7 +12,7 @@ from pathlib import Path
 
 from tools import cli, importlog
 from tools.export_combat import associations, flat, load, placed_objects, scene_name
-from tools.jsonio import dump
+from tools.jsonio import write
 from tools.mdb_to_glb import layer_offsets, with_layer_offset
 from tools.msb import parse_scene_file
 
@@ -55,7 +55,7 @@ def export(root, out):
                 points=points, tender=bool(flat(nodes).get("Is Tender", False))
             )
     (Path(out) / "data").mkdir(exist_ok=True)
-    (Path(out) / "data/docks.json").write_text(dump(docks), encoding="utf-8")
+    write(Path(out) / "data/docks.json", docks)
     print("docks:", len(docks), "entities with dock points")
 
 

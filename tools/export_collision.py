@@ -22,7 +22,7 @@ from pathlib import Path
 from tools import cli
 from tools.export_mesh_detail import collision_lods
 from tools.gamefs import ci_file
-from tools.jsonio import dump
+from tools.jsonio import write
 from tools.mdb import box_tree, parse
 from tools.mdb_to_glb import convert, layer_offsets, scene_files
 from tools.pack_data import rnd
@@ -177,7 +177,7 @@ def export(root, assets):
         if "min" not in d:
             raise ValueError(f"No collision box: {typ}")
         out[typ] = d
-    (assets / "data/collision.json").write_text(dump(rnd(out, 4)), encoding="utf-8")
+    write(assets / "data/collision.json", rnd(out, 4))
     print(f"Collision: {len(out)} entity types")
 
 

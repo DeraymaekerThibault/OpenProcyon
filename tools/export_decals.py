@@ -12,7 +12,7 @@ from pathlib import Path
 from PIL import Image
 
 from tools import cli
-from tools.jsonio import dump
+from tools.jsonio import write
 
 SIZES = {"Small": 0, "Medium": 1, "Large": 2}
 
@@ -70,7 +70,7 @@ def main(root, out):
         Image.open(f).convert("RGBA").save(out / "decals" / f"{name}.png")
         table[name] = dict(size=SIZES[size], materials=groups)
     (out / "data").mkdir(exist_ok=True)
-    (out / "data/decals.json").write_text(dump(table), encoding="utf-8")
+    write(out / "data/decals.json", table)
     print(f"decals: {len(table)}")
 
 
