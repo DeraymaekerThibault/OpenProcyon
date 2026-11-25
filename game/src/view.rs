@@ -5,7 +5,7 @@ use crate::bindings::Act;
 use crate::commands::{Engine, Kind, Orders};
 use crate::{
     EngineOrder, GunStates, Health, Library, Outcome, PlayerShip, Ship, Side, Target, audio, bindings, boarding, briefing, campaign, combat, course, docking, environment, menu,
-    options_menu, panels, rules, ship, toggle_pause,
+    panels, rules, ship, toggle_pause,
 };
 use bevy::input::mouse::AccumulatedMouseMotion;
 use bevy::input::mouse::AccumulatedMouseScroll;
@@ -697,7 +697,7 @@ pub fn object_hit<'a>(
             } else {
                 rock?.radius
             };
-            combat::seg_sphere(ray.origin, ray.origin + *ray.direction * 3000.0, tf.translation, radius).map(|t| (e, t * 3000.0))
+            combat::ray_sphere(ray, tf.translation, radius).map(|t| (e, t))
         })
         .min_by(|a, b| a.1.total_cmp(&b.1))
 }
@@ -755,7 +755,7 @@ mod camera_tests {
         world.init_resource::<crate::bindings::Bindings>();
         world.init_resource::<course::Plot>();
         world.init_resource::<panels::UiClick>();
-        world.init_resource::<options_menu::OptionsMenu>();
+        world.init_resource::<crate::options_menu::OptionsMenu>();
         world.init_resource::<environment::Sensors>();
         world.init_resource::<Messages<docking::DockMsg>>();
         world.init_resource::<Messages<audio::Sfx>>();
@@ -841,7 +841,7 @@ mod camera_tests {
         world.init_resource::<crate::bindings::Bindings>();
         world.init_resource::<course::Plot>();
         world.init_resource::<panels::UiClick>();
-        world.init_resource::<options_menu::OptionsMenu>();
+        world.init_resource::<crate::options_menu::OptionsMenu>();
         world.init_resource::<environment::Sensors>();
         world.init_resource::<Messages<docking::DockMsg>>();
         world.init_resource::<Messages<audio::Sfx>>();

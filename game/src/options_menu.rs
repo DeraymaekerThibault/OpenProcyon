@@ -13,7 +13,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use crate::audio::Sfx;
 use crate::boarding::BoardMsg;
-use crate::combat::{Health, Library, ray_hit, seg_sphere};
+use crate::combat::{Health, Library, ray_hit, ray_sphere};
 use crate::docking::Dockees;
 use crate::panels::hud_scale;
 use crate::sprites::{HudData, offset, size_of};
@@ -214,7 +214,7 @@ fn scenery_hit<'a>(
     spots
         .filter(|(e, ..)| sees(*e))
         .filter_map(|(e, tf, rock, animal, hull)| {
-            let sphere = |r: f32| seg_sphere(ray.origin, ray.origin + *ray.direction * 3000.0, tf.translation, r).map(|t| t * 3000.0);
+            let sphere = |r: f32| ray_sphere(ray, tf.translation, r);
             let t = match (animal, rock, hull) {
                 (Some(a), ..) => sphere(a.radius),
                 (_, _, Some(hull)) => hull.ray_hit(ray),
