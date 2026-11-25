@@ -159,7 +159,7 @@ only compare runs on the same machine and scene.
 ## Battle clock and scheduling
 
 Battle simulation runs in `FixedUpdate` at **0.033 s**, the interval documented in [re/gunnery.md](re/gunnery.md)
-and [re/effects.md](re/effects.md). `lib.rs::BattleSet` orders command application → sensors → AI → fleet following →
+and [re/effects.md](re/effects.md). `battle.rs::BattleSet` orders command application → sensors → AI → fleet following →
 docking/boarding orders → environmental forces → ship movement → combat → cleanup/accounting → outcome. Keep plugin systems
 in the owning stage; use a local chain for dependencies within one feature. Simulation uses fixed `Res<Time>` without per-system
 delta clamps. Virtual pause and speed still control this clock. At the original's speeds (up to 5x) one call catches up at most 10 frames
