@@ -16,7 +16,7 @@ const WAIT: f32 = 4.0;
 /// Stuck: the same obstacle for more than this many thinks while overlapping its sphere (gap under 1 unit) and barely moving.
 const STUCK_THINKS: u32 = 10;
 /// "Barely moving": the original tests the last position change per physics tick (0.033 s) under 0.1 units. PROVISIONAL: read as speed.
-const STUCK_SPEED: f32 = 0.1 / 0.033;
+const STUCK_SPEED: f32 = 0.1 / crate::TICK_SECS;
 /// Priority a moving ship of the human's gets on top of its speed: computer ships give way to it.
 pub(super) const HUMAN_PRIORITY: f32 = 50.0;
 
@@ -104,7 +104,7 @@ impl Avoid {
         let reach = t * v;
         let cands: Vec<&Other> =
             others.iter().filter(|o| o.key != me_key && !(me.lifeboat && o.lifeboat) && (o.centre - me.pos).with_y(0.0).length() - me.radius - o.radius < reach).collect();
-        let dest_heading = (-to_dest.x).atan2(-to_dest.z);
+        let dest_heading = crate::geom::heading_of(to_dest);
         if self.detour.is_some() && sweep(me, dest_heading, if shortened { t } else { RELEASE * t }, &cands).is_none() {
             self.detour = None;
         }

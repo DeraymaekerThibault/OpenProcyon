@@ -163,7 +163,7 @@ fn watch(
         if !report.ships.contains_key(&e) {
             report.sides.entry(side.clone()).or_default().ships += 1;
             // The same test the captain AI uses (ship.rs `ai`): only the human's own fleet waits for orders.
-            let computer = !(ship.side == Side::Player && member.is_none_or(|m| m.0 == fleets.local));
+            let computer = !crate::ship::is_human_ship(ship.side, member, Some(&fleets));
             report.ships.insert(
                 e,
                 ShipLine {

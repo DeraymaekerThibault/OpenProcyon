@@ -30,6 +30,7 @@ mod fixed_tests;
 pub mod flag;
 pub mod fx;
 mod gametime;
+pub mod geom;
 pub mod interpolate;
 pub mod lifeboats;
 pub mod line_of_fire;
@@ -92,7 +93,7 @@ pub use view::{Orbit, Sky, Slot, camera, hud, input, sky, toggle_debug};
 
 use bevy::prelude::*;
 pub use combat::{GunStates, Health, Library, Target, Transient};
-use std::f32::consts::{PI, TAU};
+use std::f32::consts::PI;
 use std::path::PathBuf;
 
 /// --lobby <spec>: play a skirmish setup through the lobby model instead of the --ship/--allies/--enemies shortcut. A named function,

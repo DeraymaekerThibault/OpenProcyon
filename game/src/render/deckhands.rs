@@ -42,6 +42,7 @@ use bevy::shader::ShaderRef;
 use serde_json::Value;
 
 use super::{Look, num, rgb};
+use crate::combat::xorshift_unit as rand;
 use crate::combat::{GunStates, Health, Library};
 use crate::scenario::Outcome;
 use crate::{Ship, Side};
@@ -727,13 +728,6 @@ fn lane_goal(from: Vec3, next: Vec3, side: f32) -> Vec3 {
     next + Vec3::new(-d.y, 0.0, d.x) * side
 }
 
-fn rand(rng: &mut u64) -> f32 {
-    *rng ^= *rng << 13;
-    *rng ^= *rng >> 7;
-    *rng ^= *rng << 17;
-    (*rng >> 40) as f32 / (1u64 << 24) as f32
-}
-
 /// The battle clock in tag units (tenths of a second, wrapping), as the shader reads `frame.clock.y`.
 fn stamp(time: &Time) -> u32 {
     ((time.elapsed_secs_f64() * 10.0) as u64 & 0xffff) as u32
@@ -1069,7 +1063,7 @@ fn drive(
                 let to = goal - h.pos;
                 let step = speed * dt;
                 if !h.climbing && to.xz().length() > 0.05 {
-                    h.face = Quat::from_rotation_y((-to.x).atan2(-to.z));
+                    h.face = Quat::from_rotation_y(crate::geom::heading_of(to));
                 }
                 if to.length() <= step {
                     h.pos = goal;
@@ -1229,7 +1223,7 @@ fn drive(
                 for (who, other) in [(e, p), (o, at)] {
                     if let Ok((mut h, _, _)) = hands.get_mut(who) {
                         let d = other - h.pos;
-                        h.face = Quat::from_rotation_y((-d.x).atan2(-d.z));
+                        h.face = Quat::from_rotation_y(crate::geom::heading_of(d));
                         h.chat = secs;
                         h.wait = h.wait.max(secs);
                     }

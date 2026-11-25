@@ -215,7 +215,7 @@ const COMPASS_RADIUS: f32 = 5.9;
 
 fn navigation_heading(ship: Vec3, goal: Vec3) -> f32 {
     let d = goal - ship;
-    (-d.x).atan2(-d.z)
+    crate::geom::heading_of(d)
 }
 
 // ---- ship name banners and the target reticle -----------------------------------------------------------------

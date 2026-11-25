@@ -179,7 +179,7 @@ pub(super) fn mission_ai(
         if let (Some((foe, fp)), false) = (chase, ms.stance == Stance::Dummy) {
             let (goal, order, throttle) = if ms.ram && ordered.is_some() {
                 let d = fp - tf.translation;
-                ((-d.x).atan2(-d.z), EngineOrder::Emergency, crate::ship::attack::throttle(crate::ship::attack::Routine::Ram, key(e), tf.translation, ship.heading, fp))
+                (crate::geom::heading_of(d), EngineOrder::Emergency, crate::ship::attack::throttle(crate::ship::attack::Routine::Ram, key(e), tf.translation, ship.heading, fp))
             } else if let Some(away) = crate::ship::flee(&holes, tf.translation) {
                 (away, EngineOrder::Emergency, None)
             } else {
@@ -194,7 +194,7 @@ pub(super) fn mission_ai(
                         };
                         let course = crate::ship::attack::course(routine, tf.translation, ship.heading, at, gap, range[0], time.elapsed_secs(), breakoffs.entry(e).or_default());
                         let d = course[0] - tf.translation;
-                        ((-d.x).atan2(-d.z), EngineOrder::Emergency, crate::ship::attack::throttle(routine, key(e), tf.translation, ship.heading, course[0]))
+                        (crate::geom::heading_of(d), EngineOrder::Emergency, crate::ship::attack::throttle(routine, key(e), tf.translation, ship.heading, course[0]))
                     }
                     None => (ship.heading, EngineOrder::Stop, None),
                 }
@@ -217,7 +217,7 @@ pub(super) fn mission_ai(
                     let top = crate::ship::max_speed(&ship, class, h);
                     let fraction = crate::ship::speed_fraction(ship.speed, top);
                     let d = wp - tf.translation;
-                    let error = crate::ship::angdiff((-d.x).atan2(-d.z), ship.heading);
+                    let error = crate::ship::angdiff(crate::geom::heading_of(d), ship.heading);
                     ship.throttle = Some(crate::ship::path_end::throttle(fraction, error, to_last, class.radius, false));
                     continue;
                 }

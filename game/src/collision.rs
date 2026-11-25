@@ -747,10 +747,10 @@ pub fn sail(
             crate::combat::knock_off(&mut rock, rock_tf.translation, tf.translation);
             let hurt = rock_hurt(rock.mass, (a.velocity - b.velocity).length(), substep);
             // A rock the touch breaks counts as destroyed by the ship (its owner is credited, as for a shell).
-            if rock.damage(hurt)
+            if let Some(destroyed) = rock.strike(hurt, e, rock_e)
                 && let Some(d) = broken.as_mut()
             {
-                d.write(crate::combat::Destroyed { by: e, victim: rock_e });
+                d.write(destroyed);
             }
             if let Some(r) = rams.as_mut().filter(|_| hurt > 0.0) {
                 r.write(Ram { a: e, b: rock_e, damage: hurt, at: contact.point });

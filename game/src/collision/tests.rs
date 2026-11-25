@@ -730,7 +730,7 @@ fn avoiders_sail_alike_whatever_the_query_order() {
                 let a = i as f32 * std::f32::consts::TAU / 6.0;
                 let at = Vec3::new(a.cos(), 0.0, a.sin()) * 60.0;
                 let ship = crate::Ship {
-                    heading: (-at.x).atan2(-at.z) + std::f32::consts::PI,
+                    heading: crate::geom::heading_of(at) + std::f32::consts::PI,
                     speed: 8.0,
                     order: EngineOrder::Full,
                     waypoints: vec![-at],

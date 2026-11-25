@@ -298,7 +298,7 @@ fn game_axes(v: Vec3) -> [f32; 3] {
     [v.x, -v.z, v.y]
 }
 fn bevy_axes(v: [f32; 3]) -> Vec3 {
-    Vec3::new(v[0], v[2], -v[1])
+    crate::data::conv(v[0], v[1], v[2])
 }
 
 impl Saved {

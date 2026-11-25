@@ -260,13 +260,18 @@ pub fn fraction_hit(class: &Class, hp: &mut Health, fraction: f32, humans_own_sh
     }
 }
 
+/// Damage factor on the human player's own ships per difficulty (Easy, Normal, Hard): shells of the other side and fire.
+pub(super) const INCOMING_BY_DIFFICULTY: [f32; 3] = [0.25, 0.5, 1.0];
+/// Damage factor of the player's shells on computer ships per difficulty (Easy, Normal, Hard).
+pub(super) const OUTGOING_BY_DIFFICULTY: [f32; 3] = [3.0, 2.0, 1.0];
+
 /// What a burning fire takes from its section on a fire tick. In the original a fire hurts its section through the ordinary hit
 /// routine, which scales by the victim's owner: on the human player's own ships by the incoming difficulty factor (Easy x0.25,
 /// Normal x0.5, Hard x1), on any other ship not at all (a fire has no attacker, and only the player's own hits are scaled up).
 /// Hit points are whole numbers, rounded to the nearest (half to even): a fire of 1.0 takes nothing on Normal (measured on the
 /// original: eight times of eight).
 pub fn fire_damage(intensity: f32, humans_own_ship: bool, difficulty: u8) -> f32 {
-    let scale = if humans_own_ship { [0.25, 0.5, 1.0][difficulty.min(2) as usize] } else { 1.0 };
+    let scale = if humans_own_ship { INCOMING_BY_DIFFICULTY[difficulty.min(2) as usize] } else { 1.0 };
     (intensity * scale).round_ties_even()
 }
 
@@ -295,7 +300,7 @@ pub fn fires(
 ) {
     let dt = time.delta_secs();
     for (me, _, ship, mut hp, mut fires, posts, mission, member, boarding) in &mut ships {
-        let humans = ship.side == Side::Player && member.is_none_or(|m| fleets.as_ref().is_none_or(|f| m.0 == f.local));
+        let humans = crate::ship::is_human_ship(ship.side, member, fleets.as_deref());
         let fires = &mut *fires;
         if hp.destroyed {
             for f in fires.list.drain(..) {
@@ -457,6 +462,16 @@ pub fn swap_meshes(
     }
 }
 
+/// The section a model node belongs to, by its layer name (a damaged mesh's `_damaged` suffix is stripped; case is ignored), and
+/// whether the node is the damaged mesh. `swappable_only` skips sections that have no intact/damaged pair.
+pub(super) fn section_of_node(class: &Class, name: &str, swappable_only: bool) -> (Option<usize>, bool) {
+    let (base, damaged) = match crate::data::derive::damaged_layer(name) {
+        Some(base) => (base, true),
+        None => (name.to_string(), false),
+    };
+    (class.sections.iter().position(|s| (!swappable_only || s.swappable) && s.layer.eq_ignore_ascii_case(&base)), damaged)
+}
+
 /// The nodes under `root` that are a section's intact or damaged mesh, by name.
 fn resolve_swap_nodes(root: Entity, class: &Class, children: &Query<&Children>, nodes: &Query<(&Name, &mut Visibility)>) -> Vec<(Entity, usize, bool)> {
     let mut found = Vec::new();
@@ -467,15 +482,11 @@ fn resolve_swap_nodes(root: Entity, class: &Class, children: &Query<&Children>, 
         if n.contains('.') {
             continue;
         }
-        let (base, damaged) = match crate::data::derive::damaged_layer(n) {
-            Some(base) => (base, true),
-            None => (n.to_string(), false),
-        };
         // A damaged mesh of a layer that is no swappable section can never be shown (it would sit on top of the intact one).
-        match class.sections.iter().position(|s| s.swappable && s.layer.eq_ignore_ascii_case(&base)) {
-            Some(i) => found.push((d, i, damaged)),
-            None if damaged => found.push((d, usize::MAX, true)),
-            None => {}
+        match section_of_node(class, n, true) {
+            (Some(i), damaged) => found.push((d, i, damaged)),
+            (None, true) => found.push((d, usize::MAX, true)),
+            (None, false) => {}
         }
     }
     found

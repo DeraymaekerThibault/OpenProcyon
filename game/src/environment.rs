@@ -444,7 +444,7 @@ impl SpaceAnimal {
         }
         self.velocity = (tf.translation - before) / dt.max(0.0001);
         if self.velocity.length_squared() > 0.001 {
-            let heading = (-self.velocity.x).atan2(-self.velocity.z);
+            let heading = crate::geom::heading_of(self.velocity);
             tf.rotation = tf.rotation.slerp(Quat::from_rotation_y(heading), 1.0 - (-2.0 * dt).exp());
         }
     }
@@ -523,7 +523,7 @@ pub fn spawn(commands: &mut Commands, assets: &AssetServer, data: &Value, whales
         let centre = group.iter().copied().sum::<Vec3>() / group.len() as f32;
         let id = a["id"].as_u64().unwrap_or(0);
         let forward = crate::scenario::game_rotation(&a["rot"]) * Vec3::NEG_Z;
-        let heading = (-forward.x).atan2(-forward.z);
+        let heading = crate::geom::heading_of(forward);
         let min = game_to_bevy(&whale["min"]);
         let max = game_to_bevy(&whale["max"]);
         commands.spawn((
@@ -587,8 +587,7 @@ impl Current {
             .filter_map(|w| {
                 let (a, b) = (flat(w[0]), flat(w[1]));
                 let ab = b - a;
-                let t = ((q - a).dot(ab) / ab.length_squared().max(1e-6)).clamp(0.0, 1.0);
-                let d = q.distance(a + ab * t);
+                let d = q.distance(crate::geom::nearest_on_segment_floored_2d(q, a, b, 1e-6));
                 (d < self.radius).then_some((d, ab.normalize_or_zero()))
             })
             .min_by(|a, b| a.0.total_cmp(&b.0))

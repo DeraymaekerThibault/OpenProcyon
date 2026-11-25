@@ -175,9 +175,7 @@ pub fn release_hold(commands: &mut Commands, e: Entity) {
 #[derive(Component)]
 pub struct ShipName(pub String);
 
-pub fn angdiff(a: f32, b: f32) -> f32 {
-    (a - b + PI).rem_euclid(TAU) - PI
-}
+pub use crate::geom::angdiff;
 
 pub type CaptainBusy = Or<(With<docking::Docker>, With<docking::Tower>, With<boarding::GrappleOrder>, With<boarding::Grapple>, With<boarding::Boarding>)>;
 
@@ -226,7 +224,7 @@ impl Explore {
 pub fn flee(holes: &[(Vec3, f32)], pos: Vec3) -> Option<f32> {
     holes.iter().find(|(c, r)| Vec2::new(pos.x - c.x, pos.z - c.z).length() < r + HOLE_MARGIN).map(|(c, _)| {
         let d = pos - *c;
-        (-d.x).atan2(-d.z)
+        crate::geom::heading_of(d)
     })
 }
 
@@ -345,7 +343,7 @@ pub fn ai(
         // The human's own fleet waits for orders; allied computer fleets share the human's side but hunt like any computer.
         // A ship that was just sunk has left its fleet and is computer-run, whoever steered it (docs/re/effects.md "Death drive").
         let sinking = dying.contains(e);
-        let human = !sinking && s.side == Side::Player && member.is_none_or(|m| m.0 == fleets.local);
+        let human = !sinking && is_human_ship(s.side, member, Some(&fleets));
         if busy.contains(e) || left_to_script(e) {
             continue;
         }
@@ -488,7 +486,7 @@ pub fn helm_step(ship: &mut Ship, tf: &mut Transform, class: &combat::Class, hea
                 // The original ship sails straight on past the last marker at the same order and speed.
                 ship.waypoints.remove(0);
             } else {
-                want = Some((-d.x).atan2(-d.z));
+                want = Some(crate::geom::heading_of(d));
             }
         } else if let Some(g) = ship.goal {
             want = Some(g);
@@ -544,6 +542,15 @@ pub fn approach_speed(speed: f32, target: f32, rate: f32, dt: f32) -> f32 {
 /// Fleet identity is not allegiance: allied skirmish players have different owners.
 #[derive(Component, Clone)]
 pub struct FleetMember(pub crate::names::Owner, pub usize);
+
+/// Whether a ship is the human's own: on the player's side and, when fleets are tracked, in the local player's fleet (or in none).
+/// Allied computer fleets share `Side::Player` and are NOT human. This is the "waits for orders / human scoring" question
+/// (captain AI, fire and ram damage scaling, the battle report). Not the same question as `Side`-only difficulty scaling of shells
+/// and blasts (`combat::shells::side_damage_scale`), nor collision's `humans` (it also counts the `Human` marker). MAINTAINER
+/// QUESTION: shells and blasts scale by `Side`, fire and ramming by this ownership test; the original's rule is unconfirmed.
+pub fn is_human_ship(side: Side, member: Option<&FleetMember>, fleets: Option<&Fleets>) -> bool {
+    side == Side::Player && member.is_none_or(|m| fleets.is_none_or(|f| m.0 == f.local))
+}
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Formation {
@@ -995,13 +1002,19 @@ pub(crate) fn follow_speed(hold: bool, distance: f32, leader_speed: f32, max: f3
 /// original's follower pathing is unknown; this only keeps followers from driving through the ship they follow and shoving it.
 pub(crate) fn steer_round(from: Vec3, goal: Vec3, leader: Vec3, clearance: f32) -> Vec3 {
     let (d, rel) = ((goal - from).with_y(0.0), (leader - from).with_y(0.0));
-    let t = if d.length_squared() > 0.0 { (rel.dot(d) / d.length_squared()).clamp(0.0, 1.0) } else { 0.0 };
+    let t = crate::geom::segment_t(rel, d);
     let off = (from + d * t - leader).with_y(0.0);
     if off.length() >= clearance || (goal - leader).with_y(0.0).length() < clearance {
         return goal;
     }
     let side = off.try_normalize().unwrap_or_else(|| Vec3::new(-d.z, 0.0, d.x).normalize_or_zero());
     (leader + side * clearance * 1.2).with_y(goal.y)
+}
+
+/// What the presentation (sail billow, flag, deck rules) reads as "how fast the ship goes": |speed| over the class's full speed,
+/// 0..1. Distinct from `speed_fraction` (top speed passed in, 0 below 0.001, no floor on a zero class speed here).
+pub fn speed_share(speed: f32, class: &combat::Class) -> f32 {
+    (speed.abs() / full_speed(class).max(1e-3)).clamp(0.0, 1.0)
 }
 
 /// A ship's speed as a fraction of its top speed `top` (0..1; 0 when it has none): the path-end and install-primary throttle.
@@ -1011,7 +1024,7 @@ pub(crate) fn speed_fraction(speed: f32, top: f32) -> f32 {
 
 /// The bearing error a follower steers out toward `to` (its slot, relative to the ship): 0 within a unit of it.
 pub(crate) fn follow_error(to: Vec3, heading: f32) -> f32 {
-    if to.length_squared() > 1.0 { angdiff((-to.x).atan2(-to.z), heading) } else { 0.0 }
+    if to.length_squared() > 1.0 { angdiff(crate::geom::heading_of(to), heading) } else { 0.0 }
 }
 
 /// How a follower's orders map `wanted` speed onto the helm (`follow_speed` supplies it).
@@ -1109,7 +1122,7 @@ pub fn fleet_follow(world: &mut World) {
                 let heading_error = follow_error(to_goal, heading);
                 let wanted = follow_speed(pilot.hold, distance, speed, max, heading_error);
                 if let Some(mut s) = world.get_mut::<Ship>(e) {
-                    let goal = if pilot.hold { Some((-(tf.rotation * Vec3::NEG_Z).x).atan2(-(tf.rotation * Vec3::NEG_Z).z)) } else { None };
+                    let goal = if pilot.hold { Some(crate::geom::heading_of(tf.rotation * Vec3::NEG_Z)) } else { None };
                     let helm = FollowHelm { top: full, max_share: EngineOrder::Emergency.fraction(), emergency_over_top: true };
                     follow_station(&mut s, aim, distance, goal, wanted, helm);
                 }
