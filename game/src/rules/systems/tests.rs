@@ -765,4 +765,29 @@ fn the_console_dispatch_is_the_same_in_a_campaign_mission() {
     assert!(!log.contains("needs"), "a mission serves every need: {log}");
     app.update();
     assert!(app.world().get::<Transform>(hero).unwrap().translation.distance(Vec3::new(30.0, 0.0, -10.0)) < 1.0);
+
+/// 'Player Killed A Object' of kind Ship holds when a ship of another player sinks under the player's guns (`combat::deaths` sends
+/// `Destroyed`); a hull of the player's own does not count. Asset-free.
+#[test]
+fn a_sunk_ship_is_a_kill_for_the_player_who_sank_it() {
+    let rule = |flag: &str, kind: &str| {
+        once(
+            flag,
+            serde_json::json!([{"Type": "Player Killed A Object", "Player Name": "Navy", "World Object Type": kind}]),
+            serde_json::json!([{"Type": "Set Flag Action", "Flag Name": flag, "Boolean Value": "TRUE"}]),
+        )
+    };
+    let mut app = order_app(serde_json::json!({"players": ["Player0 Group"], "rules": [rule("ship kill", "Ship"), rule("rock kill", "Asteroid")]}));
+    let (gun, own, raider) = (order_ship(&mut app, 1, "Navy", Vec3::ZERO), order_ship(&mut app, 2, "Navy", Vec3::X * 20.0), order_ship(&mut app, 3, "Raiders", Vec3::X * 40.0));
+    app.update();
+    app.world_mut().write_message(Destroyed { by: gun, victim: own });
+    app.update();
+    app.update();
+    assert!(!app.world().resource::<Mission>().script.flag("ship kill"), "sinking the player's own hull is no kill");
+    app.world_mut().write_message(Destroyed { by: gun, victim: raider });
+    app.update();
+    app.update();
+    let script = &app.world().resource::<Mission>().script;
+    assert!(script.flag("ship kill"), "a raider sunk by the player's ship is a ship kill");
+    assert!(!script.flag("rock kill"), "and not a rock kill");
 }

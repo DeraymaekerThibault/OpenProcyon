@@ -392,7 +392,7 @@ pub fn plugin(app: &mut App) {
     sk.load_map();
     app.insert_resource(sk)
         .add_systems(OnEnter(Screen::Battle), (clear_menu, stop_music))
-        .add_systems(OnEnter(Screen::Main), start_music)
+        .add_systems(OnEnter(Screen::Main), (start_music, exit_after_lobby_scenario))
         .add_systems(Update, follow_music_volume)
         .insert_resource(SaveUi { list: crate::campaign::list_saves(), ..default() })
         .add_sub_state::<Overlay>()
@@ -679,6 +679,15 @@ fn lobby_scenario(
         return;
     }
     launch(&mut sk, &mut next);
+}
+
+/// A `--lobby` launch (a tool starting a battle, `lobby_scenario`) ends the process when the player leaves the battle for the main
+/// menu (the Game Summary's continue arrow, F10, the in-game menu's quit), as a `--shot` run does after the battle: the tool waiting
+/// on the process sees it exit instead of a menu nobody asked for. Interactive menu play has no `LobbyScenario` and is unchanged.
+fn exit_after_lobby_scenario(scenario: Option<Res<LobbyScenario>>, mut exit: MessageWriter<AppExit>) {
+    if scenario.is_some() {
+        exit.write(AppExit::Success);
+    }
 }
 
 /// Dev/smoke hook (`--menu lobby --autolaunch`): fills the human fleet like the fleet screen would and launches.

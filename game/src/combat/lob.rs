@@ -317,6 +317,7 @@ pub fn ram_damage(
     mut ships: Query<(&Ship, &Transform, &mut Health, Option<&crate::campaign::MissionShip>, Option<&crate::ship::FleetMember>)>,
     fleets: Option<Res<crate::ship::Fleets>>,
     mut sfx: MessageWriter<crate::audio::Sfx>,
+    mut last: ResMut<super::LastDamager>,
 ) {
     let human = |s: &Ship, m: Option<&crate::ship::FleetMember>| s.side == Side::Player && m.is_none_or(|m| fleets.as_ref().is_none_or(|f| m.0 == f.local));
     let mut sounded: Vec<(Entity, Entity, &'static str)> = vec![];
@@ -331,6 +332,9 @@ pub fn ram_damage(
         let Some(k) = crate::collision::nearest_section(class, tf, r.at).filter(|k| *k < hp.sections.len()) else { continue };
         let d = r.damage * scale;
         apply_ship_hit(class, &mut hp, k, [d, d, 0.0, 0.0, 0.0], ms.map_or(0.0, |m| m.invuln), false, &mut rng);
+        if rammer.is_some() {
+            last.0.insert(r.a, r.b); // a rock's touch has no owner to credit
+        }
         if let Some(pool) = class.sections.get(k).and_then(|s| super::shells::damage_pool(material_key(&s.material))) {
             if !sounded.contains(&(r.b, r.a, pool)) {
                 sfx.write(super::shells::damage_sfx(pool, r.at, &mut rng));

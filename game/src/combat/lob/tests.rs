@@ -139,6 +139,7 @@ fn a_ram_hits_only_the_section_nearest_the_contact() {
     app.insert_resource(lib)
         .insert_resource(SimRng::new(7))
         .init_resource::<crate::scenario::Difficulty>()
+        .init_resource::<crate::combat::LastDamager>()
         .add_message::<crate::collision::Ram>()
         .add_message::<crate::audio::Sfx>()
         .add_systems(Update, ram_damage);
