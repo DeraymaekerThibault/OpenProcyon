@@ -3,8 +3,6 @@ use std::path::Path;
 
 use serde::Serialize;
 
-use super::resolved_ship;
-
 /// The weapon-panel slot a gun mount takes.
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct GunBank {
@@ -29,10 +27,13 @@ pub struct ShipArt {
 
 /// The side icon, the weapon-panel outline and each gun's bank of ship `id` in `root` (the base assets or an overlay): the same
 /// pictures `shipart::generate` writes (it shares the code), whether or not the ship has art of its own. Writes nothing. Errors are
-/// the ship loader's (see [`resolved_ship`]).
+/// the ship loader's.
 pub fn ship_art(root: &Path, id: &str) -> Result<ShipArt, String> {
-    let ship = resolved_ship(root, id)?;
+    let (guns, _) = crate::data::try_load_weapons(root)?;
+    let class = crate::data::try_load_class(root, id, &guns)?;
     let doc = super::read_merged(root, &format!("ships/{id}/ship.json")).map_err(|e| e.to_string())?;
+    // Mounts keep the order of the file's `guns` object (the loader's order).
+    let labels: Vec<&String> = doc["guns"].as_object().map(|m| m.keys().collect()).unwrap_or_default();
     let facts = crate::shipart::model_facts(root, &doc, id);
     let icon = facts.as_ref().and_then(|f| crate::shipart::icon_sprite(&f.layers));
     let panel = facts.as_ref().and_then(|f| crate::shipart::panel_sprite(&f.layers));
@@ -40,7 +41,7 @@ pub fn ship_art(root: &Path, id: &str) -> Result<ShipArt, String> {
         icon_png: icon.map(|s| s.png()),
         outline_trim: panel.as_ref().map(|s| s.trim),
         outline_png: panel.map(|s| s.png()),
-        banks: ship.guns.iter().map(|g| GunBank { name: g.name.clone(), bank: g.bank }).collect(),
+        banks: class.mounts.iter().enumerate().map(|(i, m)| GunBank { name: labels.get(i).map_or_else(|| format!("#{i}"), |l| l.to_string()), bank: m.bank }).collect(),
     })
 }
 

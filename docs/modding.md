@@ -179,16 +179,13 @@ Tools that link the engine as a library (an editor, a checker) use `openprocyon:
 imported assets without side effects, builds a mod overlay into a folder of the tool's own (the game's `local/overlay` is not touched, so
 several instances can run at once), and returns the rule schema, the JSON Schemas of the mod files (`schemas()`), the mission checker's findings as values, the whole-mod check (`check_mod`), the names each kind of rule field accepts (`accepted_names`, next to `defined_names`; a `group` field also takes players and the groups of placed ships), a writer for the engine's JSON layout (`to_json_string`: the exact text `tools/jsonio.py` writes, so a saved file differs from the importer's only where its data does), the unknown-key warnings of any document (`unknown_key_findings`), how a mod file combines with the files below it (`merge_rule`, `extends_parent`, `MERGED`), and the files' axes and `rot` triples as the loader reads them (`game_to_bevy`, `bevy_to_game`, `mount_rotation`, `mount_rot`); a model's `Crew_*` nodes are `CrewNode` points of `data::derive::read`.
 
-Three more calls of `authoring` give a tool what it would otherwise restate. `resolved_ship(root, id)` loads a ship as the game does and
-returns what a modder sees (points, speed, thrust, mass, sight, core HP, sections and their HP, guns with `pos`/`rot`/`bank`, engines,
-wakes, flags, crew posts, tow and homing points, effects and sounds), with `sources` saying for each ship.json key (and `/guns/<label>/pos`,
-`/physics/MaxSpeed`, ... for what an entry may state) whether the value is `file` (the ship.json chain sets it), `model` (derived from the
-GLB) or `default` (a race and size choice, the Navy Cutter numbers or a fixed default); PROVISIONAL: the source is read off the merged
-file against the fill table, not recorded by the loader. `ship_art(root, id)` returns the PNG bytes of the command-bar icon and the
+Three more calls of `authoring` give a tool what it would otherwise restate. `resolved_ship(root, id)` returns a ship as the loader sees
+it: speed, thrust, mass, core and section hit points, the gun mounts and every hardpoint in game axes (guns, engines, wakes, flags,
+tow ends, homing point, boarding points, crew nodes), each value with its source: a JSON pointer into `ship.json`, a model node, or a
+fallback rule (marked PROVISIONAL where the engine guessed). It is built from the merged document the loader hands back, so which of
+`ship.json` and the model wins is decided once, in the loader. `ship_art(root, id)` returns the PNG bytes of the command-bar icon and the
 weapon-panel outline the engine generates for a ship from a model (the same code `shipart::generate` runs, nothing is written) and each
-gun's bank. `loaded::resolved_ship(root, id)` is a second view of the same ship, built from the merged document the loader hands back: speed,
-mass, hit points, mounts and every hardpoint in game axes, each with its source (a JSON pointer into `ship.json`, a model node or a
-fallback rule); PROVISIONAL: two branches each added a `resolved_ship`, both are kept until one is chosen. `extensions()` returns the rows of "Engine extensions (not retail)" below (feature, gate, kind, code), read from this file at
+gun's bank. `extensions()` returns the rows of "Engine extensions (not retail)" below (feature, gate, kind, code), read from this file at
 build time.
 
 Restart the game after every change: the overlay, the merged tables, the string table, the sound index and the render profile are
