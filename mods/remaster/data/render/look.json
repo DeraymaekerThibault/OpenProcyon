@@ -58,7 +58,7 @@
       {"match": "Nebula", "replace": true, "density": 1.1, "absorption": 3.0, "dust": 0.8, "max_opacity": 0.6, "steps": 20, "light_steps": 2, "sun": 0.6, "core_glow": 7.0, "scale": 2.2, "churn": 0.02, "color_low": [0.22, 0.1, 0.5], "color_high": [1.0, 0.75, 1.0], "color_alt": [0.15, 0.6, 0.85], "variation": 0.6, "fill": 0.15, "inside": 0.5, "flash": 3.0, "flash_reach": 0.5}
     ]
   },
-  "currents": {"brightness": 0.6, "streaks": 10, "sparkle": 0.12, "core": 1.0, "texture": 0.2, "color": [0.08, 0.4, 0.95], "color_high": [0.4, 0.85, 1.0], "fill": 0.06, "pulse": 0.4},
+  "currents": {"brightness": 0.6, "streaks": 10, "sparkle": 0.12, "core": 1.0, "texture": 0.2, "color": [0.08, 0.4, 0.95], "color_high": [0.4, 0.85, 1.0], "fill": 0.06, "pulse": 0.4, "wave_height": 6, "wave_length": 110, "wave_speed": 18, "crest": 0.8},
   "ambient": 0.55,
   "hide_effects": ["CannonBall_Light_Muzzle", "CannonBall_Medium_Muzzle", "CannonBall_Heavy_Muzzle", "Damaged Section_Heavy"],
   "ambient_floor": [0.18, 0.24, 0.32],

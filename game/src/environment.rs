@@ -606,7 +606,7 @@ fn current_mesh(path: &[Vec3]) -> Mesh {
 }
 
 /// `current_mesh` for a lane of the given radius (`OP Etherium Current` sets one).
-fn current_mesh_of(path: &[Vec3], radius: f32) -> Mesh {
+pub(crate) fn current_mesh_of(path: &[Vec3], radius: f32) -> Mesh {
     use bevy::asset::RenderAssetUsages;
     use bevy::mesh::{Indices, PrimitiveTopology};
     let mut positions = Vec::new();
