@@ -112,6 +112,10 @@ pub struct MapDoc {
     #[serde(default, deserialize_with = "lenient_list")]
     #[schemars(with = "Vec<MapShipDoc>")]
     pub ships: Vec<MapShipDoc>,
+    /// Retail localized ship names by key (`name id -> text`), exported with a skirmish map but not read from here (PROVISIONAL: the
+    /// engine reads `ship_names` of `media.json`, which `Set Ship Name` uses; this one is listed so editors know the key).
+    #[serde(default, deserialize_with = "crate::data::lenient")]
+    pub ship_names: Option<std::collections::BTreeMap<String, String>>,
     /// Scenery: islands, asteroids, bases, black holes (`docs/missions.md`).
     #[serde(default, deserialize_with = "lenient_list")]
     #[schemars(with = "Vec<ObjectDoc>")]
@@ -480,6 +484,33 @@ pub struct VictoryConditionDoc {
     /// `Does Group Contain Unit Name`: the game's `"TRUE"` / `"FALSE"` string (any case; anything else is false).
     #[serde(rename = "Exists?", default, deserialize_with = "crate::data::lenient")]
     pub exists: Option<String>,
+    /// Retail rule fields the exporter keeps on a condition. The skirmish victory reader does not read them (it takes `objects` or
+    /// `group`); they are the spelling and types of the mission rule conditions (`docs/rule-types.md`, `--dump-rule-schema`):
+    /// `Group/Unit Name`, `Group Name`, `Unit Name` and `Group/Unit` name a group or unit (text), `Volume Name` a volume (text),
+    /// `Vital Section` a section kind (text; the rules ignore it).
+    #[serde(rename = "Group/Unit Name", default, deserialize_with = "crate::data::lenient")]
+    pub group_unit_name: Option<String>,
+    /// See `group_unit_name`: the group of `Group Destroyed`, `Enter Volume`, ... (text).
+    #[serde(rename = "Group Name", default, deserialize_with = "crate::data::lenient")]
+    pub group_name: Option<String>,
+    /// See `group_unit_name`: the unit a condition is about, such as `Unit is Within any Nebula` (text).
+    #[serde(rename = "Unit Name", default, deserialize_with = "crate::data::lenient")]
+    pub unit_name: Option<String>,
+    /// See `group_unit_name`: the group of `Team has captured / destroyed a ship from Group/Unit` (text).
+    #[serde(rename = "Group/Unit", default, deserialize_with = "crate::data::lenient")]
+    pub group_unit: Option<String>,
+    /// The volume's name of `Enter Volume` and its kin (text); the polygon is `polygon`.
+    #[serde(rename = "Volume Name", default, deserialize_with = "crate::data::lenient")]
+    pub volume_name: Option<String>,
+    /// The section kind of `Group/Unit Vital Section has >,<,= X damage` (text; the rules ignore it, PROVISIONAL).
+    #[serde(rename = "Vital Section", default, deserialize_with = "crate::data::lenient")]
+    pub vital_section: Option<String>,
+    /// The count `Team has captured a ship from Group/Unit` and `Player Vs Player capture count` compare with.
+    #[serde(rename = "Number Of Captures", default, deserialize_with = "crate::data::lenient")]
+    pub number_of_captures: Option<f64>,
+    /// The count `Team has destroyed a ship from Group/Unit` waits for.
+    #[serde(rename = "Number Of Ships Destroyed", default, deserialize_with = "crate::data::lenient")]
+    pub number_of_ships_destroyed: Option<f64>,
 }
 
 /// The JSON Schema of `map.json`, generated from [`MapDoc`].
@@ -676,6 +707,22 @@ mod tests {
         let schema = schema();
         shape_problems(&schema, &schema, map, "", &mut out);
         out
+    }
+
+    #[test]
+    fn the_keys_of_retail_victory_conditions_and_ship_names_are_described() {
+        let s = schema();
+        let map = json!({"ship_names": {"KEY": "Name"}, "victory": [{"name": "r", "if": [{
+            "Type": "Group Destroyed", "Group/Unit": "G,U", "Number Of Captures": 1, "Group/Unit Name": "G", "Vital Section": "vitalToShip",
+            "Group Name": "G", "Volume Name": "V", "Number Of Ships Destroyed": 2, "Unit Name": "U"}]}]});
+        assert!(crate::authoring::unknown_keys(&s, &map).is_empty(), "{:?}", crate::authoring::unknown_keys(&s, &map));
+        assert!(problems(&map).is_empty(), "{:?}", problems(&map));
+        let doc = MapDoc::from_value(&map);
+        let c = &doc.victory[0].conditions.as_ref().unwrap()[0];
+        assert_eq!((c.volume_name.as_deref(), c.number_of_captures, c.number_of_ships_destroyed), (Some("V"), Some(1.0), Some(2.0)));
+        assert_eq!(doc.ship_names.unwrap()["KEY"], "Name");
+        let bad = problems(&json!({"ship_names": [1], "victory": [{"if": [{"Number Of Captures": "many"}]}]}));
+        assert_eq!(bad.len(), 2, "{bad:?}");
     }
 
     #[test]
