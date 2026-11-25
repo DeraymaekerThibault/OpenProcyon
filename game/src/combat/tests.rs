@@ -1901,3 +1901,28 @@ fn vital_damage_sums_hit_points_per_section_kind() {
     assert_eq!(d[3], Some(1.0));
     assert_eq!((d[1], d[2]), (None, None));
 }
+
+/// A ship that starts sinking sends one `Destroyed`, credited to the ship that last damaged it; the black hole's victims, hulls nobody
+/// damaged and a second pass credit nothing. Asset-free.
+#[test]
+fn a_sinking_ship_sends_one_destroyed_credited_to_its_last_damager() {
+    let mut app = App::new();
+    app.insert_resource(Library { classes: vec![crate::fixed_tests::synthetic_class()], guns: default(), bullets: default(), names: default(), clips: default() })
+        .init_resource::<LastDamager>()
+        .add_message::<Hit>()
+        .add_message::<Destroyed>()
+        .add_message::<crate::lifeboats::ShipLost>()
+        .add_systems(Update, (note_damagers, deaths).chain());
+    let ship = |app: &mut App, core: f32| app.world_mut().spawn((Ship::new(0, Side::Player), Health { sections: vec![], core, destroyed: false })).id();
+    let (first, last, victim, unhit, swallowed) = (ship(&mut app, 100.0), ship(&mut app, 100.0), ship(&mut app, 0.0), ship(&mut app, 0.0), ship(&mut app, 0.0));
+    app.world_mut().entity_mut(swallowed).insert(crate::blackhole::Swallowed);
+    for (shooter, victim) in [(first, victim), (last, victim), (first, swallowed)] {
+        app.world_mut().write_message(Hit { shooter, victim });
+    }
+    app.update();
+    let sent: Vec<_> = app.world_mut().resource_mut::<Messages<Destroyed>>().drain().map(|d| (d.by, d.victim)).collect();
+    assert_eq!(sent, vec![(last, victim)], "only the shot hull, credited to the last shooter; not the unhit one ({unhit:?}) or the swallowed one");
+    assert!(app.world().get::<Sinking>(victim).is_some() && app.world().get::<Sinking>(unhit).is_some(), "all three start sinking");
+    app.update();
+    assert!(app.world_mut().resource_mut::<Messages<Destroyed>>().drain().next().is_none(), "once, not every frame");
+}

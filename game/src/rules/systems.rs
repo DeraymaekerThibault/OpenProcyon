@@ -231,6 +231,11 @@ fn update(
         if let Some(o) = owner_of(d.by) {
             // A destroyed rock is one the belt remembers (it may already be gone from the unit list).
             let rock = script.belt.contains_key(&d.victim);
+            // A sunk ship is a kill for the player who dealt the last damage (`combat::deaths`); a hull of the shooter's own player is not.
+            // PROVISIONAL: retail's treatment of friendly fire is not measured (the Game Summary does not credit it either).
+            if !rock && owner_of(d.victim).is_some_and(|v| v == o) {
+                continue;
+            }
             *script.kills.entry((o.clone(), rock)).or_default() += 1;
             script.record_destroyed(&o, d.victim);
         }
