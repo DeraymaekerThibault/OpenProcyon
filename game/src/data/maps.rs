@@ -112,10 +112,13 @@ pub struct MapDoc {
     #[serde(default, deserialize_with = "lenient_list")]
     #[schemars(with = "Vec<MapShipDoc>")]
     pub ships: Vec<MapShipDoc>,
-    /// Retail localized ship names by key (`name id -> text`), exported with a skirmish map but not read from here (PROVISIONAL: the
-    /// engine reads `ship_names` of `media.json`, which `Set Ship Name` uses; this one is listed so editors know the key).
+    /// Retail ship names of the map's placed ships by world object id: each value is `[localized name id, script name]` (the
+    /// exporter's `(Localized Ship Name, Ship Name)` pair of the `Setup Ship` action; the lookup that follows uses the localized id
+    /// text when it exists, else the script name). Exported with a skirmish map but not read from here (PROVISIONAL: the engine reads
+    /// `ship_names` of `media.json`, which `Set Ship Name` uses, and `script.json` `ships[].name`; this one is listed so editors know
+    /// the key). A plain string value is not the retail shape and counts as a shape problem.
     #[serde(default, deserialize_with = "crate::data::lenient")]
-    pub ship_names: Option<std::collections::BTreeMap<String, String>>,
+    pub ship_names: Option<std::collections::BTreeMap<String, [String; 2]>>,
     /// Scenery: islands, asteroids, bases, black holes (`docs/missions.md`).
     #[serde(default, deserialize_with = "lenient_list")]
     #[schemars(with = "Vec<ObjectDoc>")]
@@ -712,7 +715,7 @@ mod tests {
     #[test]
     fn the_keys_of_retail_victory_conditions_and_ship_names_are_described() {
         let s = schema();
-        let map = json!({"ship_names": {"KEY": "Name"}, "victory": [{"name": "r", "if": [{
+        let map = json!({"ship_names": {"12": ["LOCAL_ID", "Script name"]}, "victory": [{"name": "r", "if": [{
             "Type": "Group Destroyed", "Group/Unit": "G,U", "Number Of Captures": 1, "Group/Unit Name": "G", "Vital Section": "vitalToShip",
             "Group Name": "G", "Volume Name": "V", "Number Of Ships Destroyed": 2, "Unit Name": "U"}]}]});
         assert!(crate::authoring::unknown_keys(&s, &map).is_empty(), "{:?}", crate::authoring::unknown_keys(&s, &map));
@@ -720,9 +723,14 @@ mod tests {
         let doc = MapDoc::from_value(&map);
         let c = &doc.victory[0].conditions.as_ref().unwrap()[0];
         assert_eq!((c.volume_name.as_deref(), c.number_of_captures, c.number_of_ships_destroyed), (Some("V"), Some(1.0), Some(2.0)));
-        assert_eq!(doc.ship_names.unwrap()["KEY"], "Name");
+        assert_eq!(doc.ship_names.unwrap()["12"], ["LOCAL_ID", "Script name"]);
         let bad = problems(&json!({"ship_names": [1], "victory": [{"if": [{"Number Of Captures": "many"}]}]}));
         assert_eq!(bad.len(), 2, "{bad:?}");
+        // A plain string is not the retail shape; neither is a pair of the wrong length (the doc reads either as absent).
+        let bad = problems(&json!({"ship_names": {"12": "Name"}}));
+        assert_eq!(bad.len(), 1, "{bad:?}");
+        assert!(MapDoc::from_value(&json!({"ship_names": {"12": ["only"]}})).ship_names.is_none());
+        assert!(MapDoc::from_value(&json!({"ship_names": {"12": "Name"}})).ship_names.is_none());
     }
 
     #[test]
