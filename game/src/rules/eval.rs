@@ -19,6 +19,7 @@ pub use diag::{Diag, TraceOptions, set_trace};
 use ext::Ext;
 use schema::RuleType as T;
 pub use schema::{Role, RuleType};
+use state::Runs;
 pub use state::Script;
 pub use types::*;
 
@@ -70,7 +71,7 @@ impl Script {
             ext: Ext::new(data, &player),
             rules,
             fired: vec![false; n],
-            ran: vec![false; n],
+            runs: vec![Runs::default(); n],
             init_done: false,
             start_rules: vec![],
             start_at: None,
@@ -218,7 +219,7 @@ impl Script {
             if r.once {
                 self.fired[i] = true;
             }
-            self.ran[i] = true;
+            self.mark_ran(i);
             info!("t={:.1} rule #{i} fired: {}", self.time, r.name.trim());
             self.run_from(i, r, 0, &mut w, &mut out);
         }
@@ -261,7 +262,7 @@ impl Script {
             if rules[i].once {
                 self.fired[i] = true;
             }
-            self.ran[i] = true;
+            self.mark_ran(i);
             info!("t={:.1} rule #{i} fired at start (--fire-rule): {}", self.time, name.trim());
             self.run_from(i, &rules[i], 0, w, out);
         }

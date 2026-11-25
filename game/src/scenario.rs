@@ -214,6 +214,7 @@ pub fn leave_battle(keys: Res<ButtonInput<KeyCode>>, mut commands: Commands, old
     if !keys.just_pressed(KeyCode::F10) {
         return;
     }
+    commands.queue(|world: &mut World| crate::rules::write_report_world(world)); // `--rule-report`, before the script is removed
     for e in &old {
         commands.entity(e).despawn();
     }

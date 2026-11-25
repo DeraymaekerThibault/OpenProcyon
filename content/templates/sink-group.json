@@ -1,0 +1,22 @@
+{
+  "id": "sink-group",
+  "title": "Sink a group to win",
+  "kind": "mission",
+  "description": "A required task that is done when a group is destroyed and failed when the player's group is destroyed. It starts with the mission.",
+  "parameters": [
+    {"name": "name", "kind": "text", "label": "Task name", "default": "Sink the enemy"},
+    {"name": "task_text", "kind": "text", "label": "Task text", "default": "Sink the enemy ships."},
+    {"name": "target", "kind": "group", "label": "Group to sink"},
+    {"name": "group", "kind": "group", "label": "Player's group (the mission is lost with it)"}
+  ],
+  "mission": {"victory": "objectives"},
+  "tasks": [
+    {"Name": "{name}", "text": "{task_text}", "Active": false, "required": true,
+     "complete_when": [{"Type": "Group Destroyed", "Group Name": "{target}"}],
+     "fail_when": [{"Type": "Group Destroyed", "Group Name": "{group}"}]}
+  ],
+  "rules": [
+    {"name": "{name} Start", "Run Once": true, "Is Active": true, "conditions": [{"Type": "World Initialize"}],
+     "actions": [{"Type": "Set Objective Task Active State", "Objective Task": "{name}", "Active State": "TRUE"}]}
+  ]
+}

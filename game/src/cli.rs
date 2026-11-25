@@ -25,6 +25,7 @@ Mod authoring (no window, no assets needed unless said):
   --dump-schemas <folder>        write the JSON Schemas of ship, guns, bullets, crew nodes, mod and map files
   --dump-rule-schema [file]      write the mission rule schema (stdout without a file)
   --rule-trace, --why <rule>     while a mission plays, log why rules have not fired
+  --rule-report <file>           when the battle ends, write what each rule of the mission did to <file> (JSON)
   --console                      open the developer console (~) in a release build
 
 Other:
@@ -144,6 +145,7 @@ mod tests {
             "--dump-rule-schema",
             "--rule-trace",
             "--why",
+            "--rule-report",
             "--console",
             "--version",
             "--help",

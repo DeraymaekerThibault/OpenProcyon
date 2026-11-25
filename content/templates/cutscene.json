@@ -1,0 +1,23 @@
+{
+  "id": "cutscene",
+  "title": "Cutscene",
+  "kind": "block",
+  "description": "A short scripted scene: `NIS Start`, the camera looks at a group, a group is teleported to a point set, wait, `NIS End`. It starts with the mission; change the condition to start it elsewhere.",
+  "parameters": [
+    {"name": "name", "kind": "text", "label": "Rule name", "default": "Cutscene"},
+    {"name": "focus", "kind": "group", "label": "Camera looks at"},
+    {"name": "mover", "kind": "group", "label": "Group teleported"},
+    {"name": "point_set", "kind": "point_set", "label": "Teleported to (point set)"},
+    {"name": "seconds", "kind": "number", "label": "Seconds the scene lasts", "default": "4"}
+  ],
+  "rules": [
+    {"name": "{name}", "Run Once": true, "Is Active": true, "conditions": [{"Type": "World Initialize"}],
+     "actions": [
+       {"Type": "NIS Start"},
+       {"Type": "NIS Focus camera on Group/Unit", "GroupUnit Name": "{focus}"},
+       {"Type": "OP Teleport", "Group/Unit Name": "{mover}", "Point Set Name": "{point_set}"},
+       {"Type": "OP Wait", "Seconds": "{seconds}"},
+       {"Type": "NIS End"}
+     ]}
+  ]
+}
