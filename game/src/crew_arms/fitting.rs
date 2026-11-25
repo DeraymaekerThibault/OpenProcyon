@@ -269,8 +269,8 @@ pub(super) fn apply_outfit(
         &mut crate::boarding::Boardable,
         Option<&CrewPosts>,
     )>,
-    command: Query<(), With<crate::PlayerShip>>,
-    new_command: Query<(), Added<crate::PlayerShip>>,
+    command: Query<(), With<crate::commands::Commander>>,
+    new_command: Query<(), Added<crate::commands::Commander>>,
 ) {
     let Some(mission) = mission else { return };
     // The outfit only changes with the saved points, the mission or the command ship; otherwise only ships that just spawned need fitting.

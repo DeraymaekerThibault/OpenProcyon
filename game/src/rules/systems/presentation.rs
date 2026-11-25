@@ -62,6 +62,11 @@ fn speaker_portrait(line: &str) -> Option<&'static str> {
     [("AMELIA", "Amelia_Happy"), ("JIM", "Jim_Stoic"), ("ONYX", "Onyx_Stoic")].into_iter().find(|(p, _)| who.starts_with(p)).map(|x| x.1)
 }
 
+/// The summary's "Campaign total" line: only the retail campaign's missions count toward it, so a tutorial or a mod's map has none.
+fn campaign_total_line(mission: &str, total: u32) -> String {
+    if crate::campaign::is_campaign(mission) { format!("Campaign total: {total}\n") } else { String::new() }
+}
+
 pub(super) fn ui(
     mut talk: ResMut<crate::panels::Talk>,
     assets: Res<AssetServer>,
@@ -103,11 +108,11 @@ pub(super) fn ui(
                     .as_ref()
                     .map(|e| {
                         format!(
-                            "{}\n\n{}\nVictory points earned: {}\nCampaign total: {}\n{}R restart   F10 menu",
+                            "{}\n\n{}\nVictory points earned: {}\n{}{}R restart   F10 menu",
                             e.0,
                             stats.as_ref().map(|s| s.table()).unwrap_or_default(),
                             sc.score,
-                            campaign_points.total,
+                            campaign_total_line(&mission.id, campaign_points.total),
                             if e.1 && crate::campaign::next(&mission.id).is_some() { "N next mission   " } else { "" }
                         )
                     })
@@ -250,5 +255,17 @@ pub(super) fn nis_camera(
     cam.translation = cam.translation.lerp(want, 1.0 - (-2.5 * dt).exp());
     if cam.translation.distance_squared(look) > 0.01 {
         cam.look_at(look, Vec3::Y);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn only_a_retail_campaign_mission_shows_the_campaign_total() {
+        assert_eq!(campaign_total_line("mission04", 184), "Campaign total: 184\n");
+        assert_eq!(campaign_total_line("tutorial", 184), "");
+        assert_eq!(campaign_total_line("my_test_map", 184), "");
     }
 }

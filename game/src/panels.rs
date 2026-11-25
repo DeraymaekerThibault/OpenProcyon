@@ -355,7 +355,7 @@ fn fleet_input(
     mut orbit: ResMut<crate::Orbit>,
     buttons: Query<(Entity, &FleetButton, &Interaction)>,
     mut latch: Local<Option<(Entity, FleetButton, Option<Entity>)>>,
-    mut commands: Commands,
+    mut orders: crate::commands::Orders,
     mut sfx: MessageWriter<crate::audio::Sfx>,
     mut menu: ResMut<crate::options_menu::BarMenuRequest>,
     focus: UiFocus,
@@ -416,17 +416,13 @@ fn fleet_input(
                 sfx.write(crate::audio::Sfx::ui("HUD_SelectShip_Secondary"));
             }
         }
-        FleetButton::Formation(kind) => {
-            let hold = model.active != Some(kind);
-            let owner = fleets.local.clone();
-            commands.queue(move |w: &mut World| crate::ship::set_formation(w, &owner, Some(kind), hold));
+        FleetButton::Formation(formation) => {
+            orders.send(crate::commands::Kind::Formation { formation, hold: model.active != Some(formation) });
             // PROVISIONAL: native formation-click pool is unmapped; use the available fleet selection sound.
             sfx.write(crate::audio::Sfx::ui("HUD_ShipBar_Select"));
         }
-        FleetButton::Attack | FleetButton::CeaseFire => {
-            let owner = fleets.local.clone();
-            commands.queue(move |w: &mut World| crate::ship::fleet_help(w, &owner, button == FleetButton::Attack));
-        }
+        FleetButton::Attack => orders.send(crate::commands::Kind::FleetAttack),
+        FleetButton::CeaseFire => orders.send(crate::commands::Kind::CeaseFire),
     }
 }
 
@@ -671,7 +667,7 @@ pub fn hud_input(
     mouse: Res<ButtonInput<MouseButton>>,
     mut toggles: ResMut<Toggles>,
     mut ui: ResMut<UiClick>,
-    ship: Single<(&Ship, Option<&GunStates>), With<PlayerShip>>,
+    ship: Single<(Entity, &Ship, Option<&GunStates>), With<PlayerShip>>,
     solid: Query<&Interaction, With<Solid>>,
     toggle: Query<&Interaction, With<ToggleButton>>,
     panic: Query<&Interaction, With<PanicButton>>,
@@ -681,6 +677,7 @@ pub fn hud_input(
     lib: Res<Library>,
     mut target: ResMut<combat::Target>,
     visible: Query<&Visibility, With<HudRoot>>,
+    mut orders: crate::commands::Orders,
 ) {
     if focus.crew.as_ref().is_some_and(|m| m.open) {
         ui.0 = true;
@@ -697,7 +694,7 @@ pub fn hud_input(
         flip = true;
     }
     if ((click && panic.iter().any(crate::pointer::over)) || (shown && binds.just_pressed(&keys, Act::PanicFire))) && focus.fleets.as_ref().is_none_or(|f| f.direct()) {
-        target.2.panic = true;
+        orders.send(crate::commands::Kind::PanicFire { ship: ship.0 });
     }
     if click && ship_icon.iter().any(crate::pointer::over) {
         if let Some(f) = focus.fleets.as_mut() {
@@ -722,13 +719,14 @@ pub fn hud_input(
         }
     }
     if click && focus.fleets.as_ref().is_none_or(|f| f.direct()) {
-        // Clicking an indirect bank's icon arms it (again to disarm); the next map click is its shot.
-        let (ship, equipped) = *ship;
+        // Clicking an indirect bank's icon arms it (again to disarm); the next map click is its shot. Arming is the player's own
+        // input state; dropping a shot not fired yet is an order.
+        let (me, ship, equipped) = *ship;
         let class = &lib.classes[ship.class];
         for (GunButton(bank), _) in guns.iter().filter(|(_, i)| crate::pointer::over(i)) {
             let indirect = class.mounts.iter().enumerate().any(|(i, m)| m.bank == *bank && combat::is_indirect(&lib, equipped.map_or(m.gun.as_str(), |g| g.gun(i))));
             target.2.armed = if indirect && target.2.armed != Some(*bank) { Some(*bank) } else { None };
-            target.2.shot = None;
+            orders.send(crate::commands::Kind::Lob { ship: me, shot: None });
         }
     }
     if flip {
@@ -981,6 +979,7 @@ pub mod tests {
             .init_resource::<FleetHud>()
             .init_resource::<ChatLog>()
             .init_resource::<crate::options_menu::BarMenuRequest>()
+            .init_resource::<crate::commands::Outbox>()
             .insert_resource(crate::Orbit { yaw: 0.0, pitch: 0.0, dist: 60.0, focus: None })
             .add_message::<crate::audio::Sfx>()
             .add_systems(Update, fleet_input);
@@ -1129,6 +1128,8 @@ pub mod tests {
         let (mut app, root) = input_app();
         app.world_mut().spawn((Solid, PanicButton, Interaction::Pressed));
         app.world_mut().spawn((Solid, ShipIconButton, Interaction::Pressed));
+        // Panic fire is an order; outside a running battle clock `apply_tick` applies it at once.
+        app.add_systems(Update, crate::commands::apply_tick.after(hud_input));
         app.world_mut().resource_mut::<ButtonInput<MouseButton>>().press(MouseButton::Left);
         app.update();
         assert!(app.world().resource::<combat::Target>().2.panic);

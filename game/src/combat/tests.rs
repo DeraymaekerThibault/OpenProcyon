@@ -1,5 +1,6 @@
 use super::*;
 use crate::EngineOrder;
+use crate::PlayerShip;
 
 use crate::testutil::asset_app;
 

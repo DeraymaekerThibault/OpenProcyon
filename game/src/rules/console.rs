@@ -383,6 +383,8 @@ impl Command {
             | Command::Where
             | Command::Mark(_)
             | Command::Cam(CamMode::Player)
+            | Command::Win
+            | Command::Lose
             | Command::Teleport(Dest::Xy(..)) => Needs::World,
             Command::Cond(c) => {
                 if schema::lookup(Role::Condition, s(c, "Type")).is_some_and(|d| d.campaign_only) {
@@ -405,7 +407,7 @@ impl Command {
             | Command::Find(_)
             | Command::Show(..)
             | Command::Hide(..) => Needs::Rules,
-            Command::Win | Command::Lose | Command::Cam(CamMode::Follow(_)) => Needs::Mission,
+            Command::Cam(CamMode::Follow(_)) => Needs::Mission,
         }
     }
 
@@ -490,8 +492,8 @@ pub static TABLE: &[Entry] = &[
     entry("rules", Group::Flow, "rules [text]", "every rule with its state: fired, ran (repeating), never fired, inactive or waiting in an OP Wait", "rules gate", false),
     entry("skip", Group::Flow, "skip", "end the speech line playing now; it counts as played for Speech Event Played Once", "skip", true),
     entry("nis", Group::Flow, "nis end", "NIS End: leave a cutscene", "nis end", true),
-    entry("win", Group::Flow, "win", "win the mission (Goto Next Level): test the victory screen and the hand-off", "win", true),
-    entry("lose", Group::Flow, "lose", "lose the mission (End Game): test the defeat screen", "lose", true),
+    entry("win", Group::Flow, "win", "win: a mission goes to its next level (Goto Next Level), any other battle ends as a victory for you", "win", true),
+    entry("lose", Group::Flow, "lose", "lose: a mission ends (End Game), any other battle ends as a defeat for you", "lose", true),
     entry("restart", Group::Flow, "restart", "restart the mission (the R key)", "restart", false),
     entry(
         "ships",
@@ -902,6 +904,8 @@ pub struct Outcome {
     pub skip_voice: bool,
     /// Restart the mission.
     pub restart: bool,
+    /// End the battle (outside a campaign mission): `Some(true)` as a victory for the human side, `Some(false)` as a defeat.
+    pub end_battle: Option<bool>,
     /// Changes to the developer view (`DevView`).
     pub view: Vec<ViewChange>,
 }

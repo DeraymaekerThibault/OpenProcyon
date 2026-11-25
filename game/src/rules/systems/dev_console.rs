@@ -243,6 +243,11 @@ pub(super) fn run(
             }
         }
         restart.0 |= outcome.restart;
+        if let Some(won) = outcome.end_battle {
+            commands.queue(move |w: &mut World| {
+                crate::scenario::force_outcome(w, won);
+            });
+        }
         apply_view(&outcome.view, &mut console, &mut dev, settings.as_deref_mut());
         each_ship(&mut ships, outcome.repair, |s| crate::docking::repair(&lib, &s.ship, &mut s.health, true));
         let mut env = extra.fx.env(script, paths, &lib, Some(&mut orbit), sides);

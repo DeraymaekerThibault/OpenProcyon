@@ -9,7 +9,7 @@ mod spawn;
 pub use lighting::{Lighting, MapLighting, apply_lighting, lighting_of};
 #[cfg(test)]
 use outcome::end_line_id;
-pub use outcome::{END_LINE_SECS, EndLine, EndMessage, Outcome, RULE_PASS_SECS, RulePass, outcome};
+pub use outcome::{END_LINE_SECS, EndLine, EndMessage, Outcome, RULE_PASS_SECS, RulePass, decide, force_outcome, outcome};
 pub use script::{scripted_kills, scripted_steps};
 pub use spawn::{HOSTILE_TO_ALL, MapObject, Namer, PlayerColor, faction, game_rotation, game_to_bevy, scenery_transform, spawn_scenario, spawn_ship};
 #[cfg(test)]
@@ -35,6 +35,12 @@ impl SpawnIndex {
         ((h ^ (h >> 31)) >> 40) as f32 / (1u64 << 24) as f32
     }
 }
+
+/// A map scenery object's position in the map's `objects` list (`spawn::spawn_map_objects`): bases, islands, docks and rocks are
+/// spawned in that order, so it names the object the same way in every run of the map. It is what gives a base without guns its
+/// `commands::NetId`; numbered kinds (armed bases, asteroids) keep their `SpawnIndex`.
+#[derive(Component, Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct SceneryIndex(pub u32);
 
 /// The next `SpawnIndex` of each numbered kind; cleared at battle start.
 #[derive(Resource, Default)]
@@ -108,7 +114,8 @@ pub fn reset_sim(world: &mut World) {
 }
 
 /// A fleet type, as the TWT numbers it: 0 Navy, 2 Pirate, 3 Procyon; 4 (and any other number) is no fleet type chosen or known.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum Race {
     Navy,
     Pirate,
@@ -178,6 +185,7 @@ impl Race {
 
 /// One fleet of a battle: whose start point it uses (index in the map's player list), which side it fights for, whether the
 /// human commands it, and its ships with an explicit start position (historical maps) or none (formation at the start point).
+#[derive(Debug, PartialEq)]
 pub struct Group {
     pub player: usize,
     pub side: Side,

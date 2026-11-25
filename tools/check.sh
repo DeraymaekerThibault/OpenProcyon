@@ -131,9 +131,10 @@ if [ "$tier" = full ]; then
     # Battle check: short skirmishes with fixed fleets must still play like battles (the computer engages, nobody grinds on an
     # island, nothing panics). Whole-battle regressions that single-system tests miss show up here (~1-2 min).
     step battle-check $py -m tools.battle_check
-    # Replay check: a skirmish on the normal clock with scripted orders records a command log (PROCYON_COMMANDS), and its replay
-    # (--replay) must give the same battle report (game/src/commands.rs, ~1 min).
-    step replay-check $py -m tools.battle_check red_rover --replay
+    # Replay check: skirmishes on the normal clock with scripted orders record a command log (PROCYON_COMMANDS), and their replay
+    # (--replay) must give the same battle report (game/src/commands.rs, ~2 min). border_dispute_full is launched through the lobby
+    # and replays from the log's skirmish setup alone.
+    step replay-check $py -m tools.battle_check red_rover border_dispute_full --replay
   else
     skipped="startup smoke, battle check, replay check, "
   fi

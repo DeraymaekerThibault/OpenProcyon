@@ -132,9 +132,9 @@ fn side_of(tf: &Transform, other: Vec3) -> Vec3 {
 }
 /// The Grapple order: steer for `target` until it is inside harpoon range, then fire.
 #[derive(Component)]
-pub struct GrappleOrder(Entity);
+pub struct GrappleOrder(pub(crate) Entity);
 
-#[derive(Message)]
+#[derive(Message, Debug)]
 pub enum BoardMsg {
     /// `boarder: None` is the player's ship.
     Board {
@@ -201,7 +201,9 @@ fn status(boarders: Boarders, mut st: ResMut<BoardStatus>, ships: Query<Entity, 
 }
 
 pub fn plugin(app: &mut App) {
+    // Backspace's grapple cancel is an order (`commands::Kind::DropGrapple`).
     app.add_message::<BoardMsg>()
+        .init_resource::<crate::commands::Outbox>()
         .add_message::<Captured>()
         .add_message::<Settled>()
         .init_resource::<BoardStatus>()

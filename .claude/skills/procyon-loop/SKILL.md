@@ -10,7 +10,7 @@ Run from the checkout (or worktree) root. Details: `AGENTS.md`, `docs/developmen
 | Ask | Command | What it does |
 |---|---|---|
 | "check this" (while iterating) | `tools/check.sh --quick` | Seconds: ruff + hygiene always; rustfmt + clippy if Rust changed, Python tests if Python changed. Trust only the last `GATE OK` line; logs in `local/check/`. |
-| "check before commit" | `tools/check.sh` | Default tier: ruff, hygiene, Python tests, rustfmt, clippy, Rust tests (asset tests when assets are imported). |
+| "check before push" | `tools/check.sh` | Default tier: ruff, hygiene, Python tests, rustfmt, clippy, Rust tests (asset tests when assets are imported). |
 | before push or PR | `tools/check.sh --full` | Default + `fast` build, startup smoke, battle check. Once per push, not per edit. |
 | "test X" (one Rust test) | `cargo test --manifest-path game/Cargo.toml --lib <module::path>` | Runs the tests under that path only. Add `-- --ignored` for asset tests (needs an import). |
 | "test X" (Python) | `python3 -m unittest tests.test_<name>` or `make test-python` | One test module / all fast parser and exporter tests. |
@@ -27,7 +27,8 @@ Rules of thumb
 - Never `--release` except for a release; never `cargo clean` without `--workspace`.
 - Run long Python (`compare_assets`, `battle_check`, `autoplay`, the importer) under `systemd-run --user --scope -q -p MemoryMax=4G -p MemorySwapMax=0 <cmd>`.
 - Game runs: scratch `XDG_DATA_HOME=$(mktemp -d)` so `bindings.json` cannot remap smoke keys.
-- New worktree: `tools/worktree.sh new <branch>`; remove: `tools/worktree.sh rm <path>`.
+- Work in the checkout you were started in. Do not create a worktree (`EnterWorktree`, `isolation: worktree`, `tools/worktree.sh new`)
+  unless the user asks for one: each costs gigabytes of build. Remove one with `tools/worktree.sh rm <path>`.
 
 Hooks
 - Shared (`.claude/settings.json`): the command allowlist, and a hook that formats the one file you just edited.

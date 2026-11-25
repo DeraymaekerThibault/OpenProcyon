@@ -46,7 +46,7 @@ fn order(app: &App, e: Entity) -> EngineOrder {
 /// The player's command ship (index 0 of the local fleet) and a fleet captain beside it, numbered as at battle start.
 fn fleet(app: &mut App) -> (Entity, Entity, Entity) {
     let w = app.world_mut();
-    let me = w.spawn((Ship::new(0, Side::Player), SpawnIndex(0))).id();
+    let me = w.spawn((Ship::new(0, Side::Player), SpawnIndex(0), Commander(PlayerId(0)))).id();
     let captain = w.spawn((Ship::new(0, Side::Player), crate::ship::FleetPilot::default(), SpawnIndex(1))).id();
     let enemy = w.spawn((Ship::new(0, Side::Enemy), SpawnIndex(2))).id();
     let mut fleets = crate::ship::Fleets::default();
@@ -95,6 +95,241 @@ fn a_target_is_the_players_own_on_the_command_ship_and_an_attack_order_on_a_capt
     assert_eq!(app.world().get::<crate::ship::FleetPilot>(captain).unwrap().target, Some(enemy), "a captain keeps its attack order");
 }
 
+/// A click on water: the command ship sails there (Shift appends, a stopped ship goes to light-green Full), a captain is ordered
+/// there; both end a hold and a dock routine. Backspace drops the course, and the armed shot or the captain's orders.
+#[test]
+fn move_course_and_cancel_orders_do_what_the_clicks_and_keys_did() {
+    let mut app = battle();
+    app.add_message::<crate::docking::DockMsg>();
+    let (me, captain, enemy) = fleet(&mut app);
+    loaded(&mut app);
+    app.world_mut().entity_mut(me).insert(crate::ship::HoldPosition);
+    app.world_mut().entity_mut(captain).insert(crate::ship::HoldPosition);
+    let (a, b, c) = (Vec3::X, Vec3::Z, Vec3::NEG_X);
+    send(&mut app, Kind::Move { ship: me, to: a, append: false });
+    send(&mut app, Kind::Move { ship: me, to: b, append: true });
+    send(&mut app, Kind::Move { ship: captain, to: c, append: false });
+    frame(&mut app, 40);
+    let ship = |app: &App, e| app.world().get::<Ship>(e).unwrap().clone();
+    assert_eq!((ship(&app, me).waypoints, ship(&app, me).order), (vec![a, b], EngineOrder::Full));
+    assert_eq!(app.world().get::<crate::ship::FleetPilot>(captain).unwrap().destination, Some(c));
+    assert!(ship(&app, captain).waypoints.is_empty(), "a captain's move is an order, not the command ship's course");
+    for e in [me, captain] {
+        assert!(app.world().get::<crate::ship::HoldPosition>(e).is_none(), "a move ends a hold");
+    }
+    let cancels: Vec<_> = app.world_mut().resource_mut::<Messages<crate::docking::DockMsg>>().drain().collect();
+    assert_eq!(cancels.iter().filter(|m| matches!(m, crate::docking::DockMsg::CancelShip(_))).count(), 3, "each move ends a dock routine");
+    send(&mut app, Kind::Move { ship: me, to: c, append: false });
+    frame(&mut app, 40);
+    assert_eq!(ship(&app, me).waypoints, vec![c], "without Shift the course starts again");
+    // A plotted course replaces the course; only the click that closes it ends a hold.
+    app.world_mut().entity_mut(me).insert(crate::ship::HoldPosition);
+    app.world_mut().get_mut::<Ship>(me).unwrap().order = EngineOrder::Stop;
+    send(&mut app, Kind::Course { ship: me, points: vec![b, a], release: false });
+    frame(&mut app, 40);
+    assert_eq!((ship(&app, me).waypoints, ship(&app, me).order), (vec![b, a], EngineOrder::Full));
+    assert!(app.world().get::<crate::ship::HoldPosition>(me).is_some(), "Enter keeps the hold");
+    send(&mut app, Kind::Course { ship: me, points: vec![a], release: true });
+    frame(&mut app, 40);
+    assert!(app.world().get::<crate::ship::HoldPosition>(me).is_none(), "the closing click ends it");
+    // Backspace: the command ship keeps its engines and loses the armed shot; a captain stops and forgets its orders.
+    {
+        let mut t = app.world_mut().resource_mut::<crate::combat::Target>();
+        t.2.armed = Some(1);
+        t.2.shot = Some((1, Vec3::ONE));
+    }
+    app.world_mut().get_mut::<crate::ship::FleetPilot>(captain).unwrap().attack(enemy);
+    app.world_mut().get_mut::<crate::ship::FleetPilot>(captain).unwrap().hold = true;
+    app.world_mut().get_mut::<Ship>(captain).unwrap().order = EngineOrder::Full;
+    send(&mut app, Kind::Cancel { ship: me });
+    send(&mut app, Kind::Cancel { ship: captain });
+    frame(&mut app, 40);
+    let t = app.world().resource::<crate::combat::Target>();
+    assert_eq!((t.2.armed, t.2.shot), (None, None));
+    assert_eq!((ship(&app, me).waypoints.len(), ship(&app, me).order), (0, EngineOrder::Full));
+    let p = app.world().get::<crate::ship::FleetPilot>(captain).unwrap();
+    assert_eq!((p.destination, p.target, p.hold, ship(&app, captain).order), (None, None, false, EngineOrder::Stop));
+}
+
+/// The right-click menu's Stop, Hold and Cloak.
+#[test]
+fn stop_hold_and_cloak_do_what_the_menu_did() {
+    let mut app = battle();
+    app.add_message::<crate::docking::DockMsg>();
+    let (me, captain, enemy) = fleet(&mut app);
+    loaded(&mut app);
+    {
+        let w = app.world_mut();
+        let mut s = w.get_mut::<Ship>(me).unwrap();
+        (s.waypoints, s.order) = (vec![Vec3::X], EngineOrder::Full);
+        let mut p = w.get_mut::<crate::ship::FleetPilot>(captain).unwrap();
+        p.move_to(Vec3::Z);
+        p.hold = true;
+        w.entity_mut(me).insert(crate::cloak::Cloak::new(false));
+    }
+    let ship = |app: &App, e| app.world().get::<Ship>(e).unwrap().clone();
+    send(&mut app, Kind::Stop { ship: me });
+    send(&mut app, Kind::Stop { ship: captain });
+    frame(&mut app, 40);
+    assert_eq!((ship(&app, me).waypoints.len(), ship(&app, me).order), (0, EngineOrder::Stop));
+    let p = app.world().get::<crate::ship::FleetPilot>(captain).unwrap();
+    assert_eq!((p.destination, p.hold), (None, true), "Stop leaves the formation hold");
+    let msgs: Vec<_> = app.world_mut().resource_mut::<Messages<crate::docking::DockMsg>>().drain().collect();
+    assert_eq!(msgs.len(), 2, "Stop also ends a dock routine");
+    app.world_mut().get_mut::<crate::ship::FleetPilot>(captain).unwrap().attack(enemy);
+    app.world_mut().get_mut::<crate::ship::FleetPilot>(captain).unwrap().move_to(Vec3::X);
+    app.world_mut().get_mut::<Ship>(captain).unwrap().order = EngineOrder::Full;
+    send(&mut app, Kind::Hold { ship: captain, on: true });
+    frame(&mut app, 40);
+    assert!(app.world().get::<crate::ship::HoldPosition>(captain).is_some());
+    assert_eq!((ship(&app, captain).order, app.world().get::<crate::ship::FleetPilot>(captain).unwrap().destination), (EngineOrder::Stop, None));
+    send(&mut app, Kind::Hold { ship: captain, on: false });
+    frame(&mut app, 40);
+    assert!(app.world().get::<crate::ship::HoldPosition>(captain).is_none());
+    send(&mut app, Kind::Cloak { ship: me, on: true });
+    send(&mut app, Kind::Cloak { ship: enemy, on: true }); // no cloak: nothing happens
+    frame(&mut app, 40);
+    assert!(app.world().get::<crate::cloak::Cloak>(me).unwrap().stop_shown(), "Cloak Start: cloaking");
+    send(&mut app, Kind::Cloak { ship: me, on: false });
+    frame(&mut app, 40);
+    assert!(!app.world().get::<crate::cloak::Cloak>(me).unwrap().stop_shown(), "Cloak Stop: decloaking");
+}
+
+/// Dock, tow, board and grapple orders reach docking and boarding as the messages the menu and the click sent; the menu's Dock,
+/// Tow Start and Board Start end a hold, the click's dock does not.
+#[test]
+fn dock_tow_board_and_grapple_orders_send_what_the_menu_sent() {
+    use crate::boarding::BoardMsg;
+    use crate::docking::DockMsg;
+    let mut app = battle();
+    app.add_message::<DockMsg>().add_message::<BoardMsg>();
+    let (me, captain, enemy) = fleet(&mut app);
+    loaded(&mut app);
+    let held = |app: &mut App| {
+        let held = app.world().get::<crate::ship::HoldPosition>(me).is_some();
+        app.world_mut().entity_mut(me).insert(crate::ship::HoldPosition);
+        held
+    };
+    held(&mut app);
+    let docks = |app: &mut App| app.world_mut().resource_mut::<Messages<DockMsg>>().drain().map(|m| format!("{m:?}")).collect::<Vec<_>>();
+    let boards = |app: &mut App| app.world_mut().resource_mut::<Messages<BoardMsg>>().drain().map(|m| format!("{m:?}")).collect::<Vec<_>>();
+    let cases: Vec<(Kind, bool, String, bool)> = vec![
+        (Kind::Dock { ship: me, dockee: captain, release: false }, true, format!("{:?}", DockMsg::Dock { docker: Some(me), dockee: captain }), true),
+        (Kind::Dock { ship: me, dockee: captain, release: true }, false, format!("{:?}", DockMsg::Dock { docker: Some(me), dockee: captain }), true),
+        (Kind::Tow { ship: me, towee: Some(captain) }, false, format!("{:?}", DockMsg::TowStart { tower: Some(me), towee: captain }), true),
+        (Kind::Tow { ship: me, towee: None }, true, format!("{:?}", DockMsg::TowBreak { tower: Some(me) }), true),
+        (Kind::CancelDock { ship: me }, true, format!("{:?}", DockMsg::CancelShip(me)), true),
+        (Kind::Board { ship: me, target: Some(enemy) }, false, format!("{:?}", BoardMsg::Board { boarder: Some(me), target: enemy }), false),
+        (Kind::Board { ship: me, target: None }, true, format!("{:?}", BoardMsg::Unboard { boarder: Some(me) }), false),
+        (Kind::Grapple { ship: me, target: Some(enemy) }, true, format!("{:?}", BoardMsg::Grapple { grappler: Some(me), target: enemy }), false),
+        (Kind::Grapple { ship: me, target: None }, true, format!("{:?}", BoardMsg::Ungrapple { grappler: Some(me) }), false),
+    ];
+    for (kind, keeps_hold, msg, dock) in cases {
+        send(&mut app, kind.clone());
+        frame(&mut app, 40);
+        assert_eq!(held(&mut app), keeps_hold, "{kind:?}");
+        let (d, b) = (docks(&mut app), boards(&mut app));
+        assert_eq!(if dock { (d, b) } else { (b, d) }, (vec![msg], vec![]), "{kind:?}");
+    }
+    app.world_mut().entity_mut(me).insert(crate::boarding::GrappleOrder(enemy));
+    send(&mut app, Kind::DropGrapple { ship: me });
+    frame(&mut app, 40);
+    assert!(app.world().get::<crate::boarding::GrappleOrder>(me).is_none());
+}
+
+/// Panic fire and indirect shots act on the command ship's own gunnery state only.
+#[test]
+fn panic_fire_and_lob_shots_are_the_command_ships() {
+    let mut app = battle();
+    let (me, captain, _) = fleet(&mut app);
+    loaded(&mut app);
+    send(&mut app, Kind::PanicFire { ship: captain });
+    send(&mut app, Kind::Lob { ship: captain, shot: Some((2, Vec3::X)) });
+    frame(&mut app, 40);
+    let t = app.world().resource::<crate::combat::Target>();
+    assert_eq!((t.2.panic, t.2.shot), (false, None), "a captain has no panic button or armed bank");
+    send(&mut app, Kind::PanicFire { ship: me });
+    send(&mut app, Kind::Lob { ship: me, shot: Some((2, Vec3::X)) });
+    frame(&mut app, 40);
+    let t = app.world().resource::<crate::combat::Target>();
+    assert_eq!((t.2.panic, t.2.shot), (true, Some((2, Vec3::X))));
+    send(&mut app, Kind::Lob { ship: me, shot: None });
+    frame(&mut app, 40);
+    assert_eq!(app.world().resource::<crate::combat::Target>().2.shot, None, "a gun-bank click drops a shot not fired yet");
+}
+
+/// Everything a player can click has an id: ships, armed bases and rocks by creation number, space animals too, and map scenery
+/// without one (a base without guns, an island) by its place in the map's object list. Numbers of different kinds do not mix.
+#[test]
+fn space_animals_and_bases_without_guns_have_ids() {
+    use crate::scenario::SceneryIndex;
+    let mut app = battle();
+    let (me, _, enemy) = fleet(&mut app);
+    let w = app.world_mut();
+    let whale = w.spawn((crate::environment::SpaceAnimal::new("Whales", 5.0, Vec3::ZERO, 1, true), SpawnIndex(0))).id();
+    let stockade = w.spawn((Transform::default(), SceneryIndex(4))).id();
+    let island = w.spawn((Transform::default(), SceneryIndex(0))).id();
+    let armed = w.spawn((crate::combat::ArmedBase { class: 0 }, SpawnIndex(0), SceneryIndex(5))).id();
+    let shell = w.spawn(SpawnIndex(0)).id();
+    let id = |w: &World, e| NetId::of(w, e);
+    let w = app.world_mut();
+    assert_eq!(id(w, whale), Some(NetId { kind: NetKind::Animal, index: 0 }));
+    assert_eq!(id(w, stockade), Some(NetId { kind: NetKind::Scenery, index: 4 }));
+    assert_eq!(id(w, armed), Some(NetId { kind: NetKind::ArmedBase, index: 0 }), "a numbered kind keeps its creation number");
+    assert_eq!(id(w, shell), None, "nothing to click");
+    for e in [me, enemy, whale, stockade, island, armed] {
+        let found = id(w, e).unwrap().find(w);
+        assert_eq!(found, Some(e), "{:?}", id(w, e));
+    }
+    let saved = Saved::save(w, &Kind::Dock { ship: me, dockee: stockade, release: true }).unwrap();
+    assert_eq!(serde_json::to_string(&saved).unwrap(), r#"{"dock":{"ship":{"kind":"ship","index":0},"dockee":{"kind":"scenery","index":4},"release":true}}"#);
+    assert_eq!(saved.load(w), Some(Kind::Dock { ship: me, dockee: stockade, release: true }));
+    assert!(Saved::save(w, &Kind::Target { ship: me, target: Some(whale), spot: None }).is_ok(), "a whale is a target with an id");
+}
+
+/// `Commander` follows `PlayerShip` (battle start, promotion, loss), and "direct" is decided by the command's player: another
+/// player's order to this command ship is not its commander's.
+#[test]
+fn the_command_ship_is_the_commanders_and_only_its_players_orders_are_direct() {
+    let mut app = battle();
+    let (me, captain, enemy) = fleet(&mut app);
+    loaded(&mut app);
+    let w = app.world_mut();
+    w.entity_mut(me).remove::<Commander>();
+    w.entity_mut(captain).insert(crate::PlayerShip);
+    w.flush();
+    assert_eq!(w.get::<Commander>(captain), Some(&Commander(PlayerId(0))), "the player ship is player 0's command ship");
+    w.entity_mut(captain).remove::<crate::PlayerShip>();
+    w.entity_mut(me).insert(crate::PlayerShip);
+    w.flush();
+    assert_eq!((w.get::<Commander>(captain), w.get::<Commander>(me)), (None, Some(&Commander(PlayerId(0)))), "promotion moves it");
+    app.world_mut().resource_mut::<crate::combat::Target>().2.panic = true;
+    app.world_mut().resource_mut::<Outbox>().0.push(PlayerCommand { player: PlayerId(1), kind: Kind::Target { ship: me, target: Some(enemy), spot: None } });
+    app.world_mut().resource_mut::<Outbox>().0.push(PlayerCommand { player: PlayerId(1), kind: Kind::PanicFire { ship: me } });
+    frame(&mut app, 40);
+    let t = app.world().resource::<crate::combat::Target>();
+    assert_eq!((t.0, t.2.panic), (None, true), "player 1 does not command player 0's ship");
+    send(&mut app, Kind::Target { ship: me, target: Some(enemy), spot: None });
+    frame(&mut app, 40);
+    assert_eq!(app.world().resource::<crate::combat::Target>().0, Some(enemy));
+}
+
+/// A replay gives each command back to the player who gave it.
+#[test]
+fn a_replay_keeps_the_player_of_each_command() {
+    let header = r#"{"format":2,"version":"0.0.0","seed":5,"args":[],"mods":[]}"#;
+    let line = |p: u8| format!(r#"{{"command":{{"at":{{"tick":0}},"player":{p},"order":{{"cease_fire":null}}}}}}"#);
+    let text = format!("{header}\n{}\n{}\n", line(0), line(3));
+    let (_, replay, _) = Replay::read(text.as_bytes()).unwrap();
+    assert_eq!(replay.commands.iter().map(|c| c.1).collect::<Vec<_>>(), [PlayerId(0), PlayerId(3)]);
+    let mut app = battle();
+    fleet(&mut app);
+    app.insert_resource(replay);
+    loaded(&mut app);
+    let got = replayed(app.world_mut(), At::Tick(0)).unwrap();
+    assert_eq!(got.iter().map(|c| c.player).collect::<Vec<_>>(), [PlayerId(0), PlayerId(3)]);
+}
+
 #[test]
 fn a_command_keeps_its_meaning_through_the_file() {
     let mut app = battle();
@@ -104,6 +339,25 @@ fn a_command_keeps_its_meaning_through_the_file() {
         Kind::Engine { ship: me, engine: Engine::To(EngineOrder::Emergency) },
         Kind::Target { ship: me, target: Some(enemy), spot: Some(Vec3::new(0.25, -1.5, 3.0)) },
         Kind::Target { ship: me, target: None, spot: None },
+        Kind::Move { ship: me, to: Vec3::new(10.0, 0.0, -20.5), append: true },
+        Kind::Course { ship: me, points: vec![Vec3::new(1.0, 0.0, 2.0), Vec3::new(-3.0, 0.0, 4.0)], release: false },
+        Kind::Cancel { ship: me },
+        Kind::Stop { ship: me },
+        Kind::Hold { ship: me, on: true },
+        Kind::Cloak { ship: me, on: false },
+        Kind::Dock { ship: me, dockee: enemy, release: true },
+        Kind::Tow { ship: me, towee: None },
+        Kind::Board { ship: me, target: Some(enemy) },
+        Kind::Grapple { ship: me, target: None },
+        Kind::CancelDock { ship: me },
+        Kind::DropGrapple { ship: me },
+        Kind::Formation { formation: crate::ship::Formation::EchelonLeft, hold: true },
+        Kind::FleetAttack,
+        Kind::CeaseFire,
+        Kind::Promote { ship: me },
+        Kind::PanicFire { ship: me },
+        Kind::Lob { ship: me, shot: Some((3, Vec3::new(5.0, 0.0, -7.0))) },
+        Kind::Lob { ship: me, shot: None },
     ];
     for kind in kinds {
         let saved = Saved::save(app.world(), &kind).unwrap();
@@ -131,8 +385,9 @@ fn a_recording_reads_back_with_its_frames_unpacked() {
     assert_eq!((h.seed, h.args.as_slice(), unrecorded), (5, ["--map".to_string(), "red_rover".to_string()].as_slice(), 1));
     let ms = |m: u64| Duration::from_millis(m);
     assert_eq!(replay.frames, vec![(ms(0), 0), (ms(16), 0), (ms(16), 0), (ms(16), 0), (ms(33), 1)]);
-    assert_eq!(replay.commands, vec![(At::Frame(2), Saved::Engine { ship: NetId { kind: NetKind::Ship, index: 0 }, engine: SavedEngine::Slower })]);
-    assert!(Replay::read(header.replace("\"format\":1", "\"format\":2").as_bytes()).is_err(), "another format is refused");
+    assert_eq!(replay.commands, vec![(At::Frame(2), PlayerId(0), Saved::Engine { ship: NetId { kind: NetKind::Ship, index: 0 }, engine: SavedEngine::Slower })]);
+    assert!(Replay::read(header.replace("\"format\":1", "\"format\":3").as_bytes()).is_err(), "a newer format is refused");
+    assert!(Replay::read(header.replace("\"format\":1", "\"format\":0").as_bytes()).is_err());
 }
 
 #[test]
@@ -140,7 +395,7 @@ fn the_recorded_arguments_are_the_ones_that_decide_the_battle() {
     let args: Vec<String> =
         ["game", "--lobby", "map=x", "--speed", "16", "--script", "commands", "--fixed-step", "--seed", "3", "--replay", "f.jsonl"].iter().map(|s| s.to_string()).collect();
     assert_eq!(scenario_args(&args), ["--lobby", "map=x", "--seed", "3"]);
-    let header = Header { format: FORMAT, version: "x".into(), seed: 3, args: scenario_args(&args), mods: vec![], from_menu: false };
+    let header = Header { format: FORMAT, version: "x".into(), seed: 3, args: scenario_args(&args), mods: vec![], from_menu: false, skirmish: None };
     assert_eq!(mismatch(&header, &args, 3, &[]), None);
     assert!(mismatch(&header, &args, 4, &[]).unwrap().contains("--seed 3"));
     assert!(mismatch(&header, &["game".to_string(), "--map".to_string(), "y".to_string()], 3, &[]).is_some());
@@ -148,6 +403,30 @@ fn the_recorded_arguments_are_the_ones_that_decide_the_battle() {
     let menu = Header { args: vec![], from_menu: true, ..header };
     assert!(mismatch(&menu, &["game".to_string()], 3, &[]).unwrap().contains("menus"), "a battle set up in the menus is refused, not replayed wrong");
     assert!(sets_up_battle(&scenario_args(&args)) && !sets_up_battle(&[]));
+}
+
+/// A battle launched from the lobby keeps the lobby's setup instead of `--lobby`, and replays from `--replay <file>` alone.
+#[test]
+fn a_lobby_battle_keeps_its_setup_and_replays_without_arguments() {
+    let setup = crate::menu::SkirmishSetup::parse(r#"{"map":"m","points":300,"limit":5,"slots":[{"kind":"human","race":"navy","team":0,"flag":0}]}"#).unwrap();
+    let a = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+    let header = Header::new(0, &a(&["game", "--lobby", "map=m;slots=human,computer", "--speed", "4"]), Some(setup.clone()));
+    assert_eq!((header.format, header.args.as_slice(), header.from_menu), (2, [].as_slice(), false));
+    assert_eq!(mismatch(&header, &a(&["game", "--replay", "f"]), 0, &mod_names()), None);
+    assert!(mismatch(&header, &a(&["game", "--replay", "f", "--lobby", "map=m"]), 0, &mod_names()).unwrap().contains("leave out --lobby"));
+    let menu = Header::new(0, &a(&["game"]), Some(setup.clone()));
+    assert!(!menu.from_menu, "a skirmish set up by hand in the menus replays");
+    assert!(Header::new(0, &a(&["game"]), None).from_menu, "a campaign mission from the menus is still refused");
+    assert_eq!(Header::new(0, &a(&["game", "--map", "x"]), None).args, ["--map", "x"]);
+    // The header line round-trips, and `recorded_setup` finds the setup for the launch.
+    let path = std::env::temp_dir().join(format!("openprocyon-commands-setup-{}.jsonl", std::process::id()));
+    std::fs::write(&path, format!("{}\n{{\"frames\":[]}}\n", serde_json::to_string(&header).unwrap())).unwrap();
+    let found = recorded_setup(&a(&["game", "--replay", &path.to_string_lossy()]));
+    let read = Replay::read(std::io::BufReader::new(std::fs::File::open(&path).unwrap())).map(|r| r.0);
+    let _ = std::fs::remove_file(&path);
+    assert_eq!(found, Some(setup));
+    assert_eq!(read.unwrap(), header);
+    assert_eq!(recorded_setup(&a(&["game", "--replay", "/no/such/file"])), None);
 }
 
 #[test]
@@ -171,7 +450,7 @@ fn a_damaged_recording_cannot_ask_for_unbounded_frames() {
 #[test]
 fn frames_held_back_are_written_when_the_recorder_goes() {
     let path = std::env::temp_dir().join(format!("openprocyon-commands-drop-{}.jsonl", std::process::id()));
-    let mut rec = Recorder { out: std::io::BufWriter::new(std::fs::File::create(&path).unwrap()), frames: vec![], warned: false };
+    let mut rec = Recorder { out: std::io::BufWriter::new(std::fs::File::create(&path).unwrap()), pending: None, frames: vec![], warned: false };
     rec.frame(Duration::from_millis(16), 0);
     drop(rec);
     let text = std::fs::read_to_string(&path).unwrap();
@@ -227,8 +506,8 @@ fn a_recorded_session_replays_tick_for_tick_on_another_frame_rate() {
     let mut app = battle();
     let (me, _, enemy) = fleet(&mut app);
     let file = std::fs::File::create(&path).unwrap();
-    let mut rec = Recorder { out: std::io::BufWriter::new(file), frames: vec![], warned: false };
-    let header = Header { format: FORMAT, version: "test".into(), seed: 1, args: vec![], mods: vec![], from_menu: false };
+    let mut rec = Recorder { out: std::io::BufWriter::new(file), pending: None, frames: vec![], warned: false };
+    let header = Header { format: FORMAT, version: "test".into(), seed: 1, args: vec![], mods: vec![], from_menu: false, skirmish: None };
     serde_json::to_writer(&mut rec.out, &header).unwrap();
     rec.out.write_all(b"\n").unwrap();
     app.insert_resource(rec);

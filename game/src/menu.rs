@@ -12,6 +12,7 @@ mod script_hooks;
 mod scroll;
 mod settings;
 mod skirmish;
+mod skirmish_setup;
 pub use lobby_scenario::*;
 pub use missions::*;
 pub use mods::*;
@@ -20,6 +21,7 @@ pub use saves::*;
 pub use scroll::*;
 pub use settings::*;
 pub use skirmish::*;
+pub use skirmish_setup::*;
 
 use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
@@ -660,10 +662,10 @@ fn start_battle(sk: &mut Skirmish, next: &mut NextState<Screen>) {
     next.set(Screen::Battle);
 }
 
-/// `--lobby <spec>` (`lobby_scenario.rs`, tools/battle_check.py): sets the lobby up from the spec, then presses Launch. A spec the
+/// `--lobby <spec>` (`lobby_scenario.rs`, tools/battle_check.py) or `--replay` of a lobby battle: sets the lobby up, then presses Launch. A spec the
 /// lobby refuses ends the run with status 2 instead of silently playing something else.
 fn lobby_scenario(
-    scenario: Option<Res<LobbyScenario>>,
+    scenario: Option<Res<LobbyLaunch>>,
     mut sk: ResMut<Skirmish>,
     lib: Res<Library>,
     mut next: ResMut<NextState<Screen>>,
@@ -673,7 +675,7 @@ fn lobby_scenario(
     let Some(scenario) = scenario.filter(|_| !*done) else { return };
     *done = true;
     if let Err(err) = scenario.apply(&mut sk, &lib) {
-        eprintln!("{err}");
+        error!("{err}");
         exit.write(crate::exit::app_exit(2));
         return;
     }
@@ -682,8 +684,8 @@ fn lobby_scenario(
 
 /// A `--lobby` launch (a tool starting a battle, `lobby_scenario`) ends the process when the player leaves the battle for the main
 /// menu (the Game Summary's continue arrow, F10, the in-game menu's quit), as a `--shot` run does after the battle: the tool waiting
-/// on the process sees it exit instead of a menu nobody asked for. Interactive menu play has no `LobbyScenario` and is unchanged.
-fn exit_after_lobby_scenario(scenario: Option<Res<LobbyScenario>>, mut exit: MessageWriter<AppExit>) {
+/// on the process sees it exit instead of a menu nobody asked for. Interactive menu play has no `LobbyLaunch` and is unchanged.
+fn exit_after_lobby_scenario(scenario: Option<Res<LobbyLaunch>>, mut exit: MessageWriter<AppExit>) {
     if scenario.is_some() {
         exit.write(AppExit::Success);
     }

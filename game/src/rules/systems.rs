@@ -32,7 +32,7 @@ use crate::combat::{Asteroid, Destroyed, Fired, Health, Hit, Library, Target};
 
 use crate::docking::DockMsg;
 
-use crate::{Config, Orbit, PlayerShip, Scenario, Ship, Side, game_to_bevy};
+use crate::{Config, Orbit, Scenario, Ship, Side, game_to_bevy};
 
 // ---------------------------------------------------------------------------------------------------------------- ECS side
 
@@ -112,7 +112,7 @@ pub struct RuleShip {
     pub mission: &'static mut MissionShip,
     pub visibility: &'static mut Visibility,
     /// The human's own ship.
-    pub primary: Has<PlayerShip>,
+    pub primary: Has<crate::commands::Commander>,
     /// Its interpolation: rules see the simulation pose (`RuleShip::sim_pos`), not the drawn one.
     pub interp: Option<&'static crate::interpolate::Interp>,
     /// Fully cloaked ships answer `OP Group Is Cloaked`.

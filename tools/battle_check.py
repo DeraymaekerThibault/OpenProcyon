@@ -99,6 +99,17 @@ SCENARIOS = [
 ]
 
 
+def replay_args(game_args):
+    """The arguments a replay of a run with `game_args` takes: the same, without `--lobby <spec>` (the log holds the setup)."""
+    out, it = [], iter(game_args)
+    for a in it:
+        if a == "--lobby":
+            next(it, None)
+        else:
+            out.append(a)
+    return out
+
+
 def computer(ship):
     """A computer captain commands the ship. Older reports only had the side: everything off the player's side."""
     return ship.get("computer", ship["side"] != "player")
@@ -260,7 +271,7 @@ def main():
         "--replay",
         action="store_true",
         help="play each scenario on the normal clock with `--script commands` recording a command log (PROCYON_COMMANDS), "
-        "replay the log (`--replay`), and fail when the two reports differ",
+        "replay the log (`--replay`; a lobby scenario from the log alone), and fail when the two reports differ",
     )
     args = ap.parse_args()
     chosen = [s for s in SCENARIOS if not args.names or s.name in args.names]
@@ -316,13 +327,14 @@ def main():
         return passed, line
 
     def replay(name, game_args, seconds, text, log):
-        """(same, why) for the recorded run `text` (log `log`) and a replay of its command log."""
+        """(same, why) for the recorded run `text` (log `log`) and a replay of its command log. A lobby scenario replays from the
+        log alone (`--replay <file>`, no `--lobby`): the log's header holds the lobby's whole setup."""
         commands = log.with_suffix(".commands.jsonl")
         if not commands.exists():
             return False, f"the run wrote no command log ({commands})"
         again = play(
             name,
-            game_args,
+            replay_args(game_args),
             seconds,
             out / f"{name}.replay.log",
             ["--replay", str(commands)],

@@ -154,7 +154,7 @@ pub fn refresh_sensors(
         Option<&crate::campaign::MissionShip>,
         Option<&crate::ship::FleetMember>,
         Option<&crate::cloak::Cloak>,
-        Has<crate::PlayerShip>,
+        Has<crate::commands::Commander>,
         Option<&ScanFactor>,
     )>,
     objects: Query<

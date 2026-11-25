@@ -435,7 +435,7 @@ pub fn sail(
     mut rocks: Query<(Entity, &mut crate::combat::Asteroid, &mut Transform, &mut Obstacle, &mut Drift, Option<&Visibility>), Without<crate::Ship>>,
     mission: Option<Res<crate::campaign::Mission>>,
     mut cables: Local<HashMap<(Entity, Entity), f32>>,
-    human: Query<(), With<crate::PlayerShip>>,
+    human: Query<(), With<crate::commands::Commander>>,
     boats: Query<(), With<crate::lifeboats::Lifeboat>>,
     mut ships: Query<(Entity, &mut crate::Ship, &mut Transform, &crate::Health, &mut Drift, Option<&crate::docking::Docker>)>,
     mut sfx: Option<ResMut<Messages<crate::audio::Sfx>>>,
@@ -530,10 +530,13 @@ pub fn sail(
                 others.push(Other { key: Key::Entity(oe), centre, radius, priority: 0.0, lifeboat: false, shape: Shape::Fixed { obstacle: o, island: true } });
             }
         }
-        for (i, (_, r, _, o, _, v)) in rocks.iter().enumerate() {
+        // Rocks by entity, in spawn order: the avoider counts thinks against the same obstacle by its key (a query index changes when
+        // a rock is destroyed or moves archetype), and the nearest of equally near obstacles is the first listed (#369).
+        for re in crate::scenario::in_spawn_order(&spawn_order, rocks.iter().map(|r| r.0), |e| *e) {
+            let Ok((_, r, _, o, _, v)) = rocks.get(re) else { continue };
             if r.hp > 0.0 && v != Some(&Visibility::Hidden) {
                 let (centre, radius) = o.sphere();
-                others.push(Other { key: Key::Rock(i), centre, radius, priority: 0.0, lifeboat: false, shape: Shape::Fixed { obstacle: o, island: false } });
+                others.push(Other { key: Key::Entity(re), centre, radius, priority: 0.0, lifeboat: false, shape: Shape::Fixed { obstacle: o, island: false } });
             }
         }
         // Ships in spawn order (as the avoider loop below): query order follows archetype moves (a ship scene finishing loading, say), not the battle.
