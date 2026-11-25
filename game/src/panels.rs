@@ -293,7 +293,7 @@ fn fleet_input(
     mut orbit: ResMut<crate::Orbit>,
     buttons: Query<(Entity, &FleetButton, &Interaction)>,
     mut latch: Local<Option<(Entity, FleetButton, Option<Entity>)>>,
-    mut commands: Commands,
+    mut orders: crate::commands::Orders,
     mut sfx: MessageWriter<crate::audio::Sfx>,
     mut menu: ResMut<crate::options_menu::BarMenuRequest>,
     options: Option<Res<crate::options_menu::OptionsMenu>>,
@@ -354,17 +354,13 @@ fn fleet_input(
                 sfx.write(crate::audio::Sfx::ui("HUD_SelectShip_Secondary"));
             }
         }
-        FleetButton::Formation(kind) => {
-            let hold = model.active != Some(kind);
-            let owner = fleets.local.clone();
-            commands.queue(move |w: &mut World| crate::ship::set_formation(w, &owner, Some(kind), hold));
+        FleetButton::Formation(formation) => {
+            orders.send(crate::commands::Kind::Formation { formation, hold: model.active != Some(formation) });
             // PROVISIONAL: native formation-click pool is unmapped; use the available fleet selection sound.
             sfx.write(crate::audio::Sfx::ui("HUD_ShipBar_Select"));
         }
-        FleetButton::Attack | FleetButton::CeaseFire => {
-            let owner = fleets.local.clone();
-            commands.queue(move |w: &mut World| crate::ship::fleet_help(w, &owner, button == FleetButton::Attack));
-        }
+        FleetButton::Attack => orders.send(crate::commands::Kind::FleetAttack),
+        FleetButton::CeaseFire => orders.send(crate::commands::Kind::CeaseFire),
     }
 }
 
@@ -897,6 +893,7 @@ pub mod tests {
             .init_resource::<FleetHud>()
             .init_resource::<ChatLog>()
             .init_resource::<crate::options_menu::BarMenuRequest>()
+            .init_resource::<crate::commands::Outbox>()
             .insert_resource(crate::Orbit { yaw: 0.0, pitch: 0.0, dist: 60.0, focus: None })
             .add_message::<crate::audio::Sfx>()
             .add_systems(Update, fleet_input);

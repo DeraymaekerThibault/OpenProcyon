@@ -287,7 +287,7 @@ pub fn fleet_keys(
     mut fleets: ResMut<ship::Fleets>,
     mut orbit: ResMut<Orbit>,
     mission: Option<Res<campaign::Mission>>,
-    mut commands: Commands,
+    mut orders: Orders,
     mut sfx: MessageWriter<audio::Sfx>,
     maps: Query<(), With<crate::starmap::Starmap>>,
     menu: Option<Res<options_menu::OptionsMenu>>,
@@ -326,9 +326,7 @@ pub fn fleet_keys(
         && mission.is_none()
         && let Some(e) = fleets.selected
     {
-        commands.queue(move |w: &mut World| {
-            ship::promote(w, e, false);
-        });
+        orders.send(Kind::Promote { ship: e });
     }
 }
 

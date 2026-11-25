@@ -65,6 +65,11 @@ pub fn orders(
         13 if due(52.0) => Some(Kind::Hold { ship: me, on: false }),
         14 if due(54.0) => Some(Kind::Engine { ship: me, engine: Engine::To(EngineOrder::Full) }),
         15 if due(58.0) => Some(Kind::Stop { ship: me }),
+        16 if due(60.0) => Some(Kind::Formation { formation: crate::ship::Formation::Diamond, hold: true }),
+        17 if due(64.0) => Some(Kind::CeaseFire),
+        18 if due(68.0) => Some(Kind::CeaseFire),
+        19 if due(70.0) => Some(Kind::Target { ship: me, target: enemy(), spot: None }),
+        20 if due(71.0) => Some(Kind::FleetAttack),
         _ => return,
     };
     if p.step == 3 && order.is_none() {

@@ -20,7 +20,7 @@
 //! the first battle of a run is recorded; a restart ends the recording.
 //!
 //! Routed so far: engine orders, target picks, move, course and cancel orders, the right-click menu's Stop, Hold, Cloak, Dock,
-//! Tow, Board and Grapple, and Backspace's dock and grapple cancels. The other orders still change the battle directly and are not in a recording yet
+//! Tow, Board and Grapple, Backspace's dock and grapple cancels, the Fleet Commands (formations, attack, cease fire) and P. The other orders still change the battle directly and are not in a recording yet
 //! (later PRs, one group each). PROVISIONAL: the file format (version 2; version 1, without the skirmish setup, still reads).
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
@@ -83,6 +83,15 @@ pub enum Kind {
     CancelDock { ship: Entity },
     /// Backspace also drops the command ship's grapple order, even while a course is being plotted.
     DropGrapple { ship: Entity },
+    /// A Fleet Commands formation button: the fleet takes `formation`; `hold` (the button was not the active formation) has the
+    /// captains hold it, otherwise they leave it (`ship::set_formation`).
+    Formation { formation: crate::ship::Formation, hold: bool },
+    /// Fleet Commands Attack: the captains attack the command ship's target (`ship::fleet_help`).
+    FleetAttack,
+    /// Fleet Commands Cease Fire: the fleet's hold fire toggles.
+    CeaseFire,
+    /// P (Change Primary, skirmish only): `ship` becomes the fleet's command ship (`ship::promote`).
+    Promote { ship: Entity },
 }
 
 /// One player order.
@@ -129,6 +138,17 @@ pub fn apply(world: &mut World, kind: &Kind) {
         Kind::Move { .. } | Kind::Course { .. } | Kind::Cancel { .. } => apply_movement(world, kind),
         Kind::Stop { .. } | Kind::Hold { .. } | Kind::Cloak { .. } => apply_menu(world, kind),
         Kind::Dock { .. } | Kind::Tow { .. } | Kind::Board { .. } | Kind::Grapple { .. } | Kind::CancelDock { .. } | Kind::DropGrapple { .. } => apply_links(world, kind),
+        Kind::Formation { formation, hold } => {
+            let owner = local_fleet(world);
+            crate::ship::set_formation(world, &owner, Some(formation), hold);
+        }
+        Kind::FleetAttack | Kind::CeaseFire => {
+            let owner = local_fleet(world);
+            crate::ship::fleet_help(world, &owner, *kind == Kind::FleetAttack);
+        }
+        Kind::Promote { ship } => {
+            crate::ship::promote(world, ship, false);
+        }
         Kind::Engine { ship, engine } => {
             if let Some(mut s) = world.get_mut::<Ship>(ship) {
                 s.throttle = None;
@@ -153,6 +173,11 @@ pub fn apply(world: &mut World, kind: &Kind) {
             }
         }
     }
+}
+
+/// The fleet a fleet order commands: the local player's (single-player; #369 phase 2 makes it the command's player's).
+fn local_fleet(world: &World) -> crate::names::Owner {
+    world.get_resource::<crate::ship::Fleets>().map(|f| f.local.clone()).unwrap_or_default()
 }
 
 /// Direct control is the fleet's command ship (`Fleets::direct`, what the input handlers decided on before).
@@ -464,6 +489,10 @@ pub enum Saved {
     Grapple { ship: NetId, target: Option<NetId> },
     CancelDock { ship: NetId },
     DropGrapple { ship: NetId },
+    Formation { formation: crate::ship::Formation, hold: bool },
+    FleetAttack,
+    CeaseFire,
+    Promote { ship: NetId },
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -572,6 +601,10 @@ impl Saved {
             Kind::Grapple { ship, target } => Saved::Grapple { ship: id(ship)?, target: target.map(id).transpose()? },
             Kind::CancelDock { ship } => Saved::CancelDock { ship: id(ship)? },
             Kind::DropGrapple { ship } => Saved::DropGrapple { ship: id(ship)? },
+            Kind::Formation { formation, hold } => Saved::Formation { formation, hold },
+            Kind::FleetAttack => Saved::FleetAttack,
+            Kind::CeaseFire => Saved::CeaseFire,
+            Kind::Promote { ship } => Saved::Promote { ship: id(ship)? },
         })
     }
     /// The command for this world; None when an object it names is gone.
@@ -598,6 +631,10 @@ impl Saved {
             Saved::Grapple { ship, target } => Kind::Grapple { ship: ship.find(world)?, target: find(world, target)? },
             Saved::CancelDock { ship } => Kind::CancelDock { ship: ship.find(world)? },
             Saved::DropGrapple { ship } => Kind::DropGrapple { ship: ship.find(world)? },
+            Saved::Formation { formation, hold } => Kind::Formation { formation, hold },
+            Saved::FleetAttack => Kind::FleetAttack,
+            Saved::CeaseFire => Kind::CeaseFire,
+            Saved::Promote { ship } => Kind::Promote { ship: ship.find(world)? },
         })
     }
 }
