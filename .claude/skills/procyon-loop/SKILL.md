@@ -27,7 +27,8 @@ Rules of thumb
 - Never `--release` except for a release; never `cargo clean` without `--workspace`.
 - Run long Python (`compare_assets`, `battle_check`, `autoplay`, the importer) under `systemd-run --user --scope -q -p MemoryMax=4G -p MemorySwapMax=0 <cmd>`.
 - Game runs: scratch `XDG_DATA_HOME=$(mktemp -d)` so `bindings.json` cannot remap smoke keys.
-- New worktree: `tools/worktree.sh new <branch>`; remove: `tools/worktree.sh rm <path>`.
+- Work in the checkout you were started in. Do not create a worktree (`EnterWorktree`, `isolation: worktree`, `tools/worktree.sh new`)
+  unless the user asks for one: each costs gigabytes of build. Remove one with `tools/worktree.sh rm <path>`.
 
 Hooks
 - Shared (`.claude/settings.json`): the command allowlist, and a hook that formats the one file you just edited.

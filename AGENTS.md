@@ -95,6 +95,6 @@ files to `content/`, or anything that publishes (pushing tags, releases).
 - Known PROVISIONAL areas: ship linear motion and engine-order mapping, gun arcs, damage-smoke emitter geometry, wake parameters,
   sail alpha, HUD part order, sound falloff/levels and the event to sound-pool mapping.
 - `local/` is git-ignored scratch for screenshots, logs and notes.
-- Worktrees: `tools/worktree.sh new <branch>` makes one with a copy of the main checkout's build (only this crate compiles),
+- Worktrees: only when the user asks for one; otherwise work in the checkout you were started in. `tools/worktree.sh new <branch>` makes one with a copy of the main checkout's build (only this crate compiles),
   `tools/worktree.sh rm <path>` removes it with its build, `tools/worktree.sh gc [-n]` caps build disk use. Assets come from the
   main checkout's import; never copy `assets/`.
