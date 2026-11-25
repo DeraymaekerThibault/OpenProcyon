@@ -42,6 +42,7 @@ use bevy::shader::ShaderRef;
 use serde_json::Value;
 
 use super::{Look, num, rgb};
+use crate::combat::xorshift_unit as rand;
 use crate::combat::{GunStates, Health, Library};
 use crate::scenario::Outcome;
 use crate::{Ship, Side};
@@ -725,13 +726,6 @@ fn stop_spot(to: Vec3, before: Vec3, rng: &mut u64) -> Vec3 {
 fn lane_goal(from: Vec3, next: Vec3, side: f32) -> Vec3 {
     let d = (next - from).xz().normalize_or_zero();
     next + Vec3::new(-d.y, 0.0, d.x) * side
-}
-
-fn rand(rng: &mut u64) -> f32 {
-    *rng ^= *rng << 13;
-    *rng ^= *rng >> 7;
-    *rng ^= *rng << 17;
-    (*rng >> 40) as f32 / (1u64 << 24) as f32
 }
 
 /// The battle clock in tag units (tenths of a second, wrapping), as the shader reads `frame.clock.y`.

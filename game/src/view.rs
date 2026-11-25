@@ -519,7 +519,7 @@ impl StarRng {
     }
     /// The low 23 bits as a fraction in [0, 1).
     fn unit(&mut self) -> f32 {
-        f32::from_bits(self.step() & 0x7f_ffff | 0x3f80_0000) - 1.0
+        crate::fx::lcg_unit(&mut self.0)
     }
     /// Uniform direction: height first, then the turn about the vertical.
     fn dir(&mut self) -> Vec3 {
