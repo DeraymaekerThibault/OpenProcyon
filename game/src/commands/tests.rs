@@ -151,6 +151,50 @@ fn move_course_and_cancel_orders_do_what_the_clicks_and_keys_did() {
     assert_eq!((p.destination, p.target, p.hold, ship(&app, captain).order), (None, None, false, EngineOrder::Stop));
 }
 
+/// The right-click menu's Stop, Hold and Cloak.
+#[test]
+fn stop_hold_and_cloak_do_what_the_menu_did() {
+    let mut app = battle();
+    app.add_message::<crate::docking::DockMsg>();
+    let (me, captain, enemy) = fleet(&mut app);
+    loaded(&mut app);
+    {
+        let w = app.world_mut();
+        let mut s = w.get_mut::<Ship>(me).unwrap();
+        (s.waypoints, s.order) = (vec![Vec3::X], EngineOrder::Full);
+        let mut p = w.get_mut::<crate::ship::FleetPilot>(captain).unwrap();
+        p.move_to(Vec3::Z);
+        p.hold = true;
+        w.entity_mut(me).insert(crate::cloak::Cloak::new(false));
+    }
+    let ship = |app: &App, e| app.world().get::<Ship>(e).unwrap().clone();
+    send(&mut app, Kind::Stop { ship: me });
+    send(&mut app, Kind::Stop { ship: captain });
+    frame(&mut app, 40);
+    assert_eq!((ship(&app, me).waypoints.len(), ship(&app, me).order), (0, EngineOrder::Stop));
+    let p = app.world().get::<crate::ship::FleetPilot>(captain).unwrap();
+    assert_eq!((p.destination, p.hold), (None, true), "Stop leaves the formation hold");
+    let msgs: Vec<_> = app.world_mut().resource_mut::<Messages<crate::docking::DockMsg>>().drain().collect();
+    assert_eq!(msgs.len(), 2, "Stop also ends a dock routine");
+    app.world_mut().get_mut::<crate::ship::FleetPilot>(captain).unwrap().attack(enemy);
+    app.world_mut().get_mut::<crate::ship::FleetPilot>(captain).unwrap().move_to(Vec3::X);
+    app.world_mut().get_mut::<Ship>(captain).unwrap().order = EngineOrder::Full;
+    send(&mut app, Kind::Hold { ship: captain, on: true });
+    frame(&mut app, 40);
+    assert!(app.world().get::<crate::ship::HoldPosition>(captain).is_some());
+    assert_eq!((ship(&app, captain).order, app.world().get::<crate::ship::FleetPilot>(captain).unwrap().destination), (EngineOrder::Stop, None));
+    send(&mut app, Kind::Hold { ship: captain, on: false });
+    frame(&mut app, 40);
+    assert!(app.world().get::<crate::ship::HoldPosition>(captain).is_none());
+    send(&mut app, Kind::Cloak { ship: me, on: true });
+    send(&mut app, Kind::Cloak { ship: enemy, on: true }); // no cloak: nothing happens
+    frame(&mut app, 40);
+    assert!(app.world().get::<crate::cloak::Cloak>(me).unwrap().stop_shown(), "Cloak Start: cloaking");
+    send(&mut app, Kind::Cloak { ship: me, on: false });
+    frame(&mut app, 40);
+    assert!(!app.world().get::<crate::cloak::Cloak>(me).unwrap().stop_shown(), "Cloak Stop: decloaking");
+}
+
 #[test]
 fn a_command_keeps_its_meaning_through_the_file() {
     let mut app = battle();
@@ -163,6 +207,9 @@ fn a_command_keeps_its_meaning_through_the_file() {
         Kind::Move { ship: me, to: Vec3::new(10.0, 0.0, -20.5), append: true },
         Kind::Course { ship: me, points: vec![Vec3::new(1.0, 0.0, 2.0), Vec3::new(-3.0, 0.0, 4.0)], release: false },
         Kind::Cancel { ship: me },
+        Kind::Stop { ship: me },
+        Kind::Hold { ship: me, on: true },
+        Kind::Cloak { ship: me, on: false },
     ];
     for kind in kinds {
         let saved = Saved::save(app.world(), &kind).unwrap();
