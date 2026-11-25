@@ -39,6 +39,7 @@ Developer and smoke-test flags (docs/development.md):
   --allies <a,b,...>          allied computer ships of that battle; --enemies <a,b,...|none> the enemy ships
   --speed <x>                 game speed multiplier (default 1)
   --seed <n>                  replay a battle's random seed (also PROCYON_SEED); --fixed-step: one 33 ms tick per frame (PROCYON_FIXED_STEP=1)
+  --replay <file.jsonl>       play back a command log recorded with PROCYON_COMMANDS=<file> (same scenario arguments, seed, mods)
   --cam <yaw,pitch,dist>      camera orbit (also --yaw, --pitch, --dist); --look <x,y[,z]> aims it at a point (game axes)
   --starmap                   open the star map on the first frame
   --autolaunch                with --menu lobby: fill the human fleet and launch

@@ -332,8 +332,8 @@ impl Saved {
 /// The command-line arguments that decide the battle, as a recording keeps them: without the program, the run's presentation and
 /// timing (screenshots, camera, `--speed`, `--fixed-step`), scripts (a script gave the recorded commands) and the replay itself.
 pub fn scenario_args(args: &[String]) -> Vec<String> {
-    const WITH_VALUE: [&str; 10] = ["--script", "--replay", "--speed", "--shot", "--shot-frame", "--late-frame", "--dist", "--yaw", "--pitch", "--cam"];
-    const FLAGS: [&str; 3] = ["--fixed-step", "--autolaunch", "--console"];
+    const WITH_VALUE: [&str; 11] = ["--script", "--replay", "--speed", "--shot", "--shot-frame", "--late-frame", "--dist", "--yaw", "--pitch", "--cam", "--look"];
+    const FLAGS: [&str; 4] = ["--fixed-step", "--autolaunch", "--console", "--starmap"];
     let mut out = vec![];
     let mut it = args.iter().skip(1);
     while let Some(a) = it.next() {
