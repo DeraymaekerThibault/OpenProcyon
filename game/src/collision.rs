@@ -536,7 +536,9 @@ pub fn sail(
                 others.push(Other { key: Key::Rock(i), centre, radius, priority: 0.0, lifeboat: false, shape: Shape::Fixed { obstacle: o, island: false } });
             }
         }
-        for (oe, s, tf, h, ..) in &ships {
+        // Ships in spawn order (as the avoider loop below): query order follows archetype moves (a ship scene finishing loading, say), not the battle.
+        for oe in crate::scenario::in_spawn_order(&spawn_order, ships.iter().map(|s| s.0), |e| *e) {
+            let Ok((_, s, tf, h, ..)) = ships.get(oe) else { continue };
             if !h.destroyed && !ghost(oe) {
                 let class = &lib.classes[s.class];
                 let shape = Shape::Ship { bounds: class.collision_bounds, heading: s.heading, velocity: Vec3::new(-s.heading.sin(), 0.0, -s.heading.cos()) * s.speed };
@@ -545,7 +547,9 @@ pub fn sail(
         }
         let mut seen = 0;
         avoiders.retain(|e, _| ships.contains(*e));
-        for (e, mut s, tf, health, _, docker) in &mut ships {
+        // Spawn order: `seen` sets each avoider's think phase, so query order would make two runs of one seed differ.
+        for e in crate::scenario::in_spawn_order(&spawn_order, ships.iter().map(|s| s.0), |e| *e) {
+            let Ok((_, mut s, tf, health, _, docker)) = ships.get_mut(e) else { continue };
             // A human-captained ship skips the avoider on a move order: the original gates it on "the computer controls this ship",
             // true for the human's ships only on a dock order or a scripted path, so a click course runs straight into ships and rocks.
             if health.destroyed || docker.map_or(humans(e, s.side), |d| !d.avoids()) || pinned(e) {
@@ -650,7 +654,9 @@ pub fn sail(
     // The original's tow keeper (docs/re/collision.md Tow constraint): after both hulls ran their own step, a taut link moves the
     // pair back together along the line of centres, 25 % on the tower and 75 % on a movable towee (all on the tower when the towee is
     // pinned). Speeds are not touched: the towee's own drag and sideways damping already ran.
-    for (&(tower, towee), &length) in cables.iter() {
+    // In the rules' tow order, not the map's: a hull in two links sees the first link's move, so hash order would change the result.
+    for &(tower, towee) in tows {
+        let Some(&length) = cables.get(&(tower, towee)) else { continue };
         let Ok([(_, _, mut ta, ha, _, _), (_, mut b, mut tb, hb, db, _)]) = ships.get_many_mut([tower, towee]) else { continue };
         if ha.destroyed || hb.destroyed {
             continue;
