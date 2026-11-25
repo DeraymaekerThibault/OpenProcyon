@@ -384,9 +384,9 @@ mod tests {
             (engine, retail)
         };
         let (engine, retail) = origins(&ship["properties"]);
-        let mut want: Vec<String> = ENGINE_SHIP_KEYS.iter().map(|s| s.to_string()).chain(["$schema", "set"].map(String::from)).collect();
+        let mut want: Vec<String> = ENGINE_SHIP_KEYS.iter().map(|s| s.to_string()).chain(["$schema", "set", "merge"].map(String::from)).collect();
         want.sort();
-        assert_eq!(engine, want, "the ship keys marked engine are ENGINE_SHIP_KEYS (plus the file-only `$schema` and `set`)");
+        assert_eq!(engine, want, "the ship keys marked engine are ENGINE_SHIP_KEYS (plus the file-only `$schema`, `set` and `merge`)");
         assert!(["race", "core_hp", "sections", "guns", "physics"].iter().all(|k| retail.contains(&k.to_string())), "{retail:?}");
         let (engine, retail) = origins(&guns["$defs"]["entry"]["properties"]);
         assert_eq!(engine, ENGINE_GUN_KEYS, "only `beam` is ours");
