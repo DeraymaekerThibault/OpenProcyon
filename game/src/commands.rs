@@ -79,8 +79,9 @@ impl Orders<'_> {
 pub struct Clock {
     /// A battle has loaded and is running (frames and ticks count).
     active: bool,
-    /// The first battle ended (left or restarted): nothing more is recorded or replayed.
-    ended: bool,
+    /// Battles of this run that have ended (left or restarted); 0 during the first. Only the first is recorded or replayed, but every
+    /// battle counts its own frames and ticks, so orders work the same in all of them.
+    battle: u32,
     frame: u32,
     tick: u32,
     frame_ticks: u32,
@@ -122,13 +123,10 @@ pub fn apply(world: &mut World, kind: &Kind) {
 fn frame_start(world: &mut World) {
     let live = world.get_resource::<State<crate::menu::Screen>>().is_some_and(|s| *s.get() == crate::menu::Screen::Battle) && !world.contains_resource::<crate::loading::Loading>();
     let mut clock = world.resource_mut::<Clock>();
-    if clock.ended {
-        return;
-    }
     if !live {
         if clock.active {
             clock.active = false;
-            clock.ended = true;
+            clock.battle += 1;
         }
         world.resource_mut::<Outbox>().0.clear();
         return;
@@ -136,11 +134,11 @@ fn frame_start(world: &mut World) {
     if clock.active {
         clock.frame += 1;
     } else {
-        clock.active = true;
+        *clock = Clock { active: true, battle: clock.battle, ..default() };
     }
     clock.frame_ticks = 0;
-    let frame = clock.frame;
-    let Some(replay) = world.get_resource::<Replay>() else { return };
+    let (frame, first) = (clock.frame, clock.battle == 0);
+    let Some(replay) = world.get_resource::<Replay>().filter(|r| first && !r.finished) else { return };
     if let Some(&(advance, ticks)) = replay.frames.get(frame as usize) {
         // Exactly `ticks` ticks run this frame: with the overstep at max(0, ticks x tick - advance), the loop fits floor(max(ticks x
         // tick, advance) / tick) of them, and the recording's advance never held a further whole tick (its overstep was below one).
@@ -265,7 +263,19 @@ struct Header {
     seed: u64,
     args: Vec<String>,
     mods: Vec<String>,
+    /// The battle was set up in the menus, not by `--map`, `--lobby` or `--mission`: the arguments do not hold it, so it cannot be
+    /// replayed yet (recording the lobby's setup is a follow-up).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    from_menu: bool,
 }
+
+/// Whether these scenario arguments set up a battle by themselves.
+fn sets_up_battle(args: &[String]) -> bool {
+    args.iter().any(|a| matches!(a.as_str(), "--map" | "--lobby" | "--mission"))
+}
+
+/// Most frames a recording may hold (about six hours at 240 frames a second): a damaged file cannot ask for unbounded memory.
+const MAX_FRAMES: usize = 5_000_000;
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -330,9 +340,31 @@ impl Saved {
 }
 
 /// The command-line arguments that decide the battle, as a recording keeps them: without the program, the run's presentation and
-/// timing (screenshots, camera, `--speed`, `--fixed-step`), scripts (a script gave the recorded commands) and the replay itself.
+/// timing (screenshots, camera, `--speed`, `--fixed-step`), scripts (a script gave the recorded commands), the replay itself, and any
+/// argument that takes a path (`--mod <dir>` among them: mods are compared by folder name, and a file meant for bug reports must not
+/// carry the player's folders).
 pub fn scenario_args(args: &[String]) -> Vec<String> {
-    const WITH_VALUE: [&str; 11] = ["--script", "--replay", "--speed", "--shot", "--shot-frame", "--late-frame", "--dist", "--yaw", "--pitch", "--cam", "--look"];
+    const WITH_VALUE: [&str; 19] = [
+        "--script",
+        "--replay",
+        "--speed",
+        "--shot",
+        "--shot-frame",
+        "--late-frame",
+        "--dist",
+        "--yaw",
+        "--pitch",
+        "--cam",
+        "--look",
+        "--mod",
+        "--rule-report",
+        "--game",
+        "--out",
+        "--assets",
+        "--crashed",
+        "--setup-shot",
+        "--check-mod",
+    ];
     const FLAGS: [&str; 4] = ["--fixed-step", "--autolaunch", "--console", "--starmap"];
     let mut out = vec![];
     let mut it = args.iter().skip(1);
@@ -376,6 +408,7 @@ impl Recorder {
             self.flush();
         }
     }
+    /// Writes the frames held back and flushes the file (also before a command line, so a crash keeps the frames up to it).
     fn flush(&mut self) {
         if !self.frames.is_empty() {
             let frames = std::mem::take(&mut self.frames);
@@ -385,12 +418,19 @@ impl Recorder {
     }
 }
 
+impl Drop for Recorder {
+    fn drop(&mut self) {
+        self.flush();
+    }
+}
+
 fn record(world: &mut World, at: At, c: &PlayerCommand) {
-    if !world.contains_resource::<Recorder>() {
+    if !world.contains_resource::<Recorder>() || world.resource::<Clock>().battle != 0 {
         return;
     }
     let saved = Saved::save(world, &c.kind);
     let mut rec = world.resource_mut::<Recorder>();
+    rec.flush();
     match saved {
         Ok(order) => rec.line(&Line::Command { at, player: c.player, order }),
         Err(what) => {
@@ -401,6 +441,7 @@ fn record(world: &mut World, at: At, c: &PlayerCommand) {
             rec.line(&Line::Unrecorded { at, what: what.into() });
         }
     }
+    rec.flush();
 }
 
 /// End of each frame: the battle frame goes into the recording (its game-time advance and ticks).
@@ -409,18 +450,23 @@ fn record_frame(clock: Res<Clock>, vtime: Res<Time<Virtual>>, rec: Option<ResMut
     if *done {
         return;
     }
-    if clock.active {
+    let over = clock.battle != 0;
+    if clock.active && !over {
         rec.frame(vtime.delta(), clock.frame_ticks);
     }
-    if clock.ended || exit.read().next().is_some() {
+    if over || exit.read().next().is_some() {
         rec.flush();
-        *done = clock.ended;
+        *done = over;
     }
 }
 
 /// In a replay, the recording's commands applied at `at`, for this world; None when this is no replay.
 fn replayed(world: &mut World, at: At) -> Option<Vec<PlayerCommand>> {
-    let saved: Vec<Saved> = world.get_resource::<Replay>()?.commands.iter().filter(|(a, _)| *a == at).map(|(_, s)| s.clone()).collect();
+    // A finished replay (end of the recording, or a later battle) hands the battle back to live input.
+    if world.resource::<Clock>().battle != 0 {
+        return None;
+    }
+    let saved: Vec<Saved> = world.get_resource::<Replay>().filter(|r| !r.finished)?.commands.iter().filter(|(a, _)| *a == at).map(|(_, s)| s.clone()).collect();
     Some(
         saved
             .iter()
@@ -436,7 +482,7 @@ fn replayed(world: &mut World, at: At) -> Option<Vec<PlayerCommand>> {
 }
 
 /// A recording being played back.
-#[derive(Resource)]
+#[derive(Resource, Debug)]
 pub struct Replay {
     /// Each battle frame's game-time advance and tick count.
     frames: Vec<(Duration, u32)>,
@@ -467,7 +513,10 @@ impl Replay {
                     for f in frames {
                         let (&ns, &n) = f.first().zip(f.get(1)).ok_or(format!("line {}: a frame needs two numbers", i + 1))?;
                         let ticks = u32::try_from(n).map_err(|_| format!("line {}: tick count {n}", i + 1))?;
-                        let repeat = f.get(2).copied().unwrap_or(1) as usize;
+                        let repeat = usize::try_from(f.get(2).copied().unwrap_or(1)).unwrap_or(usize::MAX);
+                        if repeat > MAX_FRAMES - replay.frames.len() {
+                            return Err(format!("line {}: more than {MAX_FRAMES} frames", i + 1));
+                        }
                         replay.frames.extend(std::iter::repeat_n((Duration::from_nanos(ns), ticks), repeat));
                     }
                 }
@@ -493,12 +542,12 @@ fn replay_clock(
         return;
     }
     // The frame after this one: the next of a running battle, or the battle's first once it has just loaded.
-    let starting = !clock.active && !clock.ended && loading.is_none() && state.is_some_and(|s| *s.get() == crate::menu::Screen::Battle);
+    let starting = !clock.active && clock.battle == 0 && loading.is_none() && state.is_some_and(|s| *s.get() == crate::menu::Screen::Battle);
     let next = match (clock.active, starting) {
         (true, _) => clock.frame as usize + 1,
         (false, true) => 0,
         (false, false) => {
-            if clock.ended {
+            if clock.battle != 0 {
                 finish(&mut replay, &mut strategy, "the battle ended");
             }
             return;
@@ -523,6 +572,9 @@ fn finish(replay: &mut Replay, strategy: &mut bevy::time::TimeUpdateStrategy, wh
 
 /// Why a recording cannot replay with this launch, if it cannot: the scenario arguments, seed or mods differ.
 fn mismatch(header: &Header, args: &[String], seed: u64, mods: &[String]) -> Option<String> {
+    if header.from_menu {
+        return Some("it was recorded from a battle set up in the menus; only battles started with --map, --lobby or --mission replay so far".into());
+    }
     let mine = scenario_args(args);
     if header.args != mine {
         return Some(format!("it was recorded with the arguments {:?}, this run has {:?}", header.args, mine));
@@ -567,7 +619,12 @@ pub fn plugin(app: &mut App) {
     if let Ok(path) = std::env::var("PROCYON_COMMANDS") {
         let file = std::fs::File::create(&path).unwrap_or_else(|e| panic!("PROCYON_COMMANDS: cannot write {path}: {e}"));
         let mut rec = Recorder { out: std::io::BufWriter::new(file), frames: vec![], warned: false };
-        let header = Header { format: FORMAT, version: env!("CARGO_PKG_VERSION").into(), seed, args: scenario_args(&args), mods: mod_names() };
+        let scenario = scenario_args(&args);
+        let from_menu = !sets_up_battle(&scenario);
+        if from_menu {
+            warn!("PROCYON_COMMANDS: the battle will be set up in the menus, which a recording does not hold yet: --replay will refuse it");
+        }
+        let header = Header { format: FORMAT, version: env!("CARGO_PKG_VERSION").into(), seed, args: scenario, mods: mod_names(), from_menu };
         let _ = serde_json::to_writer(&mut rec.out, &header);
         let _ = rec.out.write_all(b"\n");
         let _ = rec.out.flush();

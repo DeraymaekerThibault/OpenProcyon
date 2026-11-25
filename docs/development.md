@@ -52,7 +52,8 @@ Git Bash (`GIT_BASH=<path>` if it is not in the default place), and the screensh
    frame-driven rules and ticks line up as recorded. JSON lines, format 1 (PROVISIONAL): a header (format, version, seed, scenario
    arguments, mod folders), `frames` ([advance ns, ticks] or [advance ns, ticks, repeat]), and `command` lines stamped with the
    tick (or paused frame) they were applied on, naming objects by kind and `SpawnIndex` only. Only the first battle of a run is
-   recorded. `battle_check --replay` (in `check.sh --full` for `red_rover`) records a run of `--script commands` and fails when
+   recorded, and only a battle started with `--map`, `--lobby` or `--mission` replays (one set up in the menus is marked `from_menu`
+   and refused: the arguments do not hold its setup). Arguments that take a path (`--mod <dir>`, ...) are left out of the header. `battle_check --replay` (in `check.sh --full` for `red_rover`) records a run of `--script commands` and fails when
    its replay's battle report differs.
    `--fixed-step` (or `PROCYON_FIXED_STEP=1`; `--shot` implies it unless `PROCYON_FIXED_STEP=0`, `lib.rs::wants_fixed_step`) makes a scripted run reproducible: each frame is one 33 ms tick at 1x whatever
    the frame rate, and the clock-seeded cosmetic draws (ship names, stars) use a fixed seed. Run twice, it gives the same

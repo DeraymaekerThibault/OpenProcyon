@@ -129,7 +129,13 @@ def replayable(report):
     return out
 
 
-def same_run(log_a, log_b, keep=comparable, what="same report twice"):
+def same_run(
+    log_a,
+    log_b,
+    keep=comparable,
+    what="same report twice",
+    differ="the same seed gave different reports",
+):
     """(same, why) for two logs of one seeded scenario (two fixed-step runs, or a run and its replay): the battle reports must match."""
     reports = [REPORT.search(log) for log in (log_a, log_b)]
     if not all(reports):
@@ -138,7 +144,7 @@ def same_run(log_a, log_b, keep=comparable, what="same report twice"):
     if a == b:
         return True, what
     keys = sorted(k for k in a.keys() | b.keys() if a.get(k) != b.get(k))
-    return False, f"the same seed gave different reports ({', '.join(keys)})"
+    return False, f"{differ} ({', '.join(keys)})"
 
 
 def evaluate(report, expect):
@@ -318,7 +324,13 @@ def main():
             ["--replay", str(commands)],
             {},
         )
-        return same_run(text, again, replayable, "the replay gave the same report")
+        return same_run(
+            text,
+            again,
+            replayable,
+            "the replay gave the same report",
+            "the replay gave a different report",
+        )
 
     def play(name, game_args, seconds, log, extra, env_extra):
         """Plays one scenario in its own display and scratch XDG_DATA_HOME; returns the log text."""

@@ -140,11 +140,82 @@ fn the_recorded_arguments_are_the_ones_that_decide_the_battle() {
     let args: Vec<String> =
         ["game", "--lobby", "map=x", "--speed", "16", "--script", "commands", "--fixed-step", "--seed", "3", "--replay", "f.jsonl"].iter().map(|s| s.to_string()).collect();
     assert_eq!(scenario_args(&args), ["--lobby", "map=x", "--seed", "3"]);
-    let header = Header { format: FORMAT, version: "x".into(), seed: 3, args: scenario_args(&args), mods: vec![] };
+    let header = Header { format: FORMAT, version: "x".into(), seed: 3, args: scenario_args(&args), mods: vec![], from_menu: false };
     assert_eq!(mismatch(&header, &args, 3, &[]), None);
     assert!(mismatch(&header, &args, 4, &[]).unwrap().contains("--seed 3"));
     assert!(mismatch(&header, &["game".to_string(), "--map".to_string(), "y".to_string()], 3, &[]).is_some());
     assert!(mismatch(&header, &args, 3, &["remaster".to_string()]).is_some());
+    let menu = Header { args: vec![], from_menu: true, ..header };
+    assert!(mismatch(&menu, &["game".to_string()], 3, &[]).unwrap().contains("menus"), "a battle set up in the menus is refused, not replayed wrong");
+    assert!(sets_up_battle(&scenario_args(&args)) && !sets_up_battle(&[]));
+}
+
+#[test]
+fn a_recording_keeps_no_paths() {
+    let args: Vec<String> =
+        ["game", "--map", "red_rover", "--mod", "/home/someone/mods/hunter", "--rule-report", "C:/Users/someone/r.json"].iter().map(|s| s.to_string()).collect();
+    assert_eq!(scenario_args(&args), ["--map", "red_rover"], "mods are compared by folder name; no folder of the player's goes in the file");
+}
+
+#[test]
+fn a_damaged_recording_cannot_ask_for_unbounded_frames() {
+    let header = r#"{"format":1,"version":"0.0.0","seed":5,"args":[],"mods":[]}"#;
+    let text = format!(
+        "{header}
+{{\"frames\":[[16000000,0,18446744073709551615]]}}
+"
+    );
+    assert!(Replay::read(text.as_bytes()).unwrap_err().contains("frames"));
+}
+
+#[test]
+fn frames_held_back_are_written_when_the_recorder_goes() {
+    let path = std::env::temp_dir().join(format!("openprocyon-commands-drop-{}.jsonl", std::process::id()));
+    let mut rec = Recorder { out: std::io::BufWriter::new(std::fs::File::create(&path).unwrap()), frames: vec![], warned: false };
+    rec.frame(Duration::from_millis(16), 0);
+    drop(rec);
+    let text = std::fs::read_to_string(&path).unwrap();
+    let _ = std::fs::remove_file(&path);
+    assert_eq!(text.trim(), r#"{"frames":[[16000000,0]]}"#);
+}
+
+/// A restart or a new battle starts the clock again: orders answer at once while paused in every battle, not only the first, and
+/// the recording keeps only the first battle.
+#[test]
+fn orders_work_the_same_in_a_second_battle() {
+    let mut app = battle();
+    let (me, ..) = fleet(&mut app);
+    loaded(&mut app);
+    frame(&mut app, 40);
+    app.world_mut().insert_resource(crate::loading::Loading::default()); // R: the battle loads again
+    frame(&mut app, 40);
+    loaded(&mut app);
+    frame(&mut app, 40);
+    assert_eq!(app.world().resource::<Clock>().battle, 1);
+    app.world_mut().resource_mut::<Time<Virtual>>().pause();
+    send(&mut app, Kind::Engine { ship: me, engine: Engine::To(EngineOrder::Full) });
+    frame(&mut app, 100);
+    assert_eq!(order(&app, me), EngineOrder::Full, "paused in a second battle: still applied at the end of the frame");
+    app.world_mut().resource_mut::<Time<Virtual>>().unpause();
+    send(&mut app, Kind::Engine { ship: me, engine: Engine::Slower });
+    frame(&mut app, 40);
+    assert_eq!(order(&app, me), EngineOrder::Slow);
+}
+
+/// Past the end of its recording a replay hands the battle back: live orders work again.
+#[test]
+fn live_orders_work_again_after_the_end_of_a_replay() {
+    let mut app = battle();
+    let (me, ..) = fleet(&mut app);
+    app.insert_resource(Replay { frames: vec![(Duration::from_millis(40), 1); 2], commands: vec![], finished: false }).add_systems(Last, replay_clock);
+    loaded(&mut app);
+    for _ in 0..4 {
+        app.update();
+    }
+    assert!(app.world().resource::<Replay>().finished);
+    send(&mut app, Kind::Engine { ship: me, engine: Engine::To(EngineOrder::Full) });
+    frame(&mut app, 40);
+    assert_eq!(order(&app, me), EngineOrder::Full);
 }
 
 /// The point of the log: a session on a jittery clock, with a pause and orders given at odd moments, is recorded, and the replay
@@ -157,7 +228,7 @@ fn a_recorded_session_replays_tick_for_tick_on_another_frame_rate() {
     let (me, _, enemy) = fleet(&mut app);
     let file = std::fs::File::create(&path).unwrap();
     let mut rec = Recorder { out: std::io::BufWriter::new(file), frames: vec![], warned: false };
-    let header = Header { format: FORMAT, version: "test".into(), seed: 1, args: vec![], mods: vec![] };
+    let header = Header { format: FORMAT, version: "test".into(), seed: 1, args: vec![], mods: vec![], from_menu: false };
     serde_json::to_writer(&mut rec.out, &header).unwrap();
     rec.out.write_all(b"\n").unwrap();
     app.insert_resource(rec);
