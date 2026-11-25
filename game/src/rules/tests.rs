@@ -1161,6 +1161,35 @@ fn fire_rule_runs_named_rules_at_start_once_and_in_order() {
     assert!(sc.flags["unrelated"], "a rule that was not fired still runs when its conditions hold");
 }
 
+/// `--fire-rule` and `--start-at` reach a skirmish map's script too (`SkirmishScript::load` hands them over with `campaign::apply_start`):
+/// a script set up the way a skirmish's is runs the named rule on its first step and moves the primary ship, once.
+#[test]
+fn start_options_work_on_a_skirmish_style_script() {
+    let never = serde_json::json!({"Type": "Timer Condition", "Timer Name": "never started", "Equivalence": "Greater Than", "Time in seconds": 1});
+    let data = serde_json::json!({"rules": [
+        {"name": "Reinforcements", "conditions": [never], "actions": [{"Type": "Set Flag Action", "Flag Name": "arrived", "Boolean Value": "TRUE"}]},
+    ], "ships": [], "volumes": null, "environment": {}});
+    let mut sc = Script::new(&crate::rules::without_end_rules(&data), serde_json::json!({}));
+    sc.set_teams(vec![("TEAM_A".into(), vec!["Player0".into()])]);
+    sc.decide_game(false);
+    let options = (vec!["Reinforcements".to_string()], Some((120.0_f32, -40.0_f32)));
+    crate::campaign::apply_start_options(&mut sc, Some(&options));
+    assert_eq!((sc.start_rules.len(), sc.start_at), (1, Some((120.0, -40.0))), "handed over at load");
+    let mut flagship = unit("Flagship", "Player0", Vec3::ZERO);
+    flagship.primary = true;
+    let other = unit("Other", "Player0", Vec3::new(5.0, 0.0, 0.0));
+    let (fx, _) = sc.step(&[flagship.clone(), other], 0.1, false);
+    assert!(sc.flags.get("arrived").copied().unwrap_or(false), "the named rule ran on the first step");
+    let moved: Vec<_> = fx.iter().filter_map(|f| if let Fx::Teleport(ids, p) = f { Some((ids.clone(), *p)) } else { None }).collect();
+    assert_eq!(moved, vec![(vec![flagship.e], crate::data::conv(120.0, -40.0, 0.0))], "only the primary ship moves, to the game coordinates");
+    let (fx, _) = sc.step(&[flagship], 0.1, false);
+    assert!(fx.iter().all(|f| !matches!(f, Fx::Teleport(..))), "the placement happens once");
+    // Without options nothing is set.
+    let mut plain = Script::new(&data, serde_json::json!({}));
+    crate::campaign::apply_start_options(&mut plain, None);
+    assert!(plain.start_rules.is_empty() && plain.start_at.is_none());
+}
+
 #[test]
 fn a_started_speech_line_with_text_is_handed_to_the_chat_history_once() {
     let media = serde_json::json!({"speech": {

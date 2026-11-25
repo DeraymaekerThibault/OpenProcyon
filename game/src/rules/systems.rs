@@ -257,7 +257,7 @@ fn update(
             PlaybackSettings::DESPAWN.with_volume(bevy::audio::Volume::Linear(crate::menu::volume(crate::menu::Setting::Dialogue))),
         ));
     }
-    apply_fx(fxs, mission, &mut commands, &mut ships, &mut animals, &mut extra, &mut orbit, &lib);
+    apply_fx(fxs, &mut mission.script, &mission.data["paths"], None, &mut commands, &mut ships, &mut animals, &mut extra, &mut orbit, &lib);
     if let Some(values) = mission.script.campaign_commit()
         && let Some(handed_on) = extra.campaign_values.as_mut()
     {
@@ -279,9 +279,12 @@ fn update(
 
 /// Applies the effects a `Script::step` returned to the world: ship orders, flags, docking and tow messages, effects, the orbit camera.
 /// The application itself is `apply::apply`, shared with the skirmish maps' scripts.
+#[allow(clippy::too_many_arguments)]
 fn apply_fx(
     fxs: Vec<Fx>,
-    mission: &mut Mission,
+    script: &mut Script,
+    paths: &serde_json::Value,
+    sides: Option<&std::collections::HashMap<String, Side>>,
     commands: &mut Commands,
     ships: &mut Query<RuleShip>,
     animals: &mut Query<(Entity, &mut crate::environment::SpaceAnimal, &mut Transform, &mut Visibility), Without<Ship>>,
@@ -290,8 +293,8 @@ fn apply_fx(
     lib: &Library,
 ) {
     let mut env = apply::FxEnv {
-        script: &mut mission.script,
-        paths: &mission.data["paths"],
+        script,
+        paths,
         lib,
         bases: &mut extra.bases,
         dragons: &mut extra.dragons,
@@ -306,7 +309,7 @@ fn apply_fx(
         toggles: extra.toggles.as_deref_mut(),
         difficulty: extra.difficulty.as_deref().copied().unwrap_or_default().0,
         orbit: Some(orbit),
-        sides: None,
+        sides,
         mines: Some(&mut extra.mines),
     };
     apply::apply(fxs, &mut env, commands, ships, animals);

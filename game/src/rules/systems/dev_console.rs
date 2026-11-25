@@ -5,7 +5,8 @@ use bevy::input::keyboard::KeyboardInput;
 
 use super::*;
 use crate::menu::Screen;
-use crate::rules::console::{Cheats, Command, Console, DevView, Edit, Env, FrameStats, ShipInfo, ViewChange, marks_path, parse};
+use crate::rules::console::{Caps, Cheats, Command, Console, DevView, Edit, Env, FrameStats, Needs, ShipInfo, ViewChange, marks_path, parse};
+use crate::rules::skirmish::SkirmishScript;
 
 /// Whether the console is on without the Display option "Developer Console": debug builds, `--console` or `PROCYON_CONSOLE` in the
 /// environment. A release build otherwise leaves it to the option (off by default), so a stray `~` never hands a player the cheats.
@@ -13,20 +14,26 @@ pub fn enabled() -> bool {
     cfg!(debug_assertions) || std::env::args().any(|a| a == "--console") || std::env::var_os("PROCYON_CONSOLE").is_some()
 }
 
+/// The rules script the console works on in a battle that runs none (a skirmish map without a `script.json`, a lobby battle): empty, so the
+/// commands that only need the battle's ships still have an interpreter to run through. Made on first use, dropped when a battle starts.
+#[derive(Resource, Default)]
+pub(super) struct BareScript(Option<Script>);
+
 pub(super) fn plugin(app: &mut App) {
     app.insert_resource(Console::new(enabled()))
         .init_resource::<Cheats>()
         .init_resource::<DevView>()
+        .init_resource::<BareScript>()
         .init_resource::<crate::scenario::RestartRequest>()
-        .add_systems(OnEnter(Screen::Battle), |mut cheats: ResMut<Cheats>| *cheats = Cheats::default())
+        .add_systems(OnEnter(Screen::Battle), (|mut cheats: ResMut<Cheats>| *cheats = Cheats::default(), |mut bare: ResMut<BareScript>| bare.0 = None))
         .add_systems(OnExit(Screen::Battle), (close_on_leaving, |mut dev: ResMut<DevView>| dev.reset()))
         // After the input systems and before anything reads the keys: while the console is open the game sees no keyboard or mouse.
         .add_systems(PreUpdate, keys.after(bevy::input::InputSystems).run_if(in_state(Screen::Battle)).run_if(crate::menu::overlay_closed))
         .init_resource::<crate::rules::console::FrameStats>()
         .add_systems(Last, frame_stats)
         .add_systems(Update, free_camera.after(crate::camera).run_if(in_state(Screen::Battle)))
-        .add_systems(Update, run.after(update).run_if(in_state(Screen::Battle)).run_if(resource_exists::<Mission>))
-        .add_systems(Update, run_without_mission.run_if(in_state(Screen::Battle)).run_if(not(resource_exists::<Mission>)));
+        // One dispatch for every singleplayer battle: what a command needs decides whether it runs (`Command::needs`), not which rules resource exists.
+        .add_systems(Update, (attach_ship_state, run).chain().after(update).run_if(in_state(Screen::Battle)));
 }
 
 /// Feeds the frame-rate counter from the real-time clock while it is shown.
@@ -120,13 +127,38 @@ fn keys(
     }
 }
 
-/// Runs the lines submitted since the last frame: each becomes a rule action or condition on the mission's script, and its effects
-/// are applied as a rule's would be.
-fn run(
+/// A battle whose ships carry no `MissionShip` (a skirmish map without a script, a lobby battle) gets one on each ship the first time a
+/// command needs them: the rule actions (`god`, `tp`, `kill`...) and the unit list read and change a ship through it. The ship is named
+/// after its banner and owned by its fleet, as a scripted skirmish's are; nothing else about it changes. PROVISIONAL: some systems read
+/// `MissionShip` when it exists (owners in the statistics, alliances), so a battle in which the console ran such a command counts its
+/// ships by fleet owner from then on, which is already how the scripted skirmishes work.
+pub(super) fn attach_ship_state(
+    console: Res<Console>,
+    ships: Query<(Entity, &Ship, Option<&crate::ship::FleetMember>, Option<&crate::ShipName>), (Without<MissionShip>, Without<crate::lifeboats::Lifeboat>)>,
+    lib: Res<Library>,
+    mut commands: Commands,
+) {
+    if console.pending.is_empty() || ships.is_empty() || !console.pending.iter().any(|l| parse(l, "", false).is_ok_and(|c| c.needs() >= Needs::World)) {
+        return;
+    }
+    for (e, ship, member, name) in &ships {
+        let owner = member.map_or_else(|| if ship.side == crate::Side::Player { "player".to_string() } else { "enemy".to_string() }, |m| m.0.to_string());
+        let name = name.map_or_else(|| lib.classes[ship.class].name.clone(), |n| n.0.clone());
+        commands.entity(e).insert(MissionShip { id: -1, name, owner: owner.as_str().into(), visible: true, ..default() });
+    }
+}
+
+/// Runs the lines submitted since the last frame: each becomes a rule action or condition on the battle's script (the mission's, the
+/// skirmish map's, or an empty one), and its effects are applied as a rule's would be. A command the battle cannot serve is answered
+/// with what it needs (`Command::refusal`).
+pub(super) fn run(
     mut console: ResMut<Console>,
     mut dev: ResMut<DevView>,
     mut restart: ResMut<crate::scenario::RestartRequest>,
-    mission: Option<ResMut<Mission>>,
+    mut mission: Option<ResMut<Mission>>,
+    mut skirmish: Option<ResMut<SkirmishScript>>,
+    mut bare: ResMut<BareScript>,
+    fleets: Option<Res<crate::ship::Fleets>>,
     target: Res<Target>,
     lib: Res<Library>,
     mut orbit: ResMut<Orbit>,
@@ -137,11 +169,21 @@ fn run(
     mut extra: Extra,
     mut settings: Option<ResMut<crate::menu::Settings>>,
 ) {
-    let Some(mut mission) = mission else { return };
     if console.pending.is_empty() && !console.open {
         return;
     }
-    let mission = &mut *mission;
+    // The script the battle runs, with what applying its effects needs: a campaign mission, a skirmish map's script, or neither.
+    let in_mission = mission.is_some();
+    let (null, no_sides) = (serde_json::Value::Null, std::collections::HashMap::new());
+    let (script, paths, sides, caps, mission_id): (&mut Script, &serde_json::Value, _, _, _) = if let Some(m) = mission.as_deref_mut() {
+        let Mission { script, data, id, .. } = m;
+        (script, &data["paths"], None, Caps::MISSION, id.clone())
+    } else if let Some(sk) = skirmish.as_deref_mut() {
+        let SkirmishScript { script, paths, sides, .. } = sk;
+        (script, &*paths, Some(&*sides), Caps::SKIRMISH_SCRIPT, String::new())
+    } else {
+        (bare.0.get_or_insert_with(|| Script::new(&serde_json::json!({"rules": []}), serde_json::Value::Null)), &null, Some(&no_sides), Caps::BARE, String::new())
+    };
     let lines = std::mem::take(&mut console.pending);
     // `Extra` holds the read side of `Cheats` (the points gate in `update`), so changes go through the command queue.
     let mut god = extra.cheats.as_ref().is_some_and(|c| c.god);
@@ -150,13 +192,17 @@ fn run(
     world.extend(animals.iter().map(|(e, a, tf, _)| a.unit(e, tf)));
     world.extend(extra.bases.iter_mut().map(|(e, b, tf, armed)| super::base_unit(&b, e, tf, armed, &lib)));
     world.extend(rocks.iter().map(|(e, tf, a)| a.unit(e, tf)));
-    mission.script.tag(&mut world);
+    script.tag(&mut world);
     if console.open {
-        console.names = mission.script.console_names(&world);
+        console.names = script.console_names(&world);
     }
+    // The rules address the human's fleet by its owner name: the script's player in a mission, else the local fleet's owner.
+    let player = match fleets.as_deref().map(|f| f.local.to_string()).filter(|o| !o.is_empty() && !in_mission) {
+        Some(owner) => owner,
+        None => script.player().to_string(),
+    };
     for line in lines {
         console.say(format!("> {line}"));
-        let player = mission.script.player().to_string();
         let cmd = match parse(&line, &player, god) {
             Ok(c) => c,
             Err(e) => {
@@ -167,8 +213,10 @@ fn run(
         let mut fx = vec![];
         let env = Env {
             target: target.0,
-            mission: mission.id.clone(),
+            mission: mission_id.clone(),
             marks: marks_path(),
+            word: line.split_whitespace().next().unwrap_or_default().to_lowercase(),
+            caps,
             ships: ships
                 .iter()
                 .map(|s| ShipInfo {
@@ -183,7 +231,7 @@ fn run(
                 })
                 .collect(),
         };
-        let outcome = mission.script.console_run_with(&cmd, &mut world, &env, &mut fx);
+        let outcome = script.console_run_with(&cmd, &mut world, &env, &mut fx);
         if outcome.rejected {
             for l in &outcome.lines {
                 console.say(l);
@@ -209,7 +257,7 @@ fn run(
         restart.0 |= outcome.restart;
         apply_view(&outcome.view, &mut console, &mut dev, settings.as_deref_mut());
         each_ship(&mut ships, outcome.repair, |s| crate::docking::repair(&lib, &s.ship, &mut s.health, true));
-        apply_fx(fx, mission, &mut commands, &mut ships, &mut animals, &mut extra, &mut orbit, &lib);
+        apply_fx(fx, script, paths, sides, &mut commands, &mut ships, &mut animals, &mut extra, &mut orbit, &lib);
     }
 }
 
@@ -222,24 +270,6 @@ fn apply_view(changes: &[ViewChange], console: &mut Console, dev: &mut DevView, 
             settings.save();
             console.say(format!("fps counter {}", if settings.fps { "on" } else { "off" }));
         }
-    }
-}
-
-/// The same for a battle without a mission (a skirmish): only the view commands and `help` run (`console_without_mission`).
-fn run_without_mission(mut console: ResMut<Console>, mut dev: ResMut<DevView>, mut settings: Option<ResMut<crate::menu::Settings>>) {
-    for line in std::mem::take(&mut console.pending) {
-        console.say(format!("> {line}"));
-        let outcome = match parse(&line, "", false) {
-            Ok(cmd) => crate::rules::console::console_without_mission(&line, &cmd),
-            Err(e) => {
-                console.say(e);
-                continue;
-            }
-        };
-        for l in &outcome.lines {
-            console.say(l);
-        }
-        apply_view(&outcome.view, &mut console, &mut dev, settings.as_deref_mut());
     }
 }
 
@@ -282,7 +312,7 @@ mod tests {
     use super::*;
     use bevy::input::keyboard::Key;
 
-    /// A battle with no `Mission` resource: what a skirmish has.
+    /// The console's key handling on its own (the battle's commands are tested in `rules::systems::tests`).
     fn skirmish() -> App {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
@@ -292,7 +322,7 @@ mod tests {
             .init_resource::<ButtonInput<KeyCode>>()
             .init_resource::<ButtonInput<MouseButton>>()
             .init_resource::<bevy::input::mouse::AccumulatedMouseScroll>()
-            .add_systems(Update, (keys, run_without_mission).chain());
+            .add_systems(Update, keys);
         app
     }
     fn press(app: &mut App, code: KeyCode) {
@@ -336,19 +366,5 @@ mod tests {
         app.update();
         assert!(!app.world().resource::<Console>().open);
         assert!(!app.world().resource::<ButtonInput<KeyCode>>().just_pressed(KeyCode::Escape), "the game must not also open the in-game menu");
-    }
-
-    #[test]
-    fn lines_submitted_in_a_skirmish_run_view_commands_and_refuse_rule_commands() {
-        let mut app = skirmish();
-        app.world_mut().resource_mut::<Console>().submit("hud off");
-        app.world_mut().resource_mut::<Console>().submit("god");
-        app.world_mut().resource_mut::<Console>().submit("fps");
-        app.update();
-        let log = app.world().resource::<Console>().log.join("\n");
-        assert!(log.contains("HUD off"), "{log}");
-        assert!(log.contains("god: needs a mission"), "{log}");
-        assert!(app.world().resource::<DevView>().hud_hidden);
-        app.world_mut().resource_mut::<DevView>().reset();
     }
 }

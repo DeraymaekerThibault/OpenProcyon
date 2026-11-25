@@ -435,7 +435,12 @@ pub fn spawn_scenario(commands: &mut Commands, assets: &AssetServer, lib: &Libra
             .collect();
         match crate::rules::skirmish::SkirmishScript::load(&map_id, rosters, sides) {
             Some(s) => commands.insert_resource(s),
-            None => commands.remove_resource::<crate::rules::skirmish::SkirmishScript>(),
+            None => {
+                if campaign::start_requested() {
+                    warn!("--fire-rule / --start-at: map '{map_id}' has no script.json, so there are no rules to fire and nothing runs them; they are ignored");
+                }
+                commands.remove_resource::<crate::rules::skirmish::SkirmishScript>();
+            }
         }
         // Mines the map placed (Border Dispute, Red Rover): the script gives each field to a player.
         spawn_mines(commands, map);
