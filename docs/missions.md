@@ -3,8 +3,8 @@
 A custom mission is a map folder in a mod: `maps/<id>/` with `map.json`, `mission.json` and `media.json` (and `speech/*.ogg`). The
 game plays it with the same rule interpreter as the retail campaign. This page is the guide for writing one; `docs/modding.md` covers
 mods in general (installing, sharing, ships, art) and "Mission rule extensions" there lists the engine-added `OP ` Types;
-`docs/rule-types.md` is the reference of every condition and action. A mission is data you write yourself: do not copy or edit a
-retail mission, which is game content.
+`docs/rule-types.md` is the reference of every condition and action. A mission is data you write yourself: do not copy a retail
+mission, which is game content. A diff over one (`extends` plus the changed keys) is fine, as over a retail ship or a skirmish map.
 
 The worked example, `docs/examples/gate-ambush.mission.json`, is a complete `mission.json` (ours; a unit test keeps it valid). With the
 `map.json` and `media.json` of section 1 it is a playable mission. Section 6 walks through it.
@@ -88,6 +88,8 @@ For a mission, the loader reads only the keys marked "yes" below. Numbers are ga
 | `mines` | yes, custom missions only | `[{"type": "Bullet_StarMine_Med", "id": 7, "pos": [x, y, z]}]`: mines resting where you put them, hostile to every ship until a rule hands one over with `Set Group/Unit Owner` (give each a unique `id`, and list it in a `groups` entry to address it). A mine answers to its group only, never to its owner's name. `OP Place Mines` lays them from a rule instead. `docs/modding.md` "Mission rule extensions" |
 | `players` | no | skirmish lobby slots. `--check-mission` reads the names as known players, but a mission's players live in `mission.json`. Leave it out, or fill it as the retail maps do: `{"name", "team": -1, "start": [x, y, z], "forward": [x, y, z], "formation": 0, "playable": true, "race": 4, "color": [r, g, b, a]}` (`race`: 0 Navy, 2 Pirate, 3 Procyon, 4 open; other numbers are unverified) |
 | `alliance_change`, `teams`, `ship_names`, `name_id`, `desc_id`, `assemble`, `islands_make_sounds` | no | skirmish-lobby and retail-text fields; leave them out |
+
+`openprocyon --dump-schemas <dir>` writes `map.schema.json`, the keys above with their types and defaults, for an editor's hints (`docs/modding.md` "JSON schemas").
 
 `rot` (objects, ships, animals) is nine numbers: a 3x3 rotation matrix in the order the file stores it (column by column: the first
 triple is the starboard side, the second the forward vector). `[1,0,0, 0,1,0, 0,0,1]` faces north (+y). To face a heading `a`

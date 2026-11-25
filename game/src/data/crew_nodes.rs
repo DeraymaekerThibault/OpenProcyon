@@ -11,17 +11,24 @@ use serde::Deserialize;
 use std::collections::BTreeMap;
 
 /// The kinds `Crew_<Kind>_...` the deck crews understand (`render/deckhands.rs`).
-const KINDS: [&str; 6] = ["Walk", "Gun", "Post", "Work", "Climb", "Count"];
+pub const CREW_KINDS: [&str; 6] = ["Walk", "Gun", "Post", "Work", "Climb", "Count"];
+
+/// The kind of a crew node name (`Crew_Walk_P_0` is `Walk`), one of [`CREW_KINDS`]; `None` for any other name.
+pub fn crew_kind(name: &str) -> Option<&'static str> {
+    let rest = name.strip_prefix("Crew_")?;
+    let kind = rest.split_once('_').map_or(rest, |s| s.0);
+    CREW_KINDS.iter().find(|k| **k == kind).copied()
+}
 
 /// One entry of a `crew_nodes` list.
 #[derive(Deserialize, JsonSchema)]
 pub(super) struct CrewNodeDoc {
     /// The node's name: `Crew_Walk_<lane>_<k>`, `Crew_Gun_*`, `Crew_Post_*`, `Crew_Work_*`, `Crew_Climb_<shroud>_a` / `_b` or `Crew_Count_<n>`.
-    name: String,
+    pub(in crate::data) name: String,
     /// Ship frame, game axes (x starboard, y forward, z up): the convention of a gun's `pos`.
-    pos: [f64; 3],
+    pub(in crate::data) pos: [f64; 3],
     /// Rotation, the convention of a gun's `rot`: the way the figure faces at the place.
-    rot: Option<[f64; 3]>,
+    pub(in crate::data) rot: Option<[f64; 3]>,
 }
 
 /// A crew place as the deck crews read it: the node's name and its transform in the model's frame.
@@ -32,8 +39,7 @@ pub(super) fn nodes(docs: &[CrewNodeDoc], context: &str) -> Result<Vec<CrewNode>
     docs.iter()
         .enumerate()
         .map(|(i, d)| {
-            let kind = d.name.strip_prefix("Crew_").map(|r| r.split_once('_').map_or(r, |s| s.0));
-            if !kind.is_some_and(|k| KINDS.contains(&k)) {
+            if crew_kind(&d.name).is_none() {
                 return Err(format!(
                     "{context}[{i}].name: {:?} is not a crew node name (Crew_Walk_<lane>_<k>, Crew_Gun_*, Crew_Post_*, Crew_Work_*, Crew_Climb_<shroud>_a/_b, Crew_Count_<n>)",
                     d.name

@@ -1,13 +1,46 @@
-//! The command-line flags that print something and exit, before any window, asset or mod work: `--version`,
+//! The command-line flags that print something and exit, before any window, asset or mod work: `--version`, `--help` / `-h`,
 //! `--dump-schemas <dir>` and `--check-mod <dir> [--json]`. (The mission-authoring flags are in `rules/cli.rs`.)
 
 use std::io::Write;
 use std::path::Path;
 
-/// Runs `--version` or `--dump-schemas <dir>` when given and returns the exit status; `None` when neither is.
+/// What `--help` / `-h` print: the flags a player or a mod author uses (the developer flags of the screenshot and smoke scripts are in
+/// docs/development.md).
+const HELP: &str = "\
+OpenProcyon: an open-source engine for Treasure Planet: Battle at Procyon (it needs your own imported assets).
+
+Usage: openprocyon [FLAGS]
+
+Play:
+  --map <id>                  start a skirmish battle on the map <id>
+  --mission <n>               start campaign mission <n>
+  --menu <name>               open the front end at the screen <name> (skirmish, ...)
+  --mod <folder>              load a mod folder over the assets (repeatable, later ones win)
+  --only-mod                  with --mod: load only the --mod folders, not the installed mods
+
+Mod authoring (no window, no assets needed unless said):
+  --check-mod <folder> [--json]  check a mod folder (the imported assets, when found, are used); exit 1 on errors
+  --check-mission <map id|all>   check the mission rules of a map (needs assets; takes --mod)
+  --dump-schemas <folder>        write the JSON Schemas of ship, guns, bullets, crew nodes, mod and map files
+  --dump-rule-schema [file]      write the mission rule schema (stdout without a file)
+  --rule-trace, --why <rule>     while a mission plays, log why rules have not fired
+  --console                      open the developer console (~) in a release build
+
+Other:
+  --version                   print the version and exit
+  -h, --help                  print this help and exit
+
+Environment: PROCYON_ASSETS is the folder of the imported assets (default: the per-user folder). Docs: docs/modding.md.
+";
+
+/// Runs `--help`, `--version` or `--dump-schemas <dir>` when given and returns the exit status; `None` when neither is.
 pub fn quick(args: &[String]) -> Option<i32> {
     if args.iter().skip(1).any(|a| a == "--version") {
         println!("OpenProcyon {}", crate::authoring::ENGINE_VERSION);
+        return Some(0);
+    }
+    if args.iter().skip(1).any(|a| a == "--help" || a == "-h") {
+        print!("{HELP}");
         return Some(0);
     }
     if let Some(i) = args.iter().position(|a| a == "--check-mod") {
@@ -80,9 +113,33 @@ mod tests {
     #[test]
     fn version_and_schema_flags_exit_before_anything_else() {
         assert_eq!(quick(&args(&["game", "--version"])), Some(0));
+        assert_eq!(quick(&args(&["game", "--help"])), Some(0));
+        assert_eq!(quick(&args(&["game", "-h"])), Some(0));
         assert_eq!(quick(&args(&["game", "--map", "x"])), None, "other runs go on");
         assert_eq!(quick(&args(&["game", "--dump-schemas"])), Some(2), "a folder is needed");
         assert_eq!(quick(&args(&["game", "--dump-schemas", "--mod"])), Some(2));
+    }
+
+    #[test]
+    fn the_help_names_every_flag_it_lists_and_stays_in_the_flags_the_game_reads() {
+        for flag in [
+            "--map",
+            "--mission",
+            "--menu",
+            "--mod",
+            "--only-mod",
+            "--check-mod",
+            "--check-mission",
+            "--dump-schemas",
+            "--dump-rule-schema",
+            "--rule-trace",
+            "--why",
+            "--console",
+            "--version",
+            "--help",
+        ] {
+            assert!(HELP.contains(flag), "{flag}");
+        }
     }
 
     #[test]
@@ -93,7 +150,7 @@ mod tests {
         assert_eq!(quick(&args(&["game", "--dump-schemas", &out.to_string_lossy()])), Some(0));
         let mut files: Vec<String> = std::fs::read_dir(&out).unwrap().flatten().map(|e| e.file_name().to_string_lossy().into_owned()).collect();
         files.sort();
-        assert_eq!(files, ["bullets.schema.json", "crew_nodes.schema.json", "guns.schema.json", "mod.schema.json", "ship.schema.json"]);
+        assert_eq!(files, ["bullets.schema.json", "crew_nodes.schema.json", "guns.schema.json", "map.schema.json", "mod.schema.json", "ship.schema.json"]);
         std::fs::remove_dir_all(dir).unwrap();
     }
 }

@@ -48,7 +48,7 @@ pub fn check_references(mission: &Value, map: &Value, media: &Value, look: &Look
             if let Some(class) = s["type"].as_str().filter(|c| !is_wrecked_hull(c) && !ship(c)) {
                 let name = s["name"].as_str().filter(|n| !n.is_empty()).map_or(String::new(), |n| format!(" '{n}'"));
                 let mut p = problem("(mission)", format!("ship #{}{name}", i + 1), "type", format!("ship class '{class}' does not exist (no ships/{class}/ship.json)"));
-                p.path = format!("ships[{i}].type");
+                p.set_path(super::check::JsonPath::from("ships").index(i).key("type"));
                 out.push(p);
             }
         }
@@ -93,7 +93,7 @@ pub fn check_references(mission: &Value, map: &Value, media: &Value, look: &Look
         }
     }
     if let Some(picture) = look.picture
-        && (map["backdrop"] == true || map["backdrop"].as_str().is_some_and(|s| !s.is_empty()))
+        && crate::data::MapDoc::from_value(map).wants_backdrop()
         && !picture("backdrop.png")
     {
         out.push(problem("(mission)", "files".into(), "backdrop", "map.json asks for a backdrop but the map folder has no backdrop.png".into()));

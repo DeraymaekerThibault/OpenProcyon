@@ -7,15 +7,18 @@ use std::sync::OnceLock;
 mod asteroids;
 mod crew;
 pub mod crew_nodes;
+pub mod maps;
 mod ships;
 mod weapons;
 pub use crew::{CrewMember, roster};
-pub use ships::{derive, load_class, try_load_class};
+pub use maps::MapDoc;
+pub(crate) use ships::mount_rotation;
+pub use ships::{CREW_POSTS, Fill, SHIP_FILLS, SHIP_REQUIRED_NEW, derive, fill_of, load_class, resolved, try_load_class, try_load_class_without_weapons};
 pub(crate) use weapons::lenient;
-pub use weapons::try_load_weapons;
+pub use weapons::{bullet_from_value, gun_from_value, try_load_weapons};
 
 /// The JSON schemas of the files a modder writes, by file name (`ship.schema.json`, ...): `ship.json`, `guns.json`, `bullets.json`,
-/// `data/crew_nodes.json`. `authoring::schemas` adds `mod.json`.
+/// `data/crew_nodes.json`. `authoring::schemas` adds `mod.json` and `map.json` (`map_schema`).
 pub fn schemas() -> Vec<(&'static str, Value)> {
     vec![
         ("ship.schema.json", ships::schema()),
@@ -23,6 +26,11 @@ pub fn schemas() -> Vec<(&'static str, Value)> {
         ("bullets.schema.json", weapons::bullets_schema()),
         ("crew_nodes.schema.json", crew_nodes::schema()),
     ]
+}
+
+/// The JSON schema of `maps/<id>/map.json` (`map.schema.json`), generated from [`MapDoc`].
+pub fn map_schema() -> Value {
+    maps::schema()
 }
 
 /// The file as errors name it: its path in the asset root and its source, which for a file a mod provided is the mod's own file even
@@ -586,6 +594,10 @@ pub fn num(v: &Value) -> f32 {
 /// Game frame (x starboard, y bow, z up) -> Bevy (x, z, -y), the same map as the GLB export.
 pub fn conv(x: f32, y: f32, z: f32) -> Vec3 {
     Vec3::new(x, z, -y)
+}
+/// Bevy (x, y, z) -> game frame (x, -z, y): the inverse of [`conv`].
+pub fn unconv(v: Vec3) -> [f64; 3] {
+    [v.x as f64, -v.z as f64, v.y as f64]
 }
 pub fn conv_v(v: &Value) -> Vec3 {
     conv(num(&v[0]), num(&v[1]), num(&v[2]))

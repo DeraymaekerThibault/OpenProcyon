@@ -14,6 +14,10 @@ pub struct Layer {
     pub aabb: [[f64; 3]; 2],
     pub tris: Vec<f64>,
 }
+/// The `kind` of a [`Point`] that is a crew node of the model (`Crew_<Kind>_...`): where deck crews walk, man guns, stand, work and
+/// climb. Only a render profile's `deckhands` block uses them; tools read them here to show them.
+pub const CREW_NODE: &str = "CrewNode";
+
 /// A hardpoint in game axes; `yaw` is the heading about the up axis, 0 forward and positive to port (the retail `rot_raw[0]`).
 pub struct Point {
     pub kind: String,
@@ -84,10 +88,15 @@ fn walk(doc: &Value, bin: &[u8], i: usize, parent: Mat4, out: &mut Facts, depth:
     }
 }
 
-/// What a non-mesh node is: its `extras.kind`, else a guess from its name. Nodes that are neither stay unused.
+/// What a non-mesh node is: its `extras.kind`, else `CrewNode` for a crew node name (`Crew_Walk_P_0`, see `crew_nodes::crew_kind`),
+/// else a guess from its name. Nodes that are none of these stay unused.
 pub fn point_kind(n: &Value, name: &str) -> Option<String> {
     if let Some(k) = n["extras"]["kind"].as_str() {
         return Some(k.to_string());
+    }
+    // Before the name guesses: `Crew_Work_Engine` is a crew place, not an engine port.
+    if crate::data::crew_nodes::crew_kind(name).is_some() {
+        return Some(CREW_NODE.into());
     }
     let l = name.to_lowercase();
     let kind = if l.contains("mount") || l.contains("lancer") || l.contains("turret") {
@@ -186,7 +195,7 @@ fn carrier(facts: &Facts, layers: &[&str], p: [f64; 3]) -> Option<String> {
 
 /// Hull length along y of the intact layers.
 fn length(facts: &Facts) -> f64 {
-    let (lo, hi) = facts.layers.iter().filter(|l| !l.name.contains("Damage_")).fold((f64::MAX, f64::MIN), |(a, b), l| (a.min(l.aabb[0][1]), b.max(l.aabb[1][1])));
+    let (lo, hi) = facts.layers.iter().filter(|l| !is_damage_layer(&l.name)).fold((f64::MAX, f64::MIN), |(a, b), l| (a.min(l.aabb[0][1]), b.max(l.aabb[1][1])));
     (hi - lo).max(0.0)
 }
 
@@ -204,6 +213,12 @@ pub fn mount_node<'a>(facts: &'a Facts, label: &str) -> Option<&'a Point> {
     points(facts, "GunPlacement").find(|p| p.name.eq_ignore_ascii_case(label))
 }
 
+/// Whether a mesh layer is a damage variant (`<A>Damage_<B>`, the mesh a destroyed section swaps in) and not part of the intact hull:
+/// the retail naming rule, a name that contains `Damage_`.
+pub fn is_damage_layer(name: &str) -> bool {
+    name.contains("Damage_")
+}
+
 /// The section layer a damaged mesh `<A>Damage_<B>` stands in for (`<A>_<B>`, matched ignoring case); `None` for an intact mesh.
 pub fn damaged_layer(name: &str) -> Option<String> {
     name.split_once("Damage_").map(|(a, b)| format!("{a}_{b}"))
@@ -211,7 +226,7 @@ pub fn damaged_layer(name: &str) -> Option<String> {
 
 /// Fill in every part of `j` the document did not state, from the model's `facts`.
 pub(super) fn complete(j: &mut ShipDoc, facts: &Facts, root: &Path) {
-    let intact: Vec<&Layer> = facts.layers.iter().filter(|l| !l.name.contains("Damage_")).collect();
+    let intact: Vec<&Layer> = facts.layers.iter().filter(|l| !is_damage_layer(&l.name)).collect();
     if j.sections.is_empty() {
         let hulls = intact.iter().filter(|l| !is_sail(&l.name)).count().max(1) as f64;
         j.sections = intact
@@ -362,6 +377,12 @@ pub(crate) mod tests {
 
     #[test]
     fn a_damaged_mesh_stands_in_for_the_layer_its_name_makes() {
+        assert!(is_damage_layer("HullDamage_Two") && is_damage_layer("Mast1Damage_Top_Sail") && is_damage_layer("Damage_X"));
+        assert!(
+            !is_damage_layer("Hull_Two") && !is_damage_layer("HullDamage") && !is_damage_layer("Hulldamage_Two") && !is_damage_layer(""),
+            "intact, and the marker is case-sensitive"
+        );
+        assert!(crate::authoring::is_damage_layer("HullDamage_Two"), "re-exported for tools");
         assert_eq!(damaged_layer("HullDamage_Two").as_deref(), Some("Hull_Two"));
         assert_eq!(damaged_layer("Mast1Damage_Top_Sail").as_deref(), Some("Mast1_Top_Sail"), "only the first Damage_ is the marker");
         assert_eq!(damaged_layer("Hull_Two"), None);

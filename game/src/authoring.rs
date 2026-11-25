@@ -9,8 +9,22 @@
 //! - [`read_merged`] / [`read_map`]: a JSON file of such a root (or of the base folder), read like the game reads it, as a
 //!   [`DataError`] that names the file and the mod that provided it.
 //! - [`rule_schema`]: the mission rule vocabulary as JSON, the same document `--dump-rule-schema` writes.
-//! - [`schemas`]: JSON Schemas of `ship.json`, `guns.json`, `bullets.json`, `data/crew_nodes.json` and `mod.json` (`--dump-schemas <dir>`).
+//! - [`schemas`]: JSON Schemas of `ship.json`, `guns.json`, `bullets.json`, `data/crew_nodes.json`, `mod.json` and `maps/<id>/map.json` (`--dump-schemas <dir>`).
+//! - [`extensions`]: the engine's additions to the original (the table of docs/modding.md), as data.
 //! - [`check_mission`] / [`known_names`]: the mission checker behind `--check-mission`, on JSON values in memory.
+//! - [`defined_names`] / [`accepted_names`]: the names a mission defines per kind of rule field, and exactly the names a field of
+//!   that kind accepts (derived from the checker's own test, so a `group` field also offers players and placed ships' groups).
+//! - [`Finding`]: what the checkers find, located by `path` (printed) and `pointer` (a JSON pointer); [`unknown_key_findings`] gives
+//!   the unknown-key warnings of any document with the nearest known key.
+//! - [`merge_rule`] / [`extends_parent`] / [`MERGED`]: how a mod file combines with the overlay below it, and what an `extends` file
+//!   is laid over.
+//! - [`game_to_bevy`] / [`bevy_to_game`] / [`mount_rotation`] / [`mount_rot`]: the files' axes and `rot` triples as the loader reads them.
+//! - [`resolved_ship`]: a ship as the loader sees it ([`ResolvedShip`]): speed, thrust, mass, hit points, mounts and every hardpoint
+//!   in game axes, each value with its [`Source`] (a JSON pointer into `ship.json`, a model node, or a fallback rule), serializable.
+//!   It is built from the merged document the loader hands back, so which of `ship.json` and the model wins is decided once.
+//! - [`ship_art`]: the command-bar icon and weapon-panel outline (PNG bytes) and each gun's bank the engine generates for a ship from a
+//!   model, with nothing written.
+//! - [`crew_kind`] / [`CREW_KINDS`] / [`CREW_NODE`]: crew node names, and the kind of a model's crew nodes in `data::derive::Facts`.
 //!
 //! Shared code: no UI and no view imports.
 
@@ -18,14 +32,26 @@ use std::path::{Path, PathBuf};
 
 use serde_json::Value;
 
+mod annotate;
+mod art;
 mod check_mod;
+mod extensions;
 mod json;
-pub use check_mod::{check_mod, check_mod_with, unknown_keys};
+#[cfg(test)]
+mod keyed_tests;
+/// Whether a model's mesh layer is a damage variant (`<A>Damage_<B>`, swapped in when the section `<A>_<B>` is destroyed) rather than
+/// part of the intact hull: true when the name contains `Damage_`. The one rule the game, `--check-mod` and the ship art use, so a tool
+/// listing a model's sections must skip these layers too.
+pub use crate::data::derive::is_damage_layer;
+pub use crate::data::resolved::{Hardpoint, HardpointKind, ResolvedMount, ResolvedSection, ResolvedShip, Source, Sourced, resolved_ship};
+pub use art::{GunBank, ShipArt, ship_art};
+pub use check_mod::{check_mod, check_mod_with, unknown_key_findings, unknown_keys};
+pub use extensions::{Extension, ExtensionKind, extensions};
 pub use json::to_json_string;
 
 pub use crate::data::DataError;
-pub use crate::modding::{ModEntry, ModReport};
-pub use crate::rules::check::{Finding, Level, Problem, defined_names};
+pub use crate::modding::{MERGED, MergeRule, ModEntry, ModReport, extends_parent, merge_rule};
+pub use crate::rules::check::{Finding, JsonPath, Level, Problem, Segment, accepted_names, defined_names};
 
 /// The version of this engine (the crate version).
 pub const ENGINE_VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -70,25 +96,78 @@ pub fn rule_schema() -> Value {
 }
 
 /// The JSON Schemas (draft 2020-12) of the files a modder writes, as `(file name, schema)`: `ship.schema.json`, `guns.schema.json`,
-/// `bullets.schema.json`, `crew_nodes.schema.json`, `mod.schema.json`; the files `--dump-schemas <dir>` writes. Generated from the
+/// `bullets.schema.json`, `crew_nodes.schema.json`, `mod.schema.json`, `map.schema.json`; the files `--dump-schemas <dir>` writes. Generated from the
 /// types the loader reads, so they cannot drift from it. Unknown keys stay allowed, as in the loader. No key is `required`: a mod's
-/// files are merged over a parent (`extends`, or a retail entry) before the loader reads them, so a partial file is valid; the loader's
-/// own validation of the merged result is unchanged. Needs no assets.
+/// files are merged over a parent (`extends`, or a retail entry) before the loader reads them, so a partial file is valid; the loader's own
+/// validation of the merged result is unchanged. The entry of `guns.json` and `bullets.json` carries `"x-required-new"`, the dotted
+/// fields a NEW entry must set (what the loader needs, derived from the same types; see [`required_new`]); a change to a retail entry
+/// needs none. Needs no assets.
+///
+/// Every property of the ship, guns and bullets schemas carries `"x-origin"`: `"retail"` or `"engine"` (a key the engine adds; the
+/// `ENGINE_SHIP_KEYS` / `ENGINE_GUN_KEYS` keys). A ship key the engine fills in when the file leaves it out carries `"x-default-from"`:
+/// `model`, `race_and_size`, `navy_cutter`, `hull` or `weapon_panel` (`data::SHIP_FILLS`); so do the nested keys it fills (`guns` `pos`
+/// `rot` `bank` `parent_layer`, `engines` `pos` `rot` `fx` `parent_layer`, `physics` `MinExtents` ...), on their definitions.
 pub fn schemas() -> Vec<(&'static str, Value)> {
     let mut all = crate::data::schemas();
+    annotate::all(&mut all);
     all.push(("mod.schema.json", crate::modding::schema()));
-    for (_, schema) in &mut all {
+    all.push(("map.schema.json", crate::data::map_schema()));
+    for (name, schema) in &mut all {
+        // `guns.json` and `bullets.json` entries are merged key by key, so a partial entry is the normal case and no key is `required`;
+        // what a NEW entry must set is listed apart, as the non-enforcing annotation `x-required-new` on the entry.
+        if matches!(*name, "guns.schema.json" | "bullets.schema.json") {
+            let mut list = vec![];
+            required_paths(schema, &schema["$defs"]["entry"], "", &mut list);
+            schema["$defs"]["entry"]["x-required-new"] = list.into();
+        }
         strip_required(schema);
     }
     // `extends` and `set` are consumed by the overlay merge before the loader reads a ship (docs/modding.md "Extending a file").
     if let Some(props) = all[0].1["properties"].as_object_mut() {
-        props.insert("extends".into(), serde_json::json!({"type": "string", "description": "Not part of the ship: the id of the ship this file extends. The mod merge lays this file over `ships/<id>/ship.json` before the game reads it."}));
+        props.insert("extends".into(), serde_json::json!({"type": "string", "x-origin": "engine", "description": "Not part of the ship: the id of the ship this file extends. The mod merge lays this file over `ships/<id>/ship.json` before the game reads it."}));
         props.insert(
             "set".into(),
-            serde_json::json!({"type": "object", "description": "Not part of the ship: with `extends`, JSON pointers (`/engines/0/fx`) mapped to the value that replaces what the merge left there; reaches inside arrays."}),
+            serde_json::json!({"type": "object", "x-origin": "engine", "description": "Not part of the ship: with `extends`, JSON pointers (`/engines/0/fx`) mapped to the value that replaces what the merge left there; reaches inside arrays."}),
+        );
+        props.insert(
+            "merge".into(),
+            serde_json::json!({"type": "object", "x-origin": "engine", "description": "Not part of the ship (PROVISIONAL spelling): with `extends`, a list merged by key instead of replaced, as {\"/crew_nodes\": \"name\"}: the file's list at that pointer changes, adds or (`\"$remove\": true`) removes single entries of the parent's list, matched by that field. Applied before `set`."}),
         );
     }
     all
+}
+
+/// The fields (dotted, going into the objects they hold, such as `visual.pivot`) that the loader needs of a whole entry of
+/// `data/weapons/guns.json` or `bullets.json` (a file name, or its path); what a new entry must set, since an entry that changes a
+/// retail one needs none; and of a whole `ships/<id>/ship.json` (PROVISIONAL list, `data::SHIP_REQUIRED_NEW`) that extends no existing
+/// ship. Empty for any other file. The list is the `x-required-new` of the published schema.
+pub fn required_new(file: &str) -> Vec<String> {
+    let (name, entry) = match file.rsplit('/').next() {
+        Some("guns.json") => ("guns.schema.json", true),
+        Some("bullets.json") => ("bullets.schema.json", true),
+        Some("ship.json") => ("ship.schema.json", false),
+        _ => return vec![],
+    };
+    schemas()
+        .iter()
+        .find(|(n, _)| *n == name)
+        .and_then(|(_, s)| {
+            let list = if entry { &s["$defs"]["entry"]["x-required-new"] } else { &s["x-required-new"] };
+            list.as_array().map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+        })
+        .unwrap_or_default()
+}
+
+/// The `required` paths of an entry schema (before they are stripped), dotted, into the objects named by `$ref`.
+fn required_paths(root: &Value, node: &Value, prefix: &str, out: &mut Vec<String>) {
+    for k in node["required"].as_array().into_iter().flatten().filter_map(Value::as_str) {
+        out.push(format!("{prefix}{k}"));
+    }
+    for (k, sub) in node["properties"].as_object().into_iter().flatten() {
+        if let Some(def) = sub["$ref"].as_str().and_then(|r| r.strip_prefix("#/$defs/")) {
+            required_paths(root, &root["$defs"][def], &format!("{prefix}{k}."), out);
+        }
+    }
 }
 
 /// Removes the `required` keyword from a JSON Schema, wherever it is a keyword (not a property that is itself named `required`).
@@ -116,6 +195,32 @@ fn strip_required(node: &mut Value) {
 pub fn check_mission(mission: &Value, map: &Value, media: &Value, skirmish: bool) -> Vec<Problem> {
     crate::rules::check::check_with(mission, map, media, skirmish)
 }
+
+/// A point in game axes (x starboard, y forward, z up), as the files hold it, to Bevy's axes (x, z, -y): what the loader does with
+/// every `pos` (`data::conv`).
+pub fn game_to_bevy(p: [f64; 3]) -> bevy::math::Vec3 {
+    crate::data::conv(p[0] as f32, p[1] as f32, p[2] as f32)
+}
+
+/// The inverse of [`game_to_bevy`]: a Bevy-axes vector as the `[x, y, z]` a file holds.
+pub fn bevy_to_game(v: bevy::math::Vec3) -> [f64; 3] {
+    [v.x as f64, -v.z as f64, v.y as f64]
+}
+
+/// A `rot` triple of a gun mount or a crew node (`ship.json`), as the rotation the loader gives the node (Bevy axes).
+pub fn mount_rotation(rot: [f64; 3]) -> bevy::math::Quat {
+    crate::data::mount_rotation(rot)
+}
+
+/// The inverse of [`mount_rotation`]: the `rot` triple that gives `rotation` (each angle in radians; one of the triples when there
+/// are several).
+pub fn mount_rot(rotation: bevy::math::Quat) -> [f64; 3] {
+    let (z, y, x) = rotation.to_euler(bevy::math::EulerRot::ZYX);
+    [y as f64, -z as f64, x as f64]
+}
+
+pub use crate::data::crew_nodes::{CREW_KINDS, crew_kind};
+pub use crate::data::derive::CREW_NODE;
 
 /// Every name a group spec of this mission can mean (groups, players, placed ships, environment); see `rules::check::known_names`.
 pub use crate::rules::check::known_names;
@@ -229,7 +334,7 @@ mod tests {
     fn schemas_are_2020_12_for_every_file_a_modder_writes() {
         let all = schemas();
         let names: Vec<_> = all.iter().map(|(n, _)| *n).collect();
-        assert_eq!(names, ["ship.schema.json", "guns.schema.json", "bullets.schema.json", "crew_nodes.schema.json", "mod.schema.json"]);
+        assert_eq!(names, ["ship.schema.json", "guns.schema.json", "bullets.schema.json", "crew_nodes.schema.json", "mod.schema.json", "map.schema.json"]);
         for (name, schema) in &all {
             let text = serde_json::to_string(schema).unwrap();
             let back: Value = serde_json::from_str(&text).unwrap();
@@ -241,6 +346,72 @@ mod tests {
         assert!(ship["properties"]["core_hp"]["description"].as_str().unwrap().contains("Core hit points"));
         assert!(ship["properties"]["$schema"].is_object(), "an editor may write the $schema key");
         assert!(all[4].1["properties"]["requires"]["description"].as_str().unwrap().contains("mods"));
+    }
+
+    /// The definition a property's schema points to, or the property itself.
+    fn resolve<'a>(root: &'a Value, node: &'a Value) -> &'a Value {
+        fn find(v: &Value) -> Option<&str> {
+            match v {
+                Value::Object(m) => m.get("$ref").and_then(Value::as_str).or_else(|| m.iter().filter(|(k, _)| !k.starts_with("x-")).find_map(|(_, v)| find(v))),
+                Value::Array(a) => a.iter().find_map(find),
+                _ => None,
+            }
+        }
+        find(node).and_then(|r| r.strip_prefix("#/$defs/")).map_or(node, |n| &root["$defs"][n])
+    }
+
+    #[test]
+    fn schema_annotations_equal_the_engine_constants_and_the_fill_table() {
+        use crate::data::{ENGINE_GUN_KEYS, ENGINE_SHIP_KEYS, SHIP_FILLS};
+        let all = schemas();
+        let (ship, guns, bullets) = (&all[0].1, &all[1].1, &all[2].1);
+        let origins = |props: &Value| -> (Vec<String>, Vec<String>) {
+            let (mut engine, mut retail) = (vec![], vec![]);
+            for (k, v) in props.as_object().unwrap() {
+                match v["x-origin"].as_str() {
+                    Some("engine") => engine.push(k.clone()),
+                    Some("retail") => retail.push(k.clone()),
+                    other => panic!("{k} has x-origin {other:?}"),
+                }
+            }
+            engine.sort();
+            (engine, retail)
+        };
+        let (engine, retail) = origins(&ship["properties"]);
+        let mut want: Vec<String> = ENGINE_SHIP_KEYS.iter().map(|s| s.to_string()).chain(["$schema", "set", "merge"].map(String::from)).collect();
+        want.sort();
+        assert_eq!(engine, want, "the ship keys marked engine are ENGINE_SHIP_KEYS (plus the file-only `$schema`, `set` and `merge`)");
+        assert!(["race", "core_hp", "sections", "guns", "physics"].iter().all(|k| retail.contains(&k.to_string())), "{retail:?}");
+        let (engine, retail) = origins(&guns["$defs"]["entry"]["properties"]);
+        assert_eq!(engine, ENGINE_GUN_KEYS, "only `beam` is ours");
+        assert!(retail.contains(&"MuzzleSpeed".to_string()));
+        let (engine, retail) = origins(&bullets["$defs"]["entry"]["properties"]);
+        assert!(engine.is_empty() && retail.contains(&"lifetime".to_string()), "every bullet key is retail");
+        // x-default-from: exactly the table, at the top level and below it
+        let mut seen = 0;
+        for (path, fill) in SHIP_FILLS {
+            let mut parts = path.split('.');
+            let node = &ship["properties"][parts.next().unwrap()];
+            let node = match parts.next() {
+                None => node,
+                Some(sub) => &resolve(ship, node)["properties"][sub],
+            };
+            assert_eq!(node["x-default-from"], fill.name(), "{path}");
+            seen += 1;
+        }
+        fn count(v: &Value) -> usize {
+            match v {
+                Value::Object(m) => m.iter().map(|(k, v)| usize::from(k == "x-default-from") + count(v)).sum(),
+                Value::Array(a) => a.iter().map(count).sum(),
+                _ => 0,
+            }
+        }
+        assert_eq!(count(ship), seen, "no annotation outside the table");
+        assert_eq!(count(guns) + count(bullets), 0);
+        assert_eq!(ship["properties"]["engines"]["x-default-from"], "model");
+        assert_eq!(ship["properties"]["crew_posts"]["x-default-from"], "race_and_size");
+        assert_eq!(ship["properties"]["tow"]["x-default-from"], "hull");
+        assert_eq!(resolve(ship, &ship["properties"]["guns"])["properties"]["bank"]["x-default-from"], "weapon_panel");
     }
 
     fn has_required(node: &Value) -> bool {
@@ -265,6 +436,68 @@ mod tests {
         let mini = json!({"extends": "Ship_X", "points": 100});
         assert!(unknown(ship, &mini).is_empty(), "{:?}", unknown(ship, &mini));
         assert_eq!(ship["properties"]["points"]["type"], "integer");
+    }
+
+    fn remove_path(v: &mut Value, path: &str) {
+        let mut parts: Vec<&str> = path.split('.').collect();
+        let last = parts.pop().unwrap();
+        let mut at = v;
+        for p in parts {
+            at = &mut at[p];
+        }
+        at.as_object_mut().unwrap().remove(last);
+    }
+
+    #[test]
+    fn x_required_new_of_guns_and_bullets_is_what_the_loader_needs() {
+        let all = schemas();
+        let full_gun = json!({"Mount Type": "Medium Mount", "Victory Point Cost": 3, "MuzzleFlashEffect": "Fx", "SoundName": "s", "SoundVolume": 1, "Is Lobbing Gun": false,
+            "MuzzleSpeed": 1, "TimeBetweenBursts": 1, "BulletsPerBurst": 1, "DuringBurstReloadTime": 1, "EffectiveRange_Range": 1, "LongRange_Range": 1,
+            "MaximumRange_Range": 1, "EffectiveRange_AccuracyDeviation": 1, "LongRange_AccuracyDeviation": 1, "MaximumRange_AccuracyDeviation": 1, "BulletAffectedByGravity": false,
+            "BulletTypeName_Primary": "B", "visual": {"base": "a", "barrel": "b", "pivot": [0, 0, 0], "muzzles": [[0, 0, 0]]}, "HorizontalRotationSpeed": 1, "VerticalRotationSpeed": 1,
+            "VerticalMinAngle": 0, "VerticalMaxAngle": 1, "beam": {"charge": 1}});
+        let full_bullet = json!({"lifetime": 1, "impact_vol": 1, "impact_max": 1, "impact_snd": {"Wood": ["a"]}, "damage": {"Wood": [1, 2, 0, 0, 0]}, "hit_fx": "H", "decal": "Small", "hitpoints": 2});
+        for (name, entry, full) in [("guns.schema.json", &all[1].1, full_gun), ("bullets.schema.json", &all[2].1, full_bullet)] {
+            let is_gun = name.starts_with("guns");
+            let load = |v: &Value| if is_gun { crate::data::gun_from_value("G", v.clone()).map(|_| ()) } else { crate::data::bullet_from_value("B", v.clone()).map(|_| ()) };
+            let required = required_new(if is_gun { "data/weapons/guns.json" } else { "data/weapons/bullets.json" });
+            assert_eq!(entry["$defs"]["entry"]["x-required-new"], json!(required));
+            // the loader's own (unstripped) types say the same
+            let mut own = vec![];
+            required_paths(&crate::data::schemas()[if is_gun { 1 } else { 2 }].1, &crate::data::schemas()[if is_gun { 1 } else { 2 }].1["$defs"]["entry"], "", &mut own);
+            assert_eq!(own, required);
+            assert!(required.len() >= 5, "{name}: {required:?}");
+            assert_eq!(load(&full), Ok(()), "{name}: the full entry loads");
+            // with only the required fields, it loads; without any one of them, it does not
+            let mut least = full.clone();
+            let optional: Vec<String> = {
+                let mut all_paths = vec![];
+                for (k, v) in full.as_object().unwrap() {
+                    all_paths.push(k.clone());
+                    if let Some(o) = v.as_object().filter(|_| k == "visual") {
+                        all_paths.extend(o.keys().map(|n| format!("{k}.{n}")));
+                    }
+                }
+                all_paths.into_iter().filter(|p| !required.contains(p)).collect()
+            };
+            for p in &optional {
+                if !p.contains('.') {
+                    remove_path(&mut least, p);
+                }
+            }
+            assert_eq!(load(&least), Ok(()), "{name}: the required fields alone load ({required:?})");
+            for p in &optional {
+                let mut one = full.clone();
+                remove_path(&mut one, p);
+                assert_eq!(load(&one), Ok(()), "{name}: `{p}` is optional");
+            }
+            for p in &required {
+                let mut one = full.clone();
+                assert!(full.pointer(&format!("/{}", p.replace('.', "/"))).is_some(), "{name}: the fixture lacks required `{p}`");
+                remove_path(&mut one, p);
+                assert!(load(&one).is_err(), "{name}: `{p}` is listed required but the loader does without it");
+            }
+        }
     }
 
     #[test]
@@ -324,5 +557,40 @@ mod tests {
         let problems = check_mission(&mission, &Value::Null, &Value::Null, false);
         assert!(problems.iter().any(|p| p.level == Level::Error && p.field == "Volume Name" && p.message.contains("unknown volume 'Gate Aera'")), "{problems:#?}");
         assert!(known_names(&mission).contains("Hero"));
+    }
+
+    #[test]
+    fn axes_and_rotations_round_trip_as_the_loader_reads_them() {
+        for p in [[0.0, 0.0, 0.0], [1.0, 2.0, 3.0], [-4.5, 10.25, -0.5]] {
+            assert_eq!(bevy_to_game(game_to_bevy(p)), p);
+            assert_eq!(game_to_bevy(p), crate::data::conv(p[0] as f32, p[1] as f32, p[2] as f32));
+        }
+        // forward in the files is Bevy -z
+        assert_eq!(game_to_bevy([0.0, 1.0, 0.0]), bevy::math::Vec3::NEG_Z);
+        for rot in [[0.0, 0.0, 0.0], [0.5, 0.0, 0.0], [0.3, -0.2, 0.1], [-1.2, 0.4, 0.7]] {
+            let q = mount_rotation(rot);
+            let back = mount_rot(q);
+            assert!(mount_rotation(back).angle_between(q) < 1e-5, "{rot:?} -> {back:?}");
+            for k in 0..3 {
+                assert!((back[k] - rot[k]).abs() < 1e-5, "{rot:?} -> {back:?}");
+            }
+        }
+        assert_eq!(crew_kind("Crew_Walk_P_0"), Some("Walk"));
+        assert_eq!(crew_kind("Crew_Climb_Main_a"), Some("Climb"));
+        assert_eq!(crew_kind("Crew_Dance_1"), None);
+        assert_eq!(crew_kind("Gun_Mount"), None);
+    }
+
+    #[test]
+    fn a_models_crew_nodes_are_points_of_their_own_kind() {
+        use crate::data::derive;
+        let node = |name: &str| serde_json::json!({"name": name, "translation": [1.0, 2.0, 3.0]});
+        // `point_kind` on single nodes: a crew name wins over the name guesses; an explicit kind wins over both
+        assert_eq!(derive::point_kind(&node("Crew_Work_Engine"), "Crew_Work_Engine").as_deref(), Some(CREW_NODE));
+        assert_eq!(derive::point_kind(&node("Crew_Gun_Mount_1"), "Crew_Gun_Mount_1").as_deref(), Some(CREW_NODE));
+        assert_eq!(derive::point_kind(&node("Engine_1"), "Engine_1").as_deref(), Some("EnginePortPlacement"));
+        let tagged = serde_json::json!({"name": "Crew_Walk_A_0", "extras": {"kind": "WakePlacement"}});
+        assert_eq!(derive::point_kind(&tagged, "Crew_Walk_A_0").as_deref(), Some("WakePlacement"));
+        assert_eq!(derive::point_kind(&node("Crew_Dance_1"), "Crew_Dance_1"), None, "not a crew kind");
     }
 }
