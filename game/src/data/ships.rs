@@ -340,6 +340,12 @@ struct WakeDoc {
     pos: [f64; 3],
     /// Effect name.
     fx: String,
+    /// Retail name of the emitter, as for guns and flags (PROVISIONAL: exported, not read by the engine).
+    #[allow(dead_code)]
+    label: Option<String>,
+    /// Rotation, as a crew node's `rot` (PROVISIONAL: exported, not read by the engine).
+    #[allow(dead_code)]
+    rot: Option<[f64; 3]>,
 }
 /// One flag attachment point.
 #[derive(Deserialize, JsonSchema)]

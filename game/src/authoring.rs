@@ -657,6 +657,15 @@ mod tests {
     }
 
     #[test]
+    fn a_wake_entry_with_the_retail_label_and_rot_has_no_unknown_key() {
+        let all = schemas();
+        let wake = json!({"wakes": [{"label": "Wake_0", "pos": [0, 1, 0], "rot": [0, 0, 0], "fx": "wake"}]});
+        assert!(unknown_keys(&all[0].1, &wake).is_empty(), "{:?}", unknown_keys(&all[0].1, &wake));
+        let typo = json!({"wakes": [{"pos": [0, 1, 0], "fx": "wake", "lable": "x"}]});
+        assert_eq!(unknown_keys(&all[0].1, &typo)[0].0, "wakes[0].lable");
+    }
+
+    #[test]
     fn the_schema_key_is_ignored_by_the_loaders_of_the_whole_file_types() {
         let dir = scratch("schemakey");
         std::fs::create_dir_all(dir.join("data/weapons")).unwrap();

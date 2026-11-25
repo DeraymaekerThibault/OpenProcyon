@@ -219,6 +219,22 @@ impl Checker<'_> {
         let reported = self.weapons();
         self.ships(&files, reported);
         self.missions();
+        self.skirmish_maps();
+    }
+
+    /// Every skirmish map the mod brings (`map.json` `"skirmish": true`), against what the lobby needs to start it.
+    fn skirmish_maps(&mut self) {
+        let maps = self.dir.join("maps");
+        let mut ids: Vec<String> =
+            std::fs::read_dir(&maps).into_iter().flatten().flatten().filter(|e| e.path().is_dir()).filter_map(|e| e.file_name().into_string().ok()).collect();
+        ids.sort();
+        for id in ids {
+            let Some(map) = crate::data::try_json(&self.root.join("maps").join(&id).join("map.json")) else { continue };
+            let file = format!("maps/{id}/map.json");
+            for (path, message) in skirmish_team_problems(&map) {
+                self.error(&file, path, message);
+            }
+        }
     }
 
     /// Gun, bullet, effect and sound names the mod's own files use, against the merged tables and folders. Needs the base.
@@ -556,6 +572,27 @@ impl Checker<'_> {
     }
 }
 
+/// What the skirmish lobby cannot start on a map's `teams` (the team list of a listed, open map whose fleet types are not free):
+/// `(path, message)` for each team without a numeric `race`. The lobby takes the human's fleet type from the team and, with the
+/// team's fleet type left open, cannot launch (`PLEASE_SELECT_A_RACE`) because the pull-down only works on free-for-all maps. Free-for-all
+/// maps (`alliance_change` true, or no teams) and historical maps (`assemble` false, which place their fleets) are not affected.
+fn skirmish_team_problems(map: &Value) -> Vec<(JsonPath, String)> {
+    let doc = crate::data::MapDoc::from_value(map);
+    let free = doc.alliance_change.unwrap_or(doc.teams.is_empty());
+    if doc.skirmish != Some(true) || doc.assemble != Some(true) || free {
+        return vec![];
+    }
+    let raw = map["teams"].as_array().cloned().unwrap_or_default();
+    raw.iter()
+        .enumerate()
+        .filter(|(_, t)| t["race"].as_u64().is_none())
+        .map(|(i, t)| {
+            let name = t["name_id"].as_str().map_or(String::new(), |n| format!(" ({n})"));
+            (JsonPath::default().key("teams").index(i).key("race"), format!("team {i}{name} has no `race`: the skirmish lobby takes each team's fleet type from it and cannot start the map (set the team's `race`, or make the map free-for-all with `alliance_change`)"))
+        })
+        .collect()
+}
+
 /// The schema file (`authoring::schemas`) that describes the mod file at `rel`, if any.
 /// The paths (below the entry) of every `required` field of `node` that `value` lacks, in the schema of `root`, going into the objects
 /// that are there; an object that is missing is reported by itself.
@@ -751,6 +788,33 @@ mod tests {
             "nodes": [{"name": "Hull", "mesh": 0}, {"name": if damaged { "HullDamage_Two" } else { "Plank" }, "mesh": 0}, {"name": "Turret_1", "translation": [0.0, 1.0, 0.0]}, {"name": "Mount_B_aft", "translation": [0.0, 1.0, 1.0]}]
         });
         glb(json, &bin)
+    }
+
+    #[test]
+    fn an_open_team_map_whose_teams_lack_a_race_is_an_error_the_lobby_would_have_hit() {
+        let map = |extra: Value| {
+            let mut m = json!({"skirmish": true, "assemble": true, "players": [{"playable": true, "team": 0}, {"playable": true, "team": 1}],
+                "teams": [{"name_id": "TEAM_A", "lock": 0, "race": 0}, {"name_id": "TEAM_B", "lock": 0}]});
+            m.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
+            m
+        };
+        let run = |tag: &str, m: Value| {
+            let mod_dir = scratch(tag);
+            put_json(&mod_dir, "mod.json", json!({"id": "m"}));
+            put_json(&mod_dir, "maps/arena/map.json", m);
+            check_mod_with(&mod_dir, None, &[])
+        };
+        let found = run("teamrace", map(json!({})));
+        let f = found.iter().find(|f| f.pointer == "/teams/1/race").unwrap_or_else(|| panic!("{found:#?}"));
+        assert!(f.level == Level::Error && f.file == "maps/arena/map.json" && f.message.contains("TEAM_B") && f.message.contains("race"), "{f:?}");
+        assert_eq!(found.iter().filter(|f| f.pointer.ends_with("/race")).count(), 1, "the team with a race is fine");
+        // not skirmish-listed, historical, free-for-all or complete: nothing
+        for (tag, extra) in [("t1", json!({"skirmish": false})), ("t2", json!({"assemble": false})), ("t3", json!({"alliance_change": true}))] {
+            assert!(run(tag, map(extra)).iter().all(|f| !f.pointer.ends_with("/race")), "{tag}");
+        }
+        let mut fixed = map(json!({}));
+        fixed["teams"][1]["race"] = json!(1);
+        assert!(run("t4", fixed).iter().all(|f| !f.pointer.ends_with("/race")));
     }
 
     #[test]
