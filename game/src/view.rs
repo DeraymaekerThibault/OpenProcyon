@@ -198,6 +198,7 @@ fn left_click(c: &Controlled, ray: Ray3d, scene: &ClickScene, pointer: &mut Poin
     // An allied ship or base with dock points: left-click docks when it is dockable and in sight (the cursor shows whether it can).
     if let Some((e, ok)) = docks.under(ray, actor).filter(|_| !attack_only) {
         if ok {
+            // PROVISIONAL: unlike the menu's Dock, the click leaves a hold on (as before); not observed in the original.
             orders.send(Kind::Dock { ship: actor, dockee: e, release: false });
         }
         return;
