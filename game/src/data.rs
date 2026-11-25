@@ -13,7 +13,7 @@ mod weapons;
 pub use crew::{CrewMember, roster};
 pub use maps::MapDoc;
 pub(crate) use ships::mount_rotation;
-pub use ships::{CREW_POSTS, Fill, SHIP_FILLS, SHIP_REQUIRED_NEW, derive, fill_of, load_class, resolved, try_load_class};
+pub use ships::{CREW_POSTS, Fill, SHIP_FILLS, SHIP_REQUIRED_NEW, derive, fill_of, load_class, resolved, try_load_class, try_load_class_without_weapons};
 pub(crate) use weapons::lenient;
 pub use weapons::{bullet_from_value, gun_from_value, try_load_weapons};
 

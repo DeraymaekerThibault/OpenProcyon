@@ -387,6 +387,12 @@ pub fn try_load_class(root: &Path, name: &str, guns: &HashMap<String, GunDef>) -
     build(root, name, Some(guns)).map(|(class, _)| class)
 }
 
+/// `try_load_class` without the weapon tables: the same checks except that a mount's gun is not looked up. For `--check-mod` when
+/// `data/weapons/*.json` do not load, so the ship's own errors still show.
+pub fn try_load_class_without_weapons(root: &Path, name: &str) -> Result<Class, String> {
+    build(root, name, None).map(|(class, _)| class)
+}
+
 /// Where the loader's decision about the two kinds of point that `ship.json` and the model both can give is made: a point's value and
 /// where it came from. `tow` and `homing` in `ship.json` win over the model's `TowerPoint` / `ToweePoint` / `TorpedoHomingPoint`
 /// nodes, which win over a PROVISIONAL hull-end fallback. Both the loader and `authoring::resolved_ship` read it from here.

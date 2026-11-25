@@ -361,10 +361,14 @@ impl Checker<'_> {
                 self.new_ship_fields(&file, &ship);
             }
             let errors_here = self.out.iter().filter(|f| f.level == Level::Error).count() > before;
-            // What the checks above did not see: whatever else the loader refuses (a wrong type, a bad `crew_nodes` name).
-            if let (false, Some(Ok((guns, _)))) = (errors_here, &loaded)
-                && let Err(e) = crate::data::try_load_class(&self.root, &id, guns)
-            {
+            // What the checks above did not see: whatever else the loader refuses (a wrong type, a bad `crew_nodes` name). When the
+            // weapon tables do not load, the ship is still loaded, without looking its guns up, so its own errors show too.
+            let result = match &loaded {
+                Some(Ok((guns, _))) => Some(crate::data::try_load_class(&self.root, &id, guns)),
+                Some(Err(_)) => Some(crate::data::try_load_class_without_weapons(&self.root, &id)),
+                None => None,
+            };
+            if let (false, Some(Err(e))) = (errors_here, result) {
                 let message = self.tidy(&e);
                 self.error(&file, "", format!("the game cannot load this ship: {message}"));
             }
@@ -1006,6 +1010,24 @@ mod tests {
             assert!(!found.iter().any(|f| f.file == format!("ships/{ok}/ship.json") && f.level == Level::Error), "{ok}: {all}");
         }
         assert_eq!(crate::authoring::required_new("ships/X/ship.json"), crate::data::SHIP_REQUIRED_NEW);
+        std::fs::remove_dir_all(base).unwrap();
+        std::fs::remove_dir_all(mod_dir).unwrap();
+    }
+
+    #[test]
+    fn ship_errors_show_while_the_weapon_tables_fail() {
+        let (base, mod_dir) = (scratch("both"), scratch("both-mod"));
+        put_json(&base, "data/weapons/guns.json", json!({"Gun": gun()}));
+        put_json(&base, "data/weapons/bullets.json", json!({"B": bullet()}));
+        put(&base, "ships/readme.txt", "x");
+        put(&mod_dir, "ships/Ship_A/model.glb", small_model(false));
+        put_json(&mod_dir, "ships/Ship_A/ship.json", new_ship(json!({"guns": {"Mount_1": {"gun": "Gun", "pos": [0, 0, 0], "rot": [0, 0, 0]}}})));
+        put_json(&mod_dir, "data/weapons/bullets.json", json!({"B_New": {"lifetime": 1}}));
+        let found = check_mod_with(&mod_dir, Some(&base), &[]);
+        let all = lines(&found).join("\n");
+        assert!(found.iter().any(|f| f.level == Level::Error && f.file == "data/weapons/bullets.json" && f.pointer == "/B_New/damage"), "{all}");
+        assert!(has(&found, Level::Error, "ships/Ship_A/ship.json", "", "arc_deg"), "the ship's own error shows with the bullets: {all}");
+        assert!(!all.contains("unknown weapon"), "{all}");
         std::fs::remove_dir_all(base).unwrap();
         std::fs::remove_dir_all(mod_dir).unwrap();
     }
