@@ -710,3 +710,55 @@ fn a_teleported_hull_keeps_its_spot_when_free_and_is_nudged_to_the_nearest_free_
     let above = Vec3::new(100.0, 40.0, 100.0);
     assert_eq!(spot::free_spot(bounds, Quat::IDENTITY, above, &others), above);
 }
+
+/// Two runs of one seed must sail alike however the ships sit in Bevy's tables: archetype moves (a ship's scene finishing loading)
+/// reorder queries, and the avoider once numbered its think phases in query order, so a full skirmish lobby drifted apart between two
+/// `--fixed-step --seed 1` runs (#369). The same six converging computer ships, once with half of them moved to another archetype.
+#[test]
+#[ignore = "needs imported assets"]
+fn avoiders_sail_alike_whatever_the_query_order() {
+    #[derive(Component)]
+    struct Moved;
+    fn run(move_some: bool) -> (Vec<Entity>, Vec<(Vec3, f32, f32)>) {
+        let lib = crate::Library::load(crate::assets_dir());
+        let class = lib.index("Ship_Navy_Cutter");
+        let healths: Vec<_> = (0..6).map(|_| crate::Health::new(&lib.classes[class])).collect();
+        let mut app = sail_app(lib, std::time::Duration::from_millis(33));
+        let ships: Vec<Entity> = (0..6)
+            .zip(healths)
+            .map(|(i, health)| {
+                let a = i as f32 * std::f32::consts::TAU / 6.0;
+                let at = Vec3::new(a.cos(), 0.0, a.sin()) * 60.0;
+                let ship = crate::Ship {
+                    heading: (-at.x).atan2(-at.z) + std::f32::consts::PI,
+                    speed: 8.0,
+                    order: EngineOrder::Full,
+                    waypoints: vec![-at],
+                    ..crate::Ship::new(class, crate::Side::Enemy)
+                };
+                app.world_mut().spawn((ship, health, Transform::from_translation(at), Drift::default(), crate::scenario::SpawnIndex(i))).id()
+            })
+            .collect();
+        if move_some {
+            for e in ships.iter().step_by(2) {
+                app.world_mut().entity_mut(*e).insert(Moved);
+            }
+        }
+        let order = app.world_mut().query_filtered::<Entity, With<crate::Ship>>().iter(app.world()).collect();
+        for _ in 0..300 {
+            app.update();
+        }
+        let state = ships
+            .iter()
+            .map(|e| {
+                let s = app.world().get::<crate::Ship>(*e).unwrap();
+                (app.world().get::<Transform>(*e).unwrap().translation, s.speed, s.avoid)
+            })
+            .collect();
+        (order, state)
+    }
+    let (plain, moved) = (run(false), run(true));
+    assert_ne!(plain.0, moved.0, "the test moves ships to another archetype, so the query order differs");
+    assert!(plain.1.iter().any(|s| s.2 < 1.0), "the avoiders slow someone down: {:?}", plain.1);
+    assert_eq!(plain.1, moved.1, "the same battle whatever the query order");
+}
