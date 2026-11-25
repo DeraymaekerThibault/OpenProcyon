@@ -1001,6 +1001,100 @@ pub fn outside_world(mission: &Value, map: &Value) -> Vec<Finding> {
     out
 }
 
+/// Warnings for world object ids that two entries share. Groups, rules and docks address a placed thing by its `id`, and the ids of
+/// ships, scenery, animals and mines are one namespace, so a repeated id makes a group (or `Set Group/Unit Owner`) reach the wrong
+/// one. Looks at `map.json` `objects`, `ships` and `mines` and the mission's `ships`, `environment.animals` and `environment.dragons`
+/// (an entry with no integer `id` is decoration and never counts). One warning per entry that repeats an earlier id, at that
+/// entry's `id`, its message naming the earlier entry's file and JSON pointer (`map.json /objects/2`; `mission /ships/0`). `file` is
+/// "map.json" for a map entry and empty for a mission one, as for [`outside_world`]. PROVISIONAL: a warning rather than an error
+/// because no retail file could be read to see whether the originals ever repeat an id.
+pub fn duplicate_ids(mission: &Value, map: &Value) -> Vec<Finding> {
+    let lists: [(&str, &Value, &str, &[&str]); 6] = [
+        ("map.json", map, "objects", &["objects"]),
+        ("map.json", map, "ships", &["ships"]),
+        ("map.json", map, "mines", &["mines"]),
+        ("", mission, "mission", &["ships"]),
+        ("", mission, "mission", &["environment", "animals"]),
+        ("", mission, "mission", &["environment", "dragons"]),
+    ];
+    let mut seen: std::collections::HashMap<i64, String> = Default::default();
+    let mut out = vec![];
+    for (file, doc, label, keys) in lists {
+        let list = keys.iter().fold(doc, |v, k| &v[*k]);
+        for (i, entry) in list.as_array().into_iter().flatten().enumerate() {
+            let Some(id) = entry["id"].as_i64() else { continue };
+            let path = keys.iter().fold(JsonPath::default(), |p, k| p.key(*k)).index(i);
+            let here = format!("{} {}", if file.is_empty() { label } else { file }, path.pointer());
+            match seen.get(&id) {
+                Some(first) => {
+                    out.push(Finding::in_file(Level::Warning, file, path.key("id"), format!("id {id} is also used by {first}; groups and rules address a placed thing by its id")))
+                }
+                None => {
+                    seen.insert(id, here);
+                }
+            }
+        }
+    }
+    out
+}
+
+/// Warnings for a nebula whose three records disagree (docs/missions.md section 8): `map.json` `nebulae[]` (what is drawn, drains and
+/// damages), the mission's `environment.nebulae[]` (the `*State Init* Setup Nebula` record: what hides ships) and the `volumes` entry
+/// its `Polygon Name` names (what `Unit is Within any Nebula` and sight occlusion read). Reported: a map nebula with no record of that
+/// `New Nebula Name`, a record with no map nebula of that name, a `Polygon Name` that is no volume (or one with fewer than three
+/// points), and a volume whose points differ from the map nebula's `polygon` (same points in the same order, to 0.001). `file` as for
+/// [`duplicate_ids`]. PROVISIONAL: reads the rules of agreement from the docs and the exporter (the retail exporter copies the polygon
+/// from the volume, so retail agrees by construction); the order of the points is compared as written.
+pub fn nebula_agreement(mission: &Value, map: &Value) -> Vec<Finding> {
+    let records = mission["environment"]["nebulae"].as_array().map_or(&[][..], Vec::as_slice);
+    let setups = map["nebulae"].as_array().map_or(&[][..], Vec::as_slice);
+    let named = |v: &Value, key: &str| v[key].as_str().filter(|n| !n.is_empty()).map(String::from);
+    let mut out = vec![];
+    for (i, n) in setups.iter().enumerate() {
+        let Some(name) = named(n, "name") else { continue };
+        if !records.iter().any(|r| named(r, "New Nebula Name").as_deref() == Some(&name)) {
+            out.push(Finding::in_file(
+                Level::Warning,
+                "map.json",
+                JsonPath::from("nebulae").index(i).key("name"),
+                format!("nebula '{name}' has no record with that \"New Nebula Name\" in the mission's environment.nebulae: it is drawn and damages, but hides no ship and does not count for \"Unit is Within any Nebula\""),
+            ));
+        }
+    }
+    let points = |v: &Value| -> Vec<(f64, f64)> { v.as_array().into_iter().flatten().map(|p| (p[0].as_f64().unwrap_or(f64::NAN), p[1].as_f64().unwrap_or(f64::NAN))).collect() };
+    for (j, r) in records.iter().enumerate() {
+        let at = JsonPath::from("environment").key("nebulae").index(j);
+        let name = named(r, "New Nebula Name");
+        let setup = name.as_ref().and_then(|name| setups.iter().enumerate().find(|(_, n)| named(n, "name").as_ref() == Some(name)));
+        if let (Some(name), None) = (&name, setup) {
+            out.push(Finding::in_file(
+                Level::Warning,
+                "",
+                at.clone().key("New Nebula Name"),
+                format!("no nebula named '{name}' in map.json nebulae: nothing is drawn or damages there, only the polygon hides ships"),
+            ));
+        }
+        let Some(polygon) = named(r, "Polygon Name") else { continue };
+        let volume = &mission["volumes"][polygon.as_str()];
+        if volume.as_array().is_none_or(|v| v.len() < 3) {
+            out.push(Finding::in_file(Level::Warning, "", at.key("Polygon Name"), format!("'{polygon}' is not a volume of three or more points: this nebula has no region")));
+        } else if let Some((i, n)) = setup {
+            let (a, b) = (points(volume), points(&n["polygon"]));
+            let same = a.len() == b.len() && a.iter().zip(&b).all(|(p, q)| (p.0 - q.0).abs() < 1e-3 && (p.1 - q.1).abs() < 1e-3);
+            if !same {
+                let place = JsonPath::from("volumes").key(polygon.as_str());
+                out.push(Finding::in_file(
+                    Level::Warning,
+                    "",
+                    place,
+                    format!("volume '{polygon}' differs from the polygon of nebula '{}' (map.json /nebulae/{i}/polygon): the nebula is drawn where the map says and hides ships where the volume says", named(n, "name").unwrap_or_default()),
+                ));
+            }
+        }
+    }
+    out
+}
+
 /// Warnings for `map.json` scenery whose `scene` model is not among `models` (the file names under `models/`, `Rock.glb`): it would
 /// be an invisible obstacle. `file` is "map.json".
 pub fn missing_scenery(map: &Value, models: &HashSet<String>) -> Vec<Finding> {
@@ -1429,6 +1523,61 @@ mod tests {
         let missing = missing_scenery(&map, &models);
         assert_eq!(missing.len(), 1);
         assert_eq!((missing[0].file.as_str(), missing[0].path.as_str(), missing[0].suggestion.as_deref()), ("map.json", "objects[0].scene", Some("Rock")));
+    }
+
+    #[test]
+    fn a_repeated_world_object_id_is_a_warning_naming_both_places() {
+        let mission = json!({"ships": [{"id": 5}, {"id": 9}], "environment": {"animals": [{"id": 5, "group": "W"}], "dragons": [{"id": 12}]}});
+        let map = json!({"objects": [{"id": 9, "type": "Rock"}, {"type": "Decor"}, {"type": "Decor"}, {"id": 7}], "ships": [{"id": 7}], "mines": [{"id": 12}, {"id": 12}, {"id": "x"}, {"id": "x"}]});
+        let found = duplicate_ids(&mission, &map);
+        let at: Vec<_> = found.iter().map(|f| (f.file.as_str(), f.pointer.as_str(), f.level)).collect();
+        assert_eq!(
+            at,
+            [
+                ("map.json", "/ships/0/id", Level::Warning),
+                ("map.json", "/mines/1/id", Level::Warning),
+                ("", "/ships/1/id", Level::Warning),
+                ("", "/environment/animals/0/id", Level::Warning),
+                ("", "/environment/dragons/0/id", Level::Warning),
+            ]
+        );
+        assert!(found[0].message.contains("id 7 is also used by map.json /objects/3"), "{}", found[0].message);
+        assert!(found[2].message.contains("id 9 is also used by map.json /objects/0"), "{}", found[2].message);
+        assert!(found[3].message.contains("id 5 is also used by mission /ships/0"), "{}", found[3].message);
+        assert!(duplicate_ids(&json!({}), &json!({"objects": [{"id": 1}, {"id": 2}]})).is_empty());
+        assert!(duplicate_ids(&Value::Null, &Value::Null).is_empty());
+    }
+
+    #[test]
+    fn a_nebula_whose_three_records_disagree_is_a_warning() {
+        let tri = json!([[0, 0], [10, 0], [10, 10]]);
+        let map = json!({"nebulae": [{"name": "Cloud", "polygon": tri}, {"name": "Lonely", "polygon": tri}, {"polygon": tri}]});
+        let mission = |records: Value, volumes: Value| json!({"environment": {"nebulae": records}, "volumes": volumes});
+        let agree = mission(json!([{"New Nebula Name": "Cloud", "Polygon Name": "Cloud"}, {"New Nebula Name": "Lonely", "Polygon Name": "Cloud"}]), json!({"Cloud": tri}));
+        assert!(nebula_agreement(&agree, &map).is_empty(), "{:?}", nebula_agreement(&agree, &map));
+        // a map nebula without a record, a record without a map nebula, and a polygon name that is no volume
+        let broken =
+            mission(json!([{"New Nebula Name": "Cloud", "Polygon Name": "Nowhere"}, {"New Nebula Name": "Ghost", "Polygon Name": "Small"}]), json!({"Small": [[0, 0], [1, 1]]}));
+        let found: Vec<_> = nebula_agreement(&broken, &map).into_iter().map(|f| (f.file, f.pointer)).collect();
+        assert_eq!(
+            found,
+            [
+                ("map.json".to_string(), "/nebulae/1/name".to_string()),
+                ("".to_string(), "/environment/nebulae/0/Polygon Name".to_string()),
+                ("".to_string(), "/environment/nebulae/1/New Nebula Name".to_string()),
+                ("".to_string(), "/environment/nebulae/1/Polygon Name".to_string()),
+            ]
+        );
+        // the volume is not the map's polygon
+        let moved = mission(
+            json!([{"New Nebula Name": "Cloud", "Polygon Name": "Cloud"}, {"New Nebula Name": "Lonely", "Polygon Name": "Cloud"}]),
+            json!({"Cloud": [[0, 0], [10, 0], [10, 11]]}),
+        );
+        let found = nebula_agreement(&moved, &map);
+        assert_eq!(found.len(), 2, "{found:?}");
+        assert!(found[0].pointer == "/volumes/Cloud" && found[0].message.contains("differs from the polygon of nebula 'Cloud' (map.json /nebulae/0/polygon)"), "{:?}", found[0]);
+        // a mission with no nebulae and a map with none say nothing
+        assert!(nebula_agreement(&json!({}), &json!({})).is_empty());
     }
 
     #[test]

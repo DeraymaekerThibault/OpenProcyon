@@ -278,6 +278,8 @@ A storm is described three times, and the names must agree:
 | `mission.json` `environment.nebulae[]` | a raw `*State Init* Setup Nebula` record (not a rule): `"New Nebula Name"`, `"Polygon Name"`, `"Nebula Occlusion On/Off": "TRUE"` to hide ships, the effect and point-set names, `"World Object ID"` | `Polygon Name` = a key of `volumes` |
 | `mission.json` `volumes` | the polygon with that name | what `Unit is Within any Nebula` and sight occlusion read |
 
+`--check-mod` warns when the three disagree: a map nebula with no record of its name, a record with no map nebula, a `Polygon Name` that is not a volume of three points or more, or a volume whose points differ from the map nebula's `polygon` (PROVISIONAL).
+
 The simplest is one name for all three. The map side is what is drawn, drains and damages; the mission side and the volume are what
 hide ships. Occlusion is one-way by polygon edge: ships outside cannot see in, ships inside see each other, and only a record with
 `"Nebula Occlusion On/Off": "TRUE"` occludes. A storm slows ships only when its `cloud` has `"drain": true`. Lightning and wind chip at
