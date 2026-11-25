@@ -319,7 +319,7 @@ pub fn ram_damage(
     mut sfx: MessageWriter<crate::audio::Sfx>,
     mut last: ResMut<super::LastDamager>,
 ) {
-    let human = |s: &Ship, m: Option<&crate::ship::FleetMember>| s.side == Side::Player && m.is_none_or(|m| fleets.as_ref().is_none_or(|f| m.0 == f.local));
+    let human = |s: &Ship, m: Option<&crate::ship::FleetMember>| crate::ship::is_human_ship(s.side, m, fleets.as_deref());
     let mut sounded: Vec<(Entity, Entity, &'static str)> = vec![];
     for r in msgs.read() {
         let rammer = ships.get(r.b).ok().map(|(s, _, _, _, m)| human(s, m));

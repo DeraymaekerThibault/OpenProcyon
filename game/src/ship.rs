@@ -343,7 +343,7 @@ pub fn ai(
         // The human's own fleet waits for orders; allied computer fleets share the human's side but hunt like any computer.
         // A ship that was just sunk has left its fleet and is computer-run, whoever steered it (docs/re/effects.md "Death drive").
         let sinking = dying.contains(e);
-        let human = !sinking && s.side == Side::Player && member.is_none_or(|m| m.0 == fleets.local);
+        let human = !sinking && is_human_ship(s.side, member, Some(&fleets));
         if busy.contains(e) || left_to_script(e) {
             continue;
         }
@@ -542,6 +542,15 @@ pub fn approach_speed(speed: f32, target: f32, rate: f32, dt: f32) -> f32 {
 /// Fleet identity is not allegiance: allied skirmish players have different owners.
 #[derive(Component, Clone)]
 pub struct FleetMember(pub crate::names::Owner, pub usize);
+
+/// Whether a ship is the human's own: on the player's side and, when fleets are tracked, in the local player's fleet (or in none).
+/// Allied computer fleets share `Side::Player` and are NOT human. This is the "waits for orders / human scoring" question
+/// (captain AI, fire and ram damage scaling, the battle report). Not the same question as `Side`-only difficulty scaling of shells
+/// and blasts (`combat::shells::side_damage_scale`), nor collision's `humans` (it also counts the `Human` marker). MAINTAINER
+/// QUESTION: shells and blasts scale by `Side`, fire and ramming by this ownership test; the original's rule is unconfirmed.
+pub fn is_human_ship(side: Side, member: Option<&FleetMember>, fleets: Option<&Fleets>) -> bool {
+    side == Side::Player && member.is_none_or(|m| fleets.is_none_or(|f| m.0 == f.local))
+}
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Formation {

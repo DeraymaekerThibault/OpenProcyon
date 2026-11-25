@@ -295,7 +295,7 @@ pub fn fires(
 ) {
     let dt = time.delta_secs();
     for (me, _, ship, mut hp, mut fires, posts, mission, member, boarding) in &mut ships {
-        let humans = ship.side == Side::Player && member.is_none_or(|m| fleets.as_ref().is_none_or(|f| m.0 == f.local));
+        let humans = crate::ship::is_human_ship(ship.side, member, fleets.as_deref());
         let fires = &mut *fires;
         if hp.destroyed {
             for f in fires.list.drain(..) {
