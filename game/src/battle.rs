@@ -5,6 +5,99 @@
 //! `ship::Fleets` and `collision::Shapes` are wired here only until `ship.rs` and `collision.rs` can host plugins of their own.
 use crate::*;
 
+/// Queued for removal: the object is destroyed at the start of the next tick and, until then, still takes part in the logic of
+/// the tick it was queued in (the original's deferred removal, docs/re/tick.md).
+#[derive(Component)]
+pub struct Removed;
+
+/// Queues `e` for removal at the start of the next tick. Safe to call twice, or for an entity already gone.
+pub fn queue_removal(commands: &mut Commands, e: Entity) {
+    commands.entity(e).try_insert(Removed);
+}
+
+/// Created during a tick: the object joins at the start of the next tick and is neither moved nor tested before then.
+/// Movement systems of such objects (shells, blasts, wells) leave `With<Joining>` out.
+#[derive(Component)]
+pub struct Joining;
+
+/// Height below which a moving object has left the map (docs/re/tick.md).
+pub const MAP_FLOOR: f32 = -130.0;
+
+/// Whether `p` (Bevy axes, y up) is below the map's floor.
+pub fn below_floor(p: Vec3) -> bool {
+    p.y < MAP_FLOOR
+}
+
+/// After the movement of a tick: moving objects that ended below the floor are queued for removal. Shells test their own step.
+pub(crate) fn out_of_map(mut commands: Commands, movers: Query<(Entity, &Transform), (With<combat::Asteroid>, Without<Removed>)>) {
+    for (e, tf) in &movers {
+        if below_floor(tf.translation) {
+            queue_removal(&mut commands, e);
+        }
+    }
+}
+
+/// Start of a tick: destroy what was queued for removal last tick, and let what was created last tick join.
+pub(crate) fn tick_start(mut commands: Commands, removed: Query<Entity, With<Removed>>, joining: Query<Entity, With<Joining>>) {
+    for e in &removed {
+        commands.entity(e).try_despawn();
+    }
+    for e in &joining {
+        commands.entity(e).try_remove::<Joining>();
+    }
+}
+
+/// Single-player rules (mission and skirmish scripts): evaluated once per frame, after the last tick of that frame and also while the
+/// game is paused (docs/re/tick.md). At 2x and 5x they run a half or a fifth as often as ticks. Their `Res<Time>` is the frame's
+/// game-time advance, so a script timer still adds up to the ticks' time.
+#[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct FrameRules;
+
+/// Ordered shared simulation stages; input and presentation stay on the frame schedules.
+#[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum BattleSet {
+    /// Removals queued last tick are applied and new objects join, before anything else of the tick.
+    Tick,
+    Commands,
+    Rules,
+    /// Step 6 of the original's tick, the mission tick: boarding fights are resolved and links (grapples, tows) test whether they break
+    /// and reel in. Skipped while the mission is frozen. No position is written here.
+    MissionTick,
+    Forces,
+    Simulate,
+    /// Sensor snapshot of the positions after movement and collision, for the decisions below.
+    Sense,
+    /// Per-object decisions (captains, mission AI) run after movement and collision; what they decide acts in the next tick's integration.
+    Ai,
+    Fleet,
+    /// Ship upkeep (fire, deaths, repair) and shells, after the object's decision.
+    Combat,
+    Cleanup,
+    Outcome,
+}
+
+pub(crate) fn battle_schedule(app: &mut App) {
+    app.insert_resource(Time::<Fixed>::from_duration(BATTLE_TICK)).add_systems(FixedUpdate, tick_start.in_set(BattleSet::Tick)).configure_sets(
+        FixedUpdate,
+        (
+            BattleSet::Tick,
+            BattleSet::Commands,
+            BattleSet::Rules,
+            BattleSet::MissionTick,
+            BattleSet::Forces,
+            BattleSet::Simulate,
+            BattleSet::Sense,
+            BattleSet::Ai,
+            BattleSet::Fleet,
+            BattleSet::Combat,
+            BattleSet::Cleanup,
+            BattleSet::Outcome,
+        )
+            .chain()
+            .run_if(loading::done),
+    );
+}
+
 /// Systems that only run while a battle is on screen and no menu overlay is open. One set carries the two run conditions, so a
 /// system joins the set instead of repeating them.
 #[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
