@@ -819,12 +819,19 @@ pub(super) fn pulldown_cell(ctx: &Ctx, c: &mut ChildSpawnerCommands, [l, t, r, b
     });
 }
 
+/// A full-screen modal blocker over the 800x600 canvas: it takes the pointer (`Interaction`, `FocusPolicy::Block`) so what is beneath
+/// does not react, and `action` runs when it is clicked (pass `()` for none). The dialog's own widgets go above it at `ZIndex(2)`.
+#[allow(deprecated)] // Interaction, see pointer.rs
+pub(super) fn modal_blocker(ctx: &Ctx, c: &mut ChildSpawnerCommands, action: impl Bundle) {
+    c.spawn((Interaction::None, FocusPolicy::Block, action, ctx.node(0.0, 0.0, 800.0, 600.0), ZIndex(1)));
+}
+
 /// An open pull-down list, shared by every screen: a full-screen blocker (a click elsewhere runs `close`) and one backed entry per
 /// `(label, action)` stacked `h` apart from `[x, y, w, h]`. Entries also pick on the release of a held press (`menu::dropdown_release`),
 /// except the `keep` one, drawn highlighted (a plain click on the lobby's current value keeps the list open).
 #[allow(deprecated)] // Interaction, see pointer.rs
 pub(super) fn dropdown<A: Component>(ctx: &Ctx, c: &mut ChildSpawnerCommands, close: A, [x, y, w, h]: [f32; 4], entries: Vec<(String, A)>, keep: Option<usize>) {
-    c.spawn((Interaction::None, FocusPolicy::Block, close, ctx.node(0.0, 0.0, 800.0, 600.0), ZIndex(1)));
+    modal_blocker(ctx, c, close);
     for (k, (label, action)) in entries.into_iter().enumerate() {
         c.spawn((ctx.node(x, y + k as f32 * h, w, h), ZIndex(2), BackgroundColor(LIST_BACKING))).with_children(|c| {
             pulldown_cell(ctx, c, [0.0, 0.0, w, h], &label, keep == Some(k), Some((action, ListEntry(keep != Some(k)))), false);

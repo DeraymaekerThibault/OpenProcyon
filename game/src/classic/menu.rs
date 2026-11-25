@@ -18,8 +18,8 @@ use crate::menu::{
 use crate::sprites::{BODY_FONT, Fonts, HudData};
 
 use super::widgets::{
-    Ctx, GOLD, Rest, arrow, canvas, cell, check_box, disabled, dropdown, fleet_bar, full_screen, heading, info_panel, list_row_cost, pad, picked, piece, piece_flipped,
-    pulldown_cell, radio, scrollbar, selected_tab, size_of, slider, stretched_window, victory_points, wrapped,
+    Ctx, GOLD, Rest, arrow, canvas, cell, check_box, disabled, dropdown, fleet_bar, full_screen, heading, info_panel, list_row_cost, modal_blocker, pad, picked, piece,
+    piece_flipped, pulldown_cell, radio, scrollbar, selected_tab, size_of, slider, stretched_window, victory_points, wrapped,
 };
 
 pub fn plugin(app: &mut App) {
@@ -756,7 +756,7 @@ fn players_list(ctx: &Ctx, c: &mut ChildSpawnerCommands, _rect: [f32; 4], sk: &S
     if sk.flag_picker {
         // Retail: a modal gold frame over the lobby with the fleet type's ten flags, two rows of five 75 apart; only a pick closes it.
         let base = sk.human().map_or(Race::Navy, |h| h.race).flag_base();
-        c.spawn((Interaction::None, bevy::ui::FocusPolicy::Block, Action::FlagPicker(true), ctx.node(0.0, 0.0, 800.0, 600.0), ZIndex(1)));
+        modal_blocker(ctx, c, Action::FlagPicker(true));
         c.spawn((ctx.node(150.0, 175.0, 475.0, 245.0), ZIndex(2))).with_children(|c| {
             ctx.image(c, "menu/frontenddialogscreen.png", None, 0.0, 0.0, 475.0, 245.0, Color::WHITE);
             for k in 0..10usize {
@@ -821,7 +821,7 @@ pub(super) fn profile_dialog(ctx: &Ctx, c: &mut ChildSpawnerCommands, sk: &Skirm
     use crate::profiles::Kind as K;
     let Some(d) = &sk.profile else { return };
     let s = |id: &str| text_of(strings, id);
-    c.spawn((ctx.node(0.0, 0.0, 800.0, 600.0), Interaction::None, bevy::ui::FocusPolicy::Block, ZIndex(1)));
+    modal_blocker(ctx, c, ());
     c.spawn((ctx.node(0.0, 0.0, 800.0, 600.0), ZIndex(2))).with_children(|c| {
         let [x, y, w, h] = dialog_frame([69.0, 169.0, 603.0, 420.0]);
         ctx.image(c, "menu/frontenddialogscreen.png", None, x, y, w, h, Color::WHITE);
