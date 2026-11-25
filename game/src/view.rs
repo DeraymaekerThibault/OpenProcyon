@@ -200,7 +200,6 @@ fn cancel_orders(c: &mut Controlled, target: &mut Target) {
     }
 }
 
-/// An armed indirect bank takes this click as its shot target (a click with no ground point under it keeps the bank armed).
 /// The world ray under a window position (shared by every cursor pick).
 pub fn cursor_ray(camera: &Camera, gt: &GlobalTransform, cursor: Vec2) -> Option<Ray3d> {
     camera.viewport_to_world(gt, cursor).ok()
@@ -216,6 +215,7 @@ pub fn project(camera: &Camera, gt: &GlobalTransform, world: Vec3) -> Option<Vec
     camera.world_to_viewport(gt, world).ok()
 }
 
+/// An armed indirect bank takes this click as its shot target (a click with no ground point under it keeps the bank armed).
 fn armed_shot(direct: bool, ray: Ray3d, target: &mut Target, lob: &combat::LobAim, sfx: &mut MessageWriter<audio::Sfx>) -> bool {
     let (true, Some(bank), Some(point)) = (direct, target.2.armed, ray_on_sea(ray)) else { return false };
     target.2.armed = None;

@@ -600,7 +600,14 @@ fn map_findings(root: &Path, dir: &Path, id: &str, rules_name: &str, sounds: Opt
             f
         })
         .collect();
-    let (mission, map) = (docs.mission, docs.map.unwrap_or_default());
+    // The extra checks read the caller's rules file (the mod's own name for it), as `check_map_in` may have picked the other one.
+    let mission = if docs.rules_name == rules_name {
+        docs.mission
+    } else {
+        let Some(mission) = crate::data::try_json(&dir.join(rules_name)) else { return Ok(out) };
+        mission
+    };
+    let map = docs.map.unwrap_or_default();
     let mission_file = format!("maps/{id}/{rules_name}");
     out.extend(unused_definitions(&mission).into_iter().map(|f| f.with_file(&mission_file)));
     // Findings of `rules::check` name `map.json` or nothing (the rules file); here they get the map folder.
