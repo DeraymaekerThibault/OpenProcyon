@@ -252,6 +252,10 @@ impl Checker<'_> {
         };
         for f in files {
             let name = f.to_string_lossy().replace('\\', "/");
+            // Only JSON files name effects and sounds; shaders, binaries and pictures are not read (try_json would report each).
+            if !name.ends_with(".json") {
+                continue;
+            }
             let Some(doc) = crate::data::try_json(&self.dir.join(f)).filter(Value::is_object) else { continue };
             let s = |v: &Value| v.as_str().map(String::from);
             if schema_of(&name) == Some("ship.schema.json") {
