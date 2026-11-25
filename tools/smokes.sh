@@ -23,7 +23,7 @@ while [ $# -gt 0 ]; do
 done
 out=$root/local/smokes; mkdir -p "$out"
 # The scratch XDG_DATA_HOME hides the per-user import: pass on the one every tool finds (tools/import_assets.py find_assets).
-a=$(python3 -c 'from tools.import_assets import find_assets; print(find_assets() or "")'); [ -z "$a" ] || export PROCYON_ASSETS="$a"
+[ -n "${PROCYON_ASSETS:-}" ] || { a=$(python3 -m tools.import_assets --print-assets); [ -z "$a" ] || export PROCYON_ASSETS="$a"; }
 # name | kind | game args (shot.sh adds --shot <png>)
 # kind: asserts = the script logs a PASS line when its checks held and the run fails without it (tools/smokes.py);
 #       visual  = exit status 0 and a picture that is not black; whatever the script asserts with panics shows as a crash.

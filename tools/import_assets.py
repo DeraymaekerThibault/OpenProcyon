@@ -1,6 +1,7 @@
 """Import: convert the original install into the game's asset folder. Nothing from the install is modified.
 usage: python -m tools.import_assets [--game DIR] [--out DIR] [Ship_Name ...]   (default ships below; first is the default player ship)
        openprocyon-import [--game DIR] [--out DIR] [Ship_Name ...]   (the same, frozen into the release download)
+       python -m tools.import_assets --print-assets   (print where the imported assets are, or an empty line; for the shell tools)
        openprocyon-import --bake-skies [options]   (the optional HD skies: tools.bake_sky on the imported assets)
        openprocyon-import --bake-surfaces [options]   (the optional surface maps: tools.bake_surfaces)
   --game  the original install (default: PROCYON_GAME_ROOT from the environment or .env)
@@ -319,6 +320,10 @@ def steps(root, out, want, part=lambda i, k: None):
 
 
 def main(argv):
+    if argv == ["--print-assets"]:
+        # The one lookup for the shell tools (check.sh, shot.sh, smokes.sh): the folder find_assets() gives, or an empty line.
+        print(find_assets() or "")
+        return 0
     if argv[:1] == ["--bake-skies"]:
         # The baker ships inside the frozen importer: the release download has no Python to run it with.
         from tools import bake_sky
