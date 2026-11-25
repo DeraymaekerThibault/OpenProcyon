@@ -22,7 +22,7 @@ Mod authoring (no window, no assets needed unless said):
   --check-mod <folder> [--json] [--verbose]  check a mod folder (the imported assets, when found, are used); exit 1 on errors;
                                  warnings the base game's own files have too are counted apart (--verbose lists them)
   --check-mission <map id|all>   check the mission rules of a map (needs assets; takes --mod)
-  --dump-schemas <folder>        write the JSON Schemas of ship, guns, bullets, crew nodes, mod and map files
+  --dump-schemas <folder>        write the JSON Schemas of ship, guns, bullets, crew nodes, mod, map, mission, script and media files
   --dump-rule-schema [file]      write the mission rule schema (stdout without a file)
   --rule-trace, --why <rule>     while a mission plays, log why rules have not fired
   --rule-report <file>           when the battle ends, write what each rule of the mission did to <file> (JSON)
@@ -162,7 +162,20 @@ mod tests {
         assert_eq!(quick(&args(&["game", "--dump-schemas", &out.to_string_lossy()])), Some(0));
         let mut files: Vec<String> = std::fs::read_dir(&out).unwrap().flatten().map(|e| e.file_name().to_string_lossy().into_owned()).collect();
         files.sort();
-        assert_eq!(files, ["bullets.schema.json", "crew_nodes.schema.json", "guns.schema.json", "map.schema.json", "mod.schema.json", "ship.schema.json"]);
+        assert_eq!(
+            files,
+            [
+                "bullets.schema.json",
+                "crew_nodes.schema.json",
+                "guns.schema.json",
+                "map.schema.json",
+                "media.schema.json",
+                "mission.schema.json",
+                "mod.schema.json",
+                "script.schema.json",
+                "ship.schema.json"
+            ]
+        );
         std::fs::remove_dir_all(dir).unwrap();
     }
 }
