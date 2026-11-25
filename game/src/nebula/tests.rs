@@ -44,7 +44,7 @@ fn nebula_slowdown_is_distance_over_radius_zero_at_the_centre() {
 #[test]
 #[ignore = "needs imported assets"]
 fn a_bolt_that_finds_no_ship_is_announced_with_its_segment_and_changes_nothing_else() {
-    let lib = crate::combat::Library::load(assets_dir());
+    let lib = crate::testutil::lib();
     let mut app = App::new();
     app.insert_resource(lib)
         .init_resource::<Time>()
@@ -77,7 +77,7 @@ fn a_bolt_that_finds_no_ship_is_announced_with_its_segment_and_changes_nothing_e
 #[test]
 #[ignore = "needs imported assets"]
 fn thirty_seconds_in_a_storm_does_not_guarantee_lightning_damage() {
-    let lib = crate::combat::Library::load(assets_dir());
+    let lib = crate::testutil::lib();
     let class = lib.index("Ship_Navy_Sloop");
     let hp = crate::combat::Health::new(&lib.classes[class]);
     let ship = crate::Ship { heading: 0.0, ..crate::Ship::new(class, crate::Side::Player) };

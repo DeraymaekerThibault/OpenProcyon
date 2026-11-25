@@ -79,7 +79,7 @@ fn a_ram_goes_full_throttle_only_within_five_degrees_of_the_bow() {
 #[test]
 #[ignore = "needs imported assets"]
 fn stock_fits_pick_the_decoded_routine_and_range() {
-    let lib = Library::load(crate::assets_dir());
+    let lib = crate::testutil::lib();
     for (name, routine, r) in [
         ("Ship_Pirate_Barque", Routine::Broadside(1.0), 79.3),
         ("Ship_Navy_Frigate", Routine::Broadside(1.0), 95.6),
@@ -170,7 +170,7 @@ fn a_standoff_attacker_creeps_inside_0_9_r_and_crawls_at_the_hold_distance() {
 #[test]
 #[ignore = "needs imported assets"]
 fn a_frontal_ship_is_a_standoff_attacker_only_when_its_main_gun_is_a_beam() {
-    let mut lib = Library::load(crate::assets_dir());
+    let mut lib = crate::testutil::lib();
     let class = lib.classes[lib.index("Ship_Procyon_Frigate")].mounts.iter().map(|m| m.gun.clone()).collect::<Vec<_>>();
     let health = |lib: &Library| {
         let c = &lib.classes[lib.index("Ship_Procyon_Frigate")];

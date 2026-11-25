@@ -64,9 +64,9 @@ fn cloak_script_visibility_no_primary_and_scenery_are_separate() {
 #[test]
 #[ignore = "needs imported assets"]
 fn sensor_snapshot_tracks_ship_spheres_script_changes_and_cleanup() {
-    use crate::combat::{Health, Library};
+    use crate::combat::Health;
     let mut app = App::new();
-    let lib = Library::load(crate::assets_dir());
+    let lib = crate::testutil::lib();
     let class = lib.index("Ship_Navy_Cutter");
     let health = Health::new(&lib.classes[class]);
     let sphere = lib.classes[class].sphere;

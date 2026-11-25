@@ -2,7 +2,7 @@ use super::*;
 use crate::EngineOrder;
 pub fn fleet_world() -> (World, [Entity; 6]) {
     let mut w = World::new();
-    let lib = Library::load(assets_dir());
+    let lib = crate::testutil::lib();
     let ci = lib.index("Ship_Navy_Cutter");
     let class = &lib.classes[ci];
     let ids = std::array::from_fn(|i| {
@@ -326,7 +326,7 @@ fn fresh_scenario_resumes_paused_time_without_changing_speed() {
 #[test]
 #[ignore = "needs imported assets"]
 fn open_map_ships_get_distinct_names_from_their_type_pool() {
-    let lib = combat::Library::load(crate::assets_dir());
+    let lib = crate::testutil::lib();
     let mut namer = Namer::new();
     let pool = &lib.names["Ship_Pirate_Sloop"];
     let picked: std::collections::HashSet<String> = (0..pool.len()).map(|_| namer.pick(&lib, "Ship_Pirate_Sloop").unwrap()).collect();
@@ -359,7 +359,7 @@ fn time_scale_preserves_virtual_catch_up_caps() {
 #[test]
 #[ignore = "needs imported assets"]
 fn ship_keeps_speed_and_heading_past_last_waypoint() {
-    let lib = combat::Library::load(crate::assets_dir());
+    let lib = crate::testutil::lib();
     // Not class 0: the sorted ship folders now start with the (immobile) armed bases.
     let ci = lib.index("Ship_Navy_Cutter");
     let class = &lib.classes[ci];
@@ -405,7 +405,7 @@ fn captains_turn_straight_away_from_a_black_hole() {
 fn a_broadside_attacker_circles_an_idle_ship_on_its_turning_circle() {
     // The original's broadside course (attack.rs) with the real movement step: crewed computer ships run in from 400 units and end
     // circling with the target abeam. Retail: Carrack 45-50 units around an idle Cutter, Barque 51-58 (docs/re/movement.md).
-    let lib = combat::Library::load(crate::assets_dir());
+    let lib = crate::testutil::lib();
     let foe = Vec3::ZERO;
     // Minimum throttle: the measured Carrack's save holds 0.745; the Barque takes the range's mean (each ship draws 0.65-0.75).
     // With the computer helm's torque boost and the crew factor applied once, the circles run 43-48 (Carrack) and 53-58 (Barque).
@@ -444,7 +444,7 @@ fn a_broadside_attacker_circles_an_idle_ship_on_its_turning_circle() {
 #[test]
 #[ignore = "needs imported assets"]
 fn cutter_matches_measured_retail_movement() {
-    let lib = combat::Library::load(crate::assets_dir());
+    let lib = crate::testutil::lib();
     let ci = lib.index("Ship_Navy_Cutter");
     let class = &lib.classes[ci];
     let h = Health { sections: vec![1.0; class.sections.len()], core: 1.0, destroyed: false };
@@ -491,7 +491,7 @@ fn cutter_matches_measured_retail_movement() {
 #[test]
 #[ignore = "needs imported assets"]
 fn crewed_cutter_matches_measured_retail_speed_and_turn() {
-    let lib = combat::Library::load(crate::assets_dir());
+    let lib = crate::testutil::lib();
     let ci = lib.index("Ship_Navy_Cutter");
     let class = &lib.classes[ci];
     let h = Health { sections: vec![1.0; class.sections.len()], core: 1.0, destroyed: false };
@@ -516,7 +516,7 @@ fn crewed_cutter_matches_measured_retail_speed_and_turn() {
 #[test]
 #[ignore = "needs imported assets"]
 fn uncrewed_turns_match_measured_retail() {
-    let lib = combat::Library::load(crate::assets_dir());
+    let lib = crate::testutil::lib();
     for (name, order, speed, turn) in [
         ("Ship_Navy_Cutter", EngineOrder::Emergency, 9.056, 9.71),
         ("Ship_Navy_ManOWar", EngineOrder::Full, 2.341, 4.16),
@@ -558,7 +558,7 @@ fn stop_is_frame_rate_independent_and_reaches_rest() {
 #[test]
 #[ignore = "needs imported assets"]
 fn ships_lean_into_turns_except_at_emergency_speed() {
-    let lib = combat::Library::load(crate::assets_dir());
+    let lib = crate::testutil::lib();
     let ci = lib.index("Ship_Navy_Cutter");
     let class = &lib.classes[ci];
     let h = Health { sections: vec![1.0; class.sections.len()], core: 1.0, destroyed: false };
@@ -687,7 +687,7 @@ fn a_held_ship_is_released_by_move_dock_tow_and_board_orders_only() {
 #[test]
 #[ignore = "needs imported assets"]
 fn dying_cutter_drifts_at_a_tenth_of_max_speed_and_a_fast_one_decays_to_it() {
-    let lib = combat::Library::load(crate::assets_dir());
+    let lib = crate::testutil::lib();
     let ci = lib.index("Ship_Navy_Cutter");
     let class = &lib.classes[ci];
     let wreck = Health { sections: vec![0.0; class.sections.len()], core: 0.0, destroyed: true };
@@ -722,7 +722,7 @@ fn dying_cutter_drifts_at_a_tenth_of_max_speed_and_a_fast_one_decays_to_it() {
 #[test]
 #[ignore = "needs imported assets"]
 fn a_cutter_steering_for_a_point_ahead_weaves_instead_of_settling() {
-    let lib = Library::load(assets_dir());
+    let lib = crate::testutil::lib();
     let ci = lib.index("Ship_Navy_Cutter");
     let class = &lib.classes[ci];
     let health = Health::new(class);
@@ -754,7 +754,7 @@ fn a_cutter_steering_for_a_point_ahead_weaves_instead_of_settling() {
 #[test]
 #[ignore = "needs imported assets"]
 fn a_tower_is_slowed_by_the_mass_it_tows() {
-    let lib = Library::load(assets_dir());
+    let lib = crate::testutil::lib();
     let ci = lib.index("Ship_Navy_Cutter");
     let class = &lib.classes[ci];
     let health = Health::new(class);
