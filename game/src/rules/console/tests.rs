@@ -598,6 +598,8 @@ fn what_each_command_needs_follows_what_it_touches() {
         "damage 0.5",
         "restart",
         "cam player",
+        "win",
+        "lose",
         r#"act {"Type": "Destroy Group/Unit", "Group Name": "Hero"}"#,
         r#"cond {"Type": "Group has X members", "Group Name": "Hero", "Equivalence": "Equal To", "number": 1}"#,
     ] {
@@ -632,7 +634,7 @@ fn what_each_command_needs_follows_what_it_touches() {
     ] {
         assert_eq!(needs(line), Needs::Rules, "{line}: reads or writes the rules' state");
     }
-    for line in ["win", "lose", "nis end", "primary Hero,Escort", "cam follow Raiders", "music Battle"] {
+    for line in ["nis end", "primary Hero,Escort", "cam follow Raiders", "music Battle"] {
         assert_eq!(needs(line), Needs::Mission, "{line}: a campaign mission's cutscene, level or handoff");
     }
 }
@@ -645,7 +647,7 @@ fn every_table_row_has_a_need_and_help_says_where_it_runs() {
         assert!(text.contains(&format!("runs in: {}", n.describe())), "{}: {text}", e.name);
     }
     assert_eq!(needs_of(entry_named("god").unwrap()), Needs::World);
-    assert_eq!(needs_of(entry_named("win").unwrap()), Needs::Mission);
+    assert_eq!(needs_of(entry_named("win").unwrap()), Needs::World);
     assert_eq!(needs_of(entry_named("flags").unwrap()), Needs::Rules);
 }
 
@@ -707,7 +709,15 @@ fn a_skirmish_script_runs_the_rule_commands_but_not_the_campaigns() {
     assert!(sc.flag("vault"));
     let (fx, o) = run_in(skirmish, &mut sc, "tp Harbour", &mut w, None);
     assert!(!o.rejected && matches!(fx.as_slice(), [Fx::Teleport(..)]), "{:?}", o.lines);
-    for line in ["win", "lose", "nis end", "primary Hero,Escort", "cam follow Hero", "music Battle"] {
+    // `win` / `lose` end any battle; a skirmish ends it as the human side's victory or defeat, a mission goes through the rules.
+    for (line, won) in [("win", true), ("lose", false)] {
+        let (fx, o) = run_in(skirmish, &mut sc, line, &mut w, None);
+        assert!(!o.rejected && fx.is_empty() && o.end_battle == Some(won), "{line}: {:?}", o.lines);
+        let (_, o) = run_in(Caps::MISSION, &mut sc, line, &mut w, None);
+        assert!(!o.rejected && o.end_battle.is_none() && o.lines[0].starts_with("mission "), "{line}: a mission keeps its rule action: {:?}", o.lines);
+        assert_eq!(run_in(Caps::BARE, &mut sc, line, &mut w, None).1.end_battle, Some(won), "{line} with no script");
+    }
+    for line in ["nis end", "primary Hero,Escort", "cam follow Hero", "music Battle"] {
         let (fx, o) = run_in(skirmish, &mut sc, line, &mut w, None);
         let word = line.split(' ').next().unwrap();
         assert_eq!(o.lines, vec![format!("{word}: needs a campaign mission (this battle is a skirmish: its own rules do not hand over levels, cutscenes or the ship)")], "{line}");

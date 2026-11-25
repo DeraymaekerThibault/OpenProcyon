@@ -185,13 +185,20 @@ impl Script {
                 o.skip_voice = self.skip_speech();
                 o.lines.push(if o.skip_voice { "speech line skipped (it counts as played)".into() } else { "no speech line is playing".into() });
             }
-            Command::Win => {
-                self.console_act(&win_action(&env.mission), w, out);
-                o.lines.push("mission won (Goto Next Level)".into());
-            }
-            Command::Lose => {
-                self.console_act(&lose_action(), w, out);
-                o.lines.push("mission lost (End Game)".into());
+            Command::Win | Command::Lose => {
+                let won = matches!(cmd, Command::Win);
+                if env.caps.mission {
+                    if won {
+                        self.console_act(&win_action(&env.mission), w, out);
+                    } else {
+                        self.console_act(&lose_action(), w, out);
+                    }
+                    o.lines.push(if won { "mission won (Goto Next Level)" } else { "mission lost (End Game)" }.into());
+                } else {
+                    // A skirmish or lobby battle: end it through the path a decided battle takes (`scenario::decide`).
+                    o.end_battle = Some(won);
+                    o.lines.push(if won { "battle won: ending it as a victory" } else { "battle lost: ending it as a defeat" }.into());
+                }
             }
             Command::Restart => {
                 o.restart = true;

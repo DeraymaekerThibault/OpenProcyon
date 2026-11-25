@@ -115,15 +115,41 @@ impl LobbyScenario {
         }
         sk.map = None;
         match sk.launch_error() {
-            Some(error) => Err(format!("lobby scenario cannot launch: {error}")),
+            Some(error) => Err(format!("lobby scenario cannot launch: {}", launch_error_text(error, super::strings()))),
             None => Ok(()),
         }
+    }
+}
+
+/// A launch error as plain text: a string id (`IDGS_...`) is looked up in the retail string table `strings` (empty or missing, as
+/// without an import) and otherwise gets a plain-English fallback; text that is not an id is returned as it is.
+pub fn launch_error_text(error: &str, strings: &serde_json::Value) -> String {
+    if !error.starts_with("IDGS_") {
+        return error.to_string();
+    }
+    match strings[error].as_str().filter(|t| !t.trim().is_empty()) {
+        Some(text) => text.trim().to_string(),
+        None => match error {
+            "IDGS_TPFRONTENDTEXT01_PLEASE_SELECT_A_RACE" => "a team or player has no race (pick a fleet type)".into(),
+            "IDGS_TPFRONTENDTEXT_SCREENS_ERROR_FLEET" => "the human player has no ships (assemble a fleet)".into(),
+            other => format!("launch refused ({other})"),
+        },
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_launch_error_id_becomes_text() {
+        let strings = serde_json::json!({"IDGS_X": " Pick a race. "});
+        assert_eq!(launch_error_text("IDGS_X", &strings), "Pick a race.");
+        let none = serde_json::Value::Null;
+        assert!(launch_error_text("IDGS_TPFRONTENDTEXT01_PLEASE_SELECT_A_RACE", &none).contains("has no race"));
+        assert_eq!(launch_error_text("IDGS_UNKNOWN", &none), "launch refused (IDGS_UNKNOWN)");
+        assert_eq!(launch_error_text("No opponent: open another slot.", &none), "No opponent: open another slot.");
+    }
 
     #[test]
     fn the_owners_game_parses() {

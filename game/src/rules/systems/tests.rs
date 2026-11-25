@@ -719,11 +719,11 @@ fn ship_commands_run_in_a_battle_with_no_mission_and_no_script() {
 fn rule_and_mission_commands_say_what_they_need_with_no_script() {
     let mut app = console_battle();
     lobby_ship(&mut app, "player0", Vec3::ZERO, true);
-    let log = say(&mut app, &["flags", "rules", "set key", "tp Harbour", "win", "nis end", "cam follow x"]);
+    let log = say(&mut app, &["flags", "rules", "set key", "tp Harbour", "nis end", "cam follow x"]);
     for word in ["flags", "rules", "set", "tp"] {
         assert!(log.contains(&format!("{word}: needs rules (this battle runs no rules script")), "{word}: {log}");
     }
-    for word in ["win", "nis", "cam"] {
+    for word in ["nis", "cam"] {
         assert!(log.contains(&format!("{word}: needs a campaign mission")), "{word}: {log}");
     }
     assert!(!app.world().resource::<Cheats>().used, "a refused command changes nothing");
@@ -743,7 +743,44 @@ fn a_skirmish_script_serves_the_rule_commands_of_the_console() {
     app.update();
     let at = app.world().get::<Transform>(hero).unwrap().translation;
     assert!(at.distance(Vec3::new(10.0, 0.0, -20.0)) < 1.0, "tp to a point set of the map's script: {at:?}");
-    assert!(log.contains("win: needs a campaign mission"), "{log}");
+    // `win` is a battle-level command now: it ends the skirmish rather than being refused.
+    assert!(!say(&mut app, &["win"]).contains("win: needs"));
+}
+
+#[test]
+fn win_and_lose_end_a_battle_with_no_script_through_the_outcome_path() {
+    use crate::scenario::{EndLine, EndMessage, Outcome};
+    for (word, outcome, end) in [("win", Outcome::Victory, "IDGS_TPINGAMEMESSAGE_GAME_WON"), ("lose", Outcome::Defeat, "IDGS_TPINGAMEMESSAGE_GAME_LOST")] {
+        let mut app = console_battle();
+        app.insert_resource(Outcome::Playing).init_resource::<EndMessage>().init_resource::<EndLine>().insert_resource(Config {
+            groups: vec![],
+            player: String::new(),
+            allies: vec![],
+            enemies: vec![],
+            map: None,
+            shot: None,
+            frame: 7,
+            speed: 1.0,
+            ended: None,
+            script: None,
+            autolaunch: false,
+            shot_frame: 0,
+            shot_frames: vec![],
+            late_frame: 0,
+        });
+        lobby_ship(&mut app, "player0", Vec3::ZERO, true);
+        let log = say(&mut app, &[word]);
+        assert!(!log.contains("needs"), "{log}");
+        app.update();
+        assert_eq!(*app.world().resource::<Outcome>(), outcome, "{word}");
+        assert_eq!(app.world().resource::<EndLine>().0.as_deref(), Some(end));
+        assert_eq!(app.world().resource::<Config>().ended, Some(7), "the Game Summary countdown starts");
+        assert!(app.world().resource::<Cheats>().used, "{word} is a cheat");
+        // A decided battle stays decided.
+        say(&mut app, &[if word == "win" { "lose" } else { "win" }]);
+        app.update();
+        assert_eq!(*app.world().resource::<Outcome>(), outcome);
+    }
 }
 
 #[test]

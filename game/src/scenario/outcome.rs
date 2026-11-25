@@ -119,6 +119,12 @@ pub fn outcome(
     } else {
         Outcome::Playing
     };
+    decide(new, end_message, &mut out, &mut message, &mut line, &mut cfg);
+}
+
+/// Records the battle's outcome: the one end path of a decided battle (`outcome`'s pass, and the developer console's `win` / `lose`).
+/// Logs the first decision, stamps the frame the Game Summary countdown starts from, and sets the end line and end message.
+pub fn decide(new: Outcome, end_message: Option<String>, out: &mut Outcome, message: &mut EndMessage, line: &mut EndLine, cfg: &mut Config) {
     if new != *out && new != Outcome::Playing {
         info!("{}", if new == Outcome::Victory { "VICTORY" } else { "DEFEAT" });
         cfg.ended = Some(cfg.frame);
@@ -126,4 +132,19 @@ pub fn outcome(
     *out = new;
     line.0 = end_line_id(new, end_message.as_deref());
     message.0 = end_message;
+}
+
+/// The developer console's `win` / `lose` outside a campaign mission: ends a still-undecided battle as a victory or defeat for the
+/// human side through [`decide`]. A decided battle stays decided; returns whether it ended the battle.
+pub fn force_outcome(world: &mut World, won: bool) -> bool {
+    if !(world.contains_resource::<Outcome>() && world.contains_resource::<EndMessage>() && world.contains_resource::<EndLine>() && world.contains_resource::<Config>()) {
+        return false;
+    }
+    let mut state = bevy::ecs::system::SystemState::<(ResMut<Outcome>, ResMut<EndMessage>, ResMut<EndLine>, ResMut<Config>)>::new(world);
+    let Ok((mut out, mut message, mut line, mut cfg)) = state.get_mut(world) else { return false };
+    if *out != Outcome::Playing {
+        return false;
+    }
+    decide(if won { Outcome::Victory } else { Outcome::Defeat }, None, &mut out, &mut message, &mut line, &mut cfg);
+    true
 }
