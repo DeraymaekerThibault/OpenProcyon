@@ -143,7 +143,7 @@ pub(super) fn attach_ship_state(
     for (e, ship, member, name) in &ships {
         let owner = member.map_or_else(|| if ship.side == crate::Side::Player { "player".to_string() } else { "enemy".to_string() }, |m| m.0.to_string());
         let name = name.map_or_else(|| lib.classes[ship.class].name.clone(), |n| n.0.clone());
-        commands.entity(e).insert(MissionShip { id: -1, name, owner: owner.as_str().into(), visible: true, ..default() });
+        commands.entity(e).insert(MissionShip::placed(-1, name, owner.as_str().into()));
     }
 }
 

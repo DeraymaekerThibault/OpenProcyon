@@ -40,6 +40,12 @@ pub struct MissionShip {
     pub follow: Option<rules::FollowOrder>,
 }
 use crate::rules;
+impl MissionShip {
+    /// A ship the rules can address, with nothing ordered yet: visible, neutral, no flags (every other field is its default).
+    pub fn placed(id: i64, name: String, owner: crate::names::Owner) -> Self {
+        MissionShip { id, name, owner, visible: true, ..default() }
+    }
+}
 /// A mission base/island that rules can address ('*State Init* Setup Island'): `owner` is its group, e.g. 'AbandonedCamp'.
 #[derive(Component)]
 pub struct MissionBase {
@@ -561,23 +567,7 @@ pub fn spawn(commands: &mut Commands, assets: &AssetServer, lib: &Library, fxl: 
         let owner: crate::names::Owner = s["group"].as_str().unwrap_or("").into();
         let e = crate::spawn_ship(commands, assets, lib, fxl, s["type"].as_str().unwrap(), Side::Player, pos, heading, None);
         commands.entity(e).insert(crate::ship::FleetMember(owner.clone(), slot));
-        commands.entity(e).insert(MissionShip {
-            id,
-            name: s["name"].as_str().unwrap_or_default().into(),
-            owner,
-            hold_fire: false,
-            invuln: 0.0,
-            visible: true,
-            stance: rules::Stance::Neutral,
-            target: None,
-            attack: vec![],
-            flag: String::new(),
-            banner: String::new(),
-            looping: None,
-            stop_at_end: false,
-            create_lifeboats: false,
-            ..Default::default()
-        });
+        commands.entity(e).insert(MissionShip::placed(id, s["name"].as_str().unwrap_or_default().into(), owner));
         // A pre-placed lifeboat (mission 4) is a real one, found by the class flag; it is not part of any fleet roster.
         if lib.classes.iter().any(|c| c.is_lifeboat && Some(c.name.as_str()) == s["type"].as_str()) {
             commands.entity(e).insert(crate::lifeboats::Lifeboat { owner: s["group"].as_str().unwrap_or("").into() }).remove::<crate::ship::FleetMember>();

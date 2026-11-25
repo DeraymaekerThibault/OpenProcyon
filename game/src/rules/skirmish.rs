@@ -23,31 +23,21 @@ pub struct SkirmishScript {
 }
 
 impl SkirmishScript {
-    /// The map's script, if it has one. `teams`: (team name id, its players); `sides`: the side of each map player.
-    pub fn load(map: &str, teams: Vec<(String, Vec<String>)>, sides: HashMap<String, Side>) -> Option<Self> {
+    /// The map's script (`script.json`, already read: `data`) as a running script. `teams`: (team name id, its players); `sides`: the side of
+    /// each map player.
+    pub fn load(map: &str, data: &Value, teams: Vec<(String, Vec<String>)>, sides: HashMap<String, Side>) -> Self {
         let dir = crate::assets_dir().join(format!("maps/{map}"));
-        let data = crate::data::try_json(&dir.join("script.json"))?;
         // Optional speech lines, end messages and ship names, as a mission's `media.json`.
         let media = crate::data::try_json(&dir.join("media.json")).unwrap_or(Value::Null);
-        let decides = script_decides(&data);
-        warn_campaign_only(map, &data);
+        let decides = script_decides(data);
+        warn_campaign_only(map, data);
         // A retail map's end rules stay with victory.rs; a map that opts in lets its own end rules (and team objectives) decide.
-        let mut script = Script::new(&if decides { data.clone() } else { without_end_rules(&data) }, media);
+        let mut script = Script::new(&if decides { data.clone() } else { without_end_rules(data) }, media);
         script.set_teams(teams);
         script.decide_game(decides);
         // `--fire-rule` / `--start-at` work in a skirmish as in a mission: the script's first step runs them.
         crate::campaign::apply_start(&mut script);
-        Some(SkirmishScript { script, sides, paths: data["paths"].clone(), environment: data["environment"].clone(), map_text: data["map_text"].clone() })
-    }
-    /// Whether the map's `script.json` decides how the game ends (`"victory": "script"`; `"objectives"` too, the name the campaign
-    /// gives its task-driven endings).
-    pub fn decides(map: &str) -> bool {
-        crate::data::try_json(&crate::assets_dir().join(format!("maps/{map}/script.json"))).is_some_and(|d| script_decides(&d))
-    }
-    /// The rules' names of the map-placed ships ('Setup Ship' names) by world-object id; none when the map has no script.
-    pub fn ship_names(map: &str) -> Option<HashMap<i64, String>> {
-        let data = crate::data::try_json(&crate::assets_dir().join(format!("maps/{map}/script.json")))?;
-        Some(data["ships"].as_array()?.iter().filter_map(|s| Some((s["id"].as_i64()?, s["name"].as_str()?.to_string()))).collect())
+        SkirmishScript { script, sides, paths: data["paths"].clone(), environment: data["environment"].clone(), map_text: data["map_text"].clone() }
     }
     /// Team points so far (victory.rs 'Team has X points').
     pub fn points(&self) -> Vec<(String, i32)> {
@@ -91,8 +81,13 @@ fn run(
     apply::apply(fxs, &mut env, &mut commands, &mut ships, &mut animals);
 }
 
+/// The rules' names of the map-placed ships ('Setup Ship' names) by world-object id; none when the script lists no ships.
+pub fn ship_names(data: &Value) -> Option<HashMap<i64, String>> {
+    Some(data["ships"].as_array()?.iter().filter_map(|s| Some((s["id"].as_i64()?, s["name"].as_str()?.to_string()))).collect())
+}
+
 /// `"victory": "script"` (or `"objectives"`) in a map's `script.json`: the script's own end rules decide the game.
-fn script_decides(data: &Value) -> bool {
+pub fn script_decides(data: &Value) -> bool {
     matches!(data["victory"].as_str(), Some("script" | "objectives"))
 }
 
