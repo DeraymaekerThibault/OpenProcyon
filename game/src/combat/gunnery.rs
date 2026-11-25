@@ -615,9 +615,9 @@ pub(super) fn fire(
             let mount_rot = tf.rotation * mount.rot;
             let origin = tf.transform_point(mount.pos);
             let dead = mount.parent.is_some_and(|p| health.sections[p] <= 0.0);
-            // Harpoons are grapples, fired by the Grapple order (boarding.rs) and never at will. PROVISIONAL: the original's
-            // grapple-gun exclusion is unknown. A dead mount section rests its gun.
-            let aim_at = gun_target.filter(|_| !dead && lib.family(&state.gun) != GunFamily::Harpoon);
+            // A harpoon gun fires with its bank like any gun: its first bullet is an ordinary damaging harpoon; only grappling
+            // switches it to its second, the grappling harpoon (docs/re/boarding.md "Harpoon guns"). A dead mount section rests its gun.
+            let aim_at = gun_target.filter(|_| !dead);
             let engaged = aim_turret(state, gun, mount, mount_rot, origin, aim_at, dt, &mut parts);
             shot_engaged |= on_shot && engaged.is_some();
             // A beam gun charges, then holds its beam (combat/beam.rs burns what it touches); it fires no shells.
@@ -948,7 +948,7 @@ pub(super) fn base_fire(
             let dead = mount.parent.is_some_and(|p| health.sections[p] <= 0.0);
             // Mortar towers lob at the ship (PROVISIONAL: mines/grav charges on bases are not seen in the data and stay idle).
             let usable = !is_indirect(&lib, &mount.gun) || gun.lob.is_some();
-            let aim_at = target.map(|t| t.0).filter(|_| !dead && !gun.point_defense && lib.family(&mount.gun) != GunFamily::Harpoon && usable);
+            let aim_at = target.map(|t| t.0).filter(|_| !dead && !gun.point_defense && usable);
             let engaged = aim_turret(state, gun, mount, mount_rot, origin, aim_at, dt, &mut parts);
             let (Some((aim_dir, distance)), Some((aim_at, target_side))) = (engaged, target) else {
                 state.burst_left = 0;
