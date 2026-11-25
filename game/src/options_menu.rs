@@ -15,7 +15,7 @@ use crate::audio::Sfx;
 use crate::boarding::BoardMsg;
 use crate::combat::{Health, Library, ray_hit, seg_sphere};
 use crate::docking::Dockees;
-use crate::panels::REF_H;
+use crate::panels::hud_scale;
 use crate::sprites::{HudData, offset, size_of};
 use crate::{Orbit, Ship, Side};
 
@@ -532,7 +532,7 @@ pub struct OptionsMenuArt {
 
 /// Spawns the menu root around `cursor` with its `OptionsMenuArt`; hit rects are the retail icons at the retail slot offsets.
 fn spawn_menu(commands: &mut Commands, hud: &HudData, window: &Window, cursor: Vec2, kind: Kind, can_dock: bool, tow: Tow, hooks: Hooks) -> (Entity, Vec<(Act, Rect, bool)>) {
-    let s = window.height() / REF_H;
+    let s = hud_scale(window);
     let list = items(kind, can_dock, tow, hooks);
     let n = list.len();
     let centre = menu_centre(window, cursor);
@@ -550,7 +550,7 @@ fn spawn_menu(commands: &mut Commands, hud: &HudData, window: &Window, cursor: V
 }
 
 fn menu_centre(window: &Window, cursor: Vec2) -> Vec2 {
-    let s = window.height() / REF_H;
+    let s = hud_scale(window);
     // PROVISIONAL: the 70 px margin the menu keeps from the window edge is eyeballed.
     cursor.clamp(Vec2::splat(70.0 * s), Vec2::new(window.width(), window.height()) - Vec2::splat(70.0 * s))
 }
@@ -599,7 +599,7 @@ fn dev_click(
         3 => {
             // The Friendly menu's Dock icon is slot 2 of 3 (`items`).
             let (Some(hud), Some(cursor)) = (hud, window.cursor_position()) else { return };
-            let s = window.height() / REF_H;
+            let s = hud_scale(&window);
             let size = size_of(&hud, "OPTIONS_MENU_BUTTON_DOCK").expect("dock icon");
             let at = menu_centre(&window, cursor) + (offset(&hud, "OPTIONS_MENU_SLOT_OFFSET_2_OF_3") + size / 2.0) * s;
             window.set_cursor_position(Some(at));

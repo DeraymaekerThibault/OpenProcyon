@@ -175,10 +175,15 @@ pub(super) fn pad(window: &Window, scale: f32) -> Vec2 {
     Vec2::new((window.width() / scale - 800.0) / 2.0, (window.height() / scale - 600.0) / 2.0).max(Vec2::ZERO)
 }
 
+/// Scale of the 800x600 reference canvas when it is fitted into the window.
+pub(super) fn canvas_scale(window: &Window) -> f32 {
+    (window.width() / 800.0).min(window.height() / 600.0)
+}
+
 /// The 800x600 reference canvas centred in the window, and its scale.
 pub(super) fn canvas(window: &Window) -> (Node, f32) {
     let (ww, wh) = (window.width(), window.height());
-    let scale = (ww / 800.0).min(wh / 600.0);
+    let scale = canvas_scale(window);
     let node = Node {
         position_type: PositionType::Absolute,
         left: Val::Px((ww - 800.0 * scale) / 2.0),

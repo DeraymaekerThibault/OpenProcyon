@@ -7,7 +7,7 @@
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
 
-use crate::panels::REF_H;
+use crate::panels::{REF_H, hud_scale};
 use crate::sprites::{Fonts, HudData, sprite};
 use crate::starmap::{MapIconKind, Starmap, StarmapContents};
 
@@ -153,7 +153,7 @@ fn redraw(
         commands.entity(e).despawn();
     }
     let (Ok((root, map)), Ok((square, &Square { side })), Some(hud)) = (root.single(), square.single(), hud) else { return };
-    let (half, scale) = (map.half, window.height() / REF_H);
+    let (half, scale) = (map.half, hud_scale(&window));
     let frame = (time.elapsed_secs() / FRAME_SECS) as usize % 4;
     for icon in &contents.icons {
         let name = match icon.kind {

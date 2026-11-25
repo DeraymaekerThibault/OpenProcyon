@@ -3,7 +3,7 @@
 use bevy::prelude::*;
 
 use crate::combat::Health;
-use crate::panels::{REF_H, Toggles, cinematic};
+use crate::panels::{Toggles, cinematic, hud_scale, message_text_size};
 use crate::sprites::{Fonts, HudData, size_of, slice, sprite};
 use crate::{Library, PlayerShip, Ship};
 
@@ -68,7 +68,7 @@ fn end_line(
     line: Res<crate::scenario::EndLine>,
     mut shown: Query<(Entity, &mut Text, &mut TextFont), With<EndLineText>>,
 ) {
-    let size = 17.0 * window.height() / 1080.0;
+    let size = message_text_size(&window);
     let Some(id) = line.0.as_deref() else {
         for (e, ..) in &shown {
             commands.entity(e).despawn();
@@ -110,7 +110,7 @@ fn loading_cover(
             };
             let mut cover = commands.spawn((LoadingCover, node, BackgroundColor(Color::BLACK), GlobalZIndex(1000)));
             if let Some(font) = fonts.as_ref().and_then(|f| f.0.get("Immi14")) {
-                cover.with_child(font.text("Loading...", 17.0 * window.height() / 1080.0 / font.size, Color::WHITE));
+                cover.with_child(font.text("Loading...", message_text_size(&window) / font.size, Color::WHITE));
             }
         }
         _ => {}
@@ -125,7 +125,7 @@ struct RefRect {
 }
 /// Scales label children (ribbon pieces) from reference pixels to the window.
 fn place_ref_rects(window: Single<&Window, With<bevy::window::PrimaryWindow>>, mut q: Query<(&RefRect, &mut Node)>) {
-    let s = window.height() / REF_H;
+    let s = hud_scale(&window);
     for (r, mut n) in &mut q {
         n.left = Val::Px(r.pos.x * s);
         n.top = Val::Px(r.pos.y * s);
@@ -280,7 +280,7 @@ struct LabelText {
 #[derive(Component)]
 struct LabelSize(f32);
 fn scale_label_text(window: Single<&Window, With<bevy::window::PrimaryWindow>>, mut w: Query<(&LabelText, &mut Node)>, mut t: Query<(&LabelSize, &mut TextFont)>) {
-    let s = window.height() / REF_H;
+    let s = hud_scale(&window);
     for (l, mut n) in &mut w {
         n.left = Val::Px(l.pos.x * s);
         n.top = Val::Px(l.pos.y * s);
@@ -352,7 +352,7 @@ fn place_labels(
     (wrappers, mut texts, real): (Query<&Children, With<LabelText>>, Query<&mut TextColor>, Res<Time<Real>>),
     mut reticle: Query<(&Reticle, &mut Node, &mut Visibility), With<Reticle>>,
 ) {
-    let s = window.height() / REF_H;
+    let s = hud_scale(&window);
     let (camera, ctf) = *cam;
     let project = |g: &GlobalTransform, up: f32| camera.world_to_viewport(ctf, g.translation() + Vec3::Y * up).ok();
     for (e, mut label, mut node, mut vis, kids) in &mut labels {

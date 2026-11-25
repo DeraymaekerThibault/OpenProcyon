@@ -4,7 +4,7 @@
 use bevy::prelude::*;
 
 use crate::options_menu::{HoverCursor, OptionsMenuArt};
-use crate::panels::REF_H;
+use crate::panels::hud_scale;
 use crate::sprites::HudData;
 use crate::sprites::{Sprite, offset, sprite};
 
@@ -20,7 +20,7 @@ fn draw(
     menus: Query<(Entity, &OptionsMenuArt), Added<OptionsMenuArt>>,
 ) {
     let Some(hud) = hud else { return };
-    let s = window.height() / REF_H;
+    let s = hud_scale(&window);
     for (root, art) in &menus {
         // A zero-size anchor at the menu centre; the art hangs off it.
         commands.entity(root).insert((GlobalZIndex(170), Node { position_type: PositionType::Absolute, left: Val::Px(art.centre.x), top: Val::Px(art.centre.y), ..default() }));
@@ -63,7 +63,7 @@ fn draw_cursor(
         }
         return;
     };
-    let s = window.height() / REF_H;
+    let s = hud_scale(&window);
     let Some(art) = sprite(&assets, &hud, name) else { return };
     let hot = offset(&hud, &format!("Offset_{name}"));
     let mut node = Node { position_type: PositionType::Absolute, left: Val::Px(cursor.x + hot.x * s), top: Val::Px(cursor.y + hot.y * s), ..default() };

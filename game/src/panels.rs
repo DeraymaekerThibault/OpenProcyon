@@ -12,6 +12,21 @@ use crate::{Library, PlayerShip, Ship};
 
 /// Height of the reference screen the HUD art is scaled against (the reference video draws the 640x480 art at twice that height).
 pub const REF_H: f32 = 960.0;
+
+/// Scale from the 960-pixel-high reference layout to this window: every HUD size is multiplied by it.
+pub fn hud_scale(window: &Window) -> f32 {
+    window.height() / REF_H
+}
+
+/// Size of full-screen message text (the end line, "Loading...") at `MESSAGE_TEXT_REF_H` window height.
+/// PROVISIONAL: one reference-footage frame measured about 16-17 px of 1080.
+pub const MESSAGE_TEXT_PX: f32 = 17.0;
+pub const MESSAGE_TEXT_REF_H: f32 = 1080.0;
+
+/// Message text size in pixels for this window.
+pub fn message_text_size(window: &Window) -> f32 {
+    MESSAGE_TEXT_PX * window.height() / MESSAGE_TEXT_REF_H
+}
 pub const MAX_CONTACTS: usize = 16;
 /// Radar range in world units mapped to the disk's radius: retail draws ships out to ~153 units (0.297 px per unit on a 45.6 px disk)
 /// and none beyond (docs/re/hud.md).
@@ -499,7 +514,7 @@ fn update_docking_status(
     let set = if docking || boarding_art.is_empty() || !boarding { docking_art } else { boarding_art };
     let frame = &set[(time.elapsed_secs() * STATUS_FPS) as usize % set.len()];
     for (mut img, mut node, mut vis) in &mut icons {
-        frame.show(&mut img, &mut node, window.height() / REF_H);
+        frame.show(&mut img, &mut node, hud_scale(&window));
         vis.set_if_neq(if docking || boarding { Visibility::Inherited } else { Visibility::Hidden });
     }
 }
@@ -539,7 +554,7 @@ fn update_contacts(
     mut q: Query<(&Contact, &mut Node, &mut Visibility)>,
 ) {
     let Some(radar) = radar else { return };
-    let s = window.height() / REF_H;
+    let s = hud_scale(&window);
     // 'Set Radar Active State' FALSE blanks the disk.
     let on = mission.as_deref().is_none_or(|m| m.script.radar);
     // Living ships within range relative to the player's heading (forward = up); retail shows friendly ships too and none past the rim.
