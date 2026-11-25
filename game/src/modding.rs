@@ -156,7 +156,7 @@ fn key_text(v: Option<&Value>) -> Option<String> {
 /// order; `{"<field>": k, "$remove": true}` drops the base entry (a missing one adds a line to `warnings`). Base entries that are not
 /// mentioned keep their place. Errors (the whole file is then skipped, as for a bad `set`): the base is not a list, a base entry has
 /// no key or two share one, a diff entry is no object or has no key.
-fn merge_keyed(base: &mut Value, ptr: &str, field: &str, entries: &[Value], warnings: &mut Vec<String>) -> Result<(), String> {
+pub(crate) fn merge_keyed(base: &mut Value, ptr: &str, field: &str, entries: &[Value], warnings: &mut Vec<String>) -> Result<(), String> {
     let err = |m: String| format!("merges '{ptr}': {m}");
     let slot = object_slot(base, ptr).ok_or_else(|| err("the file being extended has no object on that path".into()))?;
     if slot.is_null() {
@@ -204,7 +204,7 @@ fn merge_keyed(base: &mut Value, ptr: &str, field: &str, entries: &[Value], warn
 /// The lists of a map or mission file whose entries have a stable key, merged by that key by default (PROVISIONAL, each from what the
 /// loader reads: docs/modding.md "Changing one entry of a list"). `name` is the file's path inside the assets. Lists of other files,
 /// and every list not named here (a ship's `engines`, a rule's `actions`), replace whole as before.
-fn keyed_defaults(name: &str) -> &'static [(&'static str, &'static str)] {
+pub(crate) fn keyed_defaults(name: &str) -> &'static [(&'static str, &'static str)] {
     let parts: Vec<&str> = name.split('/').collect();
     match parts[..] {
         ["maps", _, "map.json"] => &[("/objects", "id"), ("/ships", "id"), ("/mines", "id"), ("/nebulae", "name"), ("/players", "name")],
@@ -219,7 +219,7 @@ fn keyed_defaults(name: &str) -> &'static [(&'static str, &'static str)] {
 /// `"set"`. `"merge": {"<pointer>": false}` makes a default list replace whole instead. `extends`, `merge` and `set` are dropped from
 /// the result. Order: the whole merge (keyed lists included) first, then `set`, so a `set` pointer counts the entries after the keyed
 /// merge. Returns the result and the warnings.
-fn extend(mut parent: Value, diff: &Value, file: &str) -> Result<(Value, Vec<String>), String> {
+pub(crate) fn extend(mut parent: Value, diff: &Value, file: &str) -> Result<(Value, Vec<String>), String> {
     let mut diff = diff.clone();
     // A `merge` that is not an object is not this feature: it stays data.
     let explicit = match diff.as_object_mut().filter(|o| o.get("merge").is_some_and(Value::is_object)).and_then(|o| o.remove("merge")) {
