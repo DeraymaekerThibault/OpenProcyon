@@ -296,6 +296,8 @@ pub fn plugin(app: &mut App) {
     crate::scenario::number_spawns::<lob::Blast>(app);
     crate::scenario::number_spawns::<Asteroid>(app);
     crate::scenario::number_spawns::<ArmedBase>(app);
+    // Space animals (whales, dragons) are spawned from the map's data in its order; a number gives them a `commands::NetId`.
+    crate::scenario::number_spawns::<crate::environment::SpaceAnimal>(app);
     app.insert_resource(PRELOADED.lock().ok().and_then(|mut slot| slot.take()).unwrap_or_else(|| Library::load(assets_dir())))
         .init_resource::<Target>()
         .init_resource::<LastDamager>()

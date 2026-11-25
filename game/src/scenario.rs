@@ -36,6 +36,12 @@ impl SpawnIndex {
     }
 }
 
+/// A map scenery object's position in the map's `objects` list (`spawn::spawn_map_objects`): bases, islands, docks and rocks are
+/// spawned in that order, so it names the object the same way in every run of the map. It is what gives a base without guns its
+/// `commands::NetId`; numbered kinds (armed bases, asteroids) keep their `SpawnIndex`.
+#[derive(Component, Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct SceneryIndex(pub u32);
+
 /// The next `SpawnIndex` of each numbered kind; cleared at battle start.
 #[derive(Resource, Default)]
 pub struct SpawnCounters(std::collections::HashMap<std::any::TypeId, u32>);

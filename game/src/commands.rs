@@ -444,7 +444,8 @@ fn apply_paused(world: &mut World) {
 
 // ---- The file -------------------------------------------------------------------------------------------------------------
 
-/// A replicated object: its kind and its creation number within the kind (`scenario::SpawnIndex`, from 0 at battle start).
+/// A replicated object: its kind and its creation number within the kind (`scenario::SpawnIndex`, from 0 at battle start), or for
+/// map scenery without one (bases without guns, islands) its place in the map's object list (`scenario::SceneryIndex`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct NetId {
     pub kind: NetKind,
@@ -456,27 +457,40 @@ pub enum NetKind {
     Ship,
     ArmedBase,
     Asteroid,
+    /// A space animal (whale, dragon).
+    Animal,
+    /// Map scenery that is none of the above: a base without guns, an island.
+    Scenery,
 }
 
 impl NetId {
-    /// `e`'s id, None for an object without a creation number (space animals and bases without guns, for now).
+    /// `e`'s id, None for an object a player cannot name (an effect, a shell).
     pub fn of(world: &World, e: Entity) -> Option<Self> {
-        let index = world.get::<crate::scenario::SpawnIndex>(e)?.0;
-        let kind = if world.get::<Ship>(e).is_some() {
-            NetKind::Ship
-        } else if world.get::<crate::combat::ArmedBase>(e).is_some() {
-            NetKind::ArmedBase
-        } else if world.get::<crate::combat::Asteroid>(e).is_some() {
-            NetKind::Asteroid
-        } else {
-            return None;
-        };
-        Some(Self { kind, index })
+        let numbered = world.get::<crate::scenario::SpawnIndex>(e).and_then(|i| {
+            let kind = if world.get::<Ship>(e).is_some() {
+                NetKind::Ship
+            } else if world.get::<crate::combat::ArmedBase>(e).is_some() {
+                NetKind::ArmedBase
+            } else if world.get::<crate::combat::Asteroid>(e).is_some() {
+                NetKind::Asteroid
+            } else if world.get::<crate::environment::SpaceAnimal>(e).is_some() {
+                NetKind::Animal
+            } else {
+                return None;
+            };
+            Some(Self { kind, index: i.0 })
+        });
+        numbered.or_else(|| world.get::<crate::scenario::SceneryIndex>(e).map(|i| Self { kind: NetKind::Scenery, index: i.0 }))
     }
     /// The entity with this id now.
     pub fn find(self, world: &mut World) -> Option<Entity> {
-        let mut q = world.query::<(Entity, &crate::scenario::SpawnIndex)>();
-        let found: Vec<Entity> = q.iter(world).filter(|(_, i)| i.0 == self.index).map(|(e, _)| e).collect();
+        let found: Vec<Entity> = if self.kind == NetKind::Scenery {
+            let mut q = world.query::<(Entity, &crate::scenario::SceneryIndex)>();
+            q.iter(world).filter(|(_, i)| i.0 == self.index).map(|(e, _)| e).collect()
+        } else {
+            let mut q = world.query::<(Entity, &crate::scenario::SpawnIndex)>();
+            q.iter(world).filter(|(_, i)| i.0 == self.index).map(|(e, _)| e).collect()
+        };
         found.into_iter().find(|e| NetId::of(world, *e) == Some(self))
     }
 }

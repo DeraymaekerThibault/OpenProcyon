@@ -53,7 +53,8 @@ Git Bash (`GIT_BASH=<path>` if it is not in the default place), and the screensh
    version, seed, scenario arguments, mod folders and, for a battle launched from the skirmish lobby, the lobby's whole setup:
    `skirmish`, `menu/skirmish_setup.rs`), written once the battle has loaded; `frames` ([advance ns, ticks] or [advance ns, ticks,
    repeat]); and `command` lines stamped with the tick (or paused frame) they were applied on, naming objects by kind and
-   `SpawnIndex` only. The setup holds ids only (map, ship classes, gun keys per weapon bank, crew keys, a picked name as its
+   `SpawnIndex` only (ships, armed bases, rocks, space animals; map scenery without one, such as a base without guns, by its
+   place in the map's object list: `SceneryIndex`). The setup holds ids only (map, ship classes, gun keys per weapon bank, crew keys, a picked name as its
    position in the hull's name list) and the computers' draw seed, not their fleets: those are drawn again at launch, so a setup
    replays only on the same data and mods. A lobby battle, set up by hand in the menus or with `--lobby`, replays with `--replay
    <file>` alone: the game opens the lobby, sets it up from the header and presses Launch (`--lobby` next to such a log is refused,

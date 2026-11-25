@@ -258,6 +258,35 @@ fn panic_fire_and_lob_shots_are_the_command_ships() {
     assert_eq!(app.world().resource::<crate::combat::Target>().2.shot, None, "a gun-bank click drops a shot not fired yet");
 }
 
+/// Everything a player can click has an id: ships, armed bases and rocks by creation number, space animals too, and map scenery
+/// without one (a base without guns, an island) by its place in the map's object list. Numbers of different kinds do not mix.
+#[test]
+fn space_animals_and_bases_without_guns_have_ids() {
+    use crate::scenario::SceneryIndex;
+    let mut app = battle();
+    let (me, _, enemy) = fleet(&mut app);
+    let w = app.world_mut();
+    let whale = w.spawn((crate::environment::SpaceAnimal::new("Whales", 5.0, Vec3::ZERO, 1, true), SpawnIndex(0))).id();
+    let stockade = w.spawn((Transform::default(), SceneryIndex(4))).id();
+    let island = w.spawn((Transform::default(), SceneryIndex(0))).id();
+    let armed = w.spawn((crate::combat::ArmedBase { class: 0 }, SpawnIndex(0), SceneryIndex(5))).id();
+    let shell = w.spawn(SpawnIndex(0)).id();
+    let id = |w: &World, e| NetId::of(w, e);
+    let w = app.world_mut();
+    assert_eq!(id(w, whale), Some(NetId { kind: NetKind::Animal, index: 0 }));
+    assert_eq!(id(w, stockade), Some(NetId { kind: NetKind::Scenery, index: 4 }));
+    assert_eq!(id(w, armed), Some(NetId { kind: NetKind::ArmedBase, index: 0 }), "a numbered kind keeps its creation number");
+    assert_eq!(id(w, shell), None, "nothing to click");
+    for e in [me, enemy, whale, stockade, island, armed] {
+        let found = id(w, e).unwrap().find(w);
+        assert_eq!(found, Some(e), "{:?}", id(w, e));
+    }
+    let saved = Saved::save(w, &Kind::Dock { ship: me, dockee: stockade, release: true }).unwrap();
+    assert_eq!(serde_json::to_string(&saved).unwrap(), r#"{"dock":{"ship":{"kind":"ship","index":0},"dockee":{"kind":"scenery","index":4},"release":true}}"#);
+    assert_eq!(saved.load(w), Some(Kind::Dock { ship: me, dockee: stockade, release: true }));
+    assert!(Saved::save(w, &Kind::Target { ship: me, target: Some(whale), spot: None }).is_ok(), "a whale is a target with an id");
+}
+
 #[test]
 fn a_command_keeps_its_meaning_through_the_file() {
     let mut app = battle();
