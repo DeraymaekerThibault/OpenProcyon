@@ -674,7 +674,7 @@ fn lobby_scenario(
     let Some(scenario) = scenario.filter(|_| !*done) else { return };
     *done = true;
     if let Err(err) = scenario.apply(&mut sk, &lib) {
-        eprintln!("{err}");
+        error!("{err}");
         exit.write(crate::exit::app_exit(2));
         return;
     }
