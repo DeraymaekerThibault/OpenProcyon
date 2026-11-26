@@ -253,57 +253,25 @@ fn spawn_skirmish(
                 human: true,
                 race: Race::from_twt(players[0]["race"].as_u64().unwrap_or(4)),
                 team: players[0]["team"].as_i64().unwrap_or(-1) as i32,
-                row: None,
-                ids: vec![],
                 ships: fleet(ours),
-                weapons: vec![],
-                crew: vec![],
+                ..default()
             },
             Group {
                 player: them,
                 side: Side::Enemy,
-                human: false,
                 race: Race::from_twt(players[them]["race"].as_u64().unwrap_or(4)),
                 team: players[them]["team"].as_i64().unwrap_or(-1) as i32,
-                row: None,
-                ids: vec![],
                 ships: fleet(&cfg.enemies),
-                weapons: vec![],
-                crew: vec![],
+                ..default()
             },
         ]
     } else {
-        cfg.groups
-            .iter()
-            .map(|g| Group {
-                player: g.player,
-                side: g.side,
-                human: g.human,
-                race: g.race,
-                team: g.team,
-                row: g.row.clone(),
-                ids: g.ids.clone(),
-                ships: g.ships.clone(),
-                weapons: g.weapons.clone(),
-                crew: g.crew.clone(),
-            })
-            .collect()
+        cfg.groups.clone()
     };
     if cfg.script.as_deref() == Some("fleet")
         && let Some(player) = (0..players.len()).find(|i| !groups.iter().any(|g| g.player == *i))
     {
-        groups.push(Group {
-            player,
-            side: Side::Player,
-            human: false,
-            race: Race::Unchosen,
-            team: -1,
-            row: None,
-            ids: vec![],
-            ships: vec![(ship::DEFAULT_SHIP.into(), None, Some("Allied captain".into()))],
-            weapons: vec![],
-            crew: vec![],
-        });
+        groups.push(Group { player, side: Side::Player, team: -1, ships: vec![(ship::DEFAULT_SHIP.into(), None, Some("Allied captain".into()))], ..default() });
     }
     // A map with its own script (Convoy Raid's convoys, ...): the ships of its non-playable players join the battle on their
     // team's side, and every ship carries its map player and rule name for the script (rules::skirmish).
@@ -330,10 +298,7 @@ fn spawn_skirmish(
             groups.push(Group {
                 player: p,
                 side,
-                human: false,
-                race: Race::Unchosen,
                 team,
-                row: None,
                 ids: placed.iter().map(|o| o["id"].as_i64()).collect(),
                 ships: placed
                     .iter()
@@ -341,8 +306,7 @@ fn spawn_skirmish(
                         (o["type"].as_str().unwrap_or_default().into(), Some([0, 1, 2].map(|i| o["pos"][i].as_f64().unwrap_or(0.0) as f32)), o["name"].as_str().map(String::from))
                     })
                     .collect(),
-                weapons: vec![],
-                crew: vec![],
+                ..default()
             });
         }
     }

@@ -67,7 +67,7 @@ pub const ROLL_RATE: f32 = 0.06;
 
 /// The player a ship fights for: its index in the battle's alliance table (`alliance::Alliances`), 0 the human's. Whether two
 /// sides fight is the table's answer alone; `Side::Enemy` is the first computer player.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
 pub struct Side(pub u8);
 
 #[allow(non_upper_case_globals)]
@@ -818,7 +818,10 @@ fn captain_target_valid(world: &World, actor: Entity, target: Entity) -> bool {
         && world.get::<Health>(target).is_none_or(|h| !h.destroyed)
         && world.get::<combat::Asteroid>(target).is_none_or(|a| a.hp > 0.0)
         && world.get::<environment::SpaceAnimal>(target).is_none_or(|a| a.visible)
-        && world.get::<Ship>(actor).zip(world.get::<Ship>(target)).is_none_or(|(a, b)| crate::alliance::table(world).hostile(a.side, b.side))
+        && world
+            .get::<Ship>(actor)
+            .zip(world.get::<Ship>(target))
+            .is_none_or(|(a, b)| world.get_resource::<crate::alliance::Alliances>().unwrap_or(crate::alliance::empty()).hostile(a.side, b.side))
 }
 
 /// Reconcile live ownership, retaining roster order. PROVISIONAL loss fallback: first living member;

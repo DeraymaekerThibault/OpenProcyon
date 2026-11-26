@@ -945,22 +945,7 @@ pub mod tests {
     fn a_crew_line_opens_the_talking_head_on_its_speaker() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins).init_resource::<Talk>().init_resource::<HeadState>().add_message::<crate::audio::Sfx>().add_systems(Update, talking_head);
-        app.insert_resource(crate::Config {
-            groups: vec![],
-            player: String::new(),
-            allies: vec![],
-            enemies: vec![],
-            map: None,
-            shot: None,
-            frame: 0,
-            speed: 1.0,
-            ended: None,
-            script: None,
-            autolaunch: false,
-            shot_frame: 0,
-            shot_frames: vec![],
-            late_frame: 0,
-        });
+        app.insert_resource(crate::Config { speed: 1.0, ..default() });
         let line = app.world_mut().spawn(CrewSpeech("TalkingHead_Character_Aquanogs_0".into())).id();
         app.update();
         let head = app.world().resource::<HeadState>();

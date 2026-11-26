@@ -220,11 +220,6 @@ impl std::ops::Deref for Hostility<'_> {
     }
 }
 
-/// The table a world holds (the empty one without).
-pub fn table(world: &World) -> &Alliances {
-    world.get_resource::<Alliances>().unwrap_or(&EMPTY)
-}
-
 /// The empty table: each side on its own.
 pub fn empty() -> &'static Alliances {
     &EMPTY
@@ -286,18 +281,7 @@ mod tests {
 
     #[test]
     fn the_lobby_team_starts_allied() {
-        let group = |side, team| crate::Group {
-            player: side as usize,
-            side: Side(side),
-            human: side == 0,
-            race: crate::scenario::Race::Unchosen,
-            team,
-            row: None,
-            ids: vec![],
-            ships: vec![],
-            weapons: vec![],
-            crew: vec![],
-        };
+        let group = |side, team| crate::Group { player: side as usize, side: Side(side), team, ..default() };
         let t = crate::scenario::lobby_alliances(&[group(0, 1), group(1, 1), group(2, 2), group(3, -1), group(4, -1)]);
         assert!(t.allied(Side(0), Side(1)), "same lobby team");
         assert!(t.hostile(Side(0), Side(2)) && t.hostile(Side(1), Side(2)), "another team");

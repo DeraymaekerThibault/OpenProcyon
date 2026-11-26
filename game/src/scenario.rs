@@ -185,7 +185,7 @@ impl Race {
 
 /// One fleet of a battle: whose start point it uses (index in the map's player list), which side it fights for, whether the
 /// human commands it, and its ships with an explicit start position (historical maps) or none (formation at the start point).
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Default, Clone)]
 pub struct Group {
     pub player: usize,
     pub side: Side,

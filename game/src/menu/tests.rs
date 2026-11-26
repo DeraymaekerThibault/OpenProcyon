@@ -220,22 +220,7 @@ fn border_dispute_keeps_the_humans_command_ship() {
         .init_resource::<ship::Fleets>()
         .init_resource::<Target>()
         .insert_resource(Orbit { yaw: 0.0, pitch: 0.0, dist: 60.0, focus: None })
-        .insert_resource(Config {
-            groups: plan,
-            player: String::new(),
-            allies: vec![],
-            enemies: vec![],
-            map: Some("border_dispute".into()),
-            shot: None,
-            frame: 0,
-            speed: 1.0,
-            ended: None,
-            script: None,
-            autolaunch: false,
-            shot_frame: 0,
-            shot_frames: vec![],
-            late_frame: 0,
-        });
+        .insert_resource(Config { groups: plan, map: Some("border_dispute".into()), speed: 1.0, ..default() });
     app.world_mut()
         .run_system_once(|mut c: Commands, a: Res<AssetServer>, l: Res<Library>, f: Res<fx::FxLib>, s: Res<collision::Shapes>, r: Res<data::AsteroidDefs>, cfg: Res<Config>| {
             crate::scenario::spawn_scenario(&mut c, &a, &l, &f, &s, &r, &cfg)

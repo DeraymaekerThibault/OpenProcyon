@@ -87,23 +87,7 @@ fn promotion_checks_membership_reorders_and_preserves_speed_not_camera() {
 #[ignore = "needs imported assets"]
 fn scripted_cross_group_primary_retires_standin_and_updates_mission_identity() {
     let (mut w, ids) = fleet_world();
-    let ms = |id, owner: &str, name: &str| campaign::MissionShip {
-        id,
-        owner: owner.into(),
-        name: name.into(),
-        hold_fire: false,
-        invuln: 0.0,
-        visible: true,
-        stance: rules::Stance::Neutral,
-        ordered: None,
-        attack: vec![],
-        flag: String::new(),
-        banner: String::new(),
-        looping: None,
-        stop_at_end: false,
-        create_lifeboats: false,
-        ..Default::default()
-    };
+    let ms = |id, owner: &str, name: &str| campaign::MissionShip { id, owner: owner.into(), name: name.into(), visible: true, ..Default::default() };
     w.entity_mut(ids[0]).insert(ms(-1, "Player", "RLS Stand-in"));
     w.entity_mut(ids[4]).insert(ms(99, "Players Ships", "RLS St Roch"));
     w.insert_resource(campaign::load_id("mission09"));
@@ -417,22 +401,7 @@ fn a_mission_captain_takes_a_base_only_in_scan_range_a_skirmish_one_at_any() {
         let mut w = World::new();
         let lib = Library { classes: vec![crate::fixed_tests::synthetic_class()], guns: default(), bullets: default(), names: default(), clips: default() };
         w.insert_resource(lib);
-        w.insert_resource(crate::Config {
-            groups: vec![],
-            player: String::new(),
-            allies: vec![],
-            enemies: vec![],
-            map: None,
-            shot: None,
-            frame: 0,
-            speed: 1.0,
-            ended: None,
-            script: None,
-            autolaunch: false,
-            shot_frame: 0,
-            shot_frames: vec![],
-            late_frame: 0,
-        });
+        w.insert_resource(crate::Config { speed: 1.0, ..default() });
         w.init_resource::<crate::environment::Sensors>();
         w.init_resource::<CaptainTargets>();
         w.init_resource::<Fleets>();
@@ -652,22 +621,7 @@ fn allied_computer_ships_hunt_the_enemy_base_the_humans_fleet_waits() {
     let class = w.resource::<Library>().index("Base_SmugglersCamp");
     let health = Health::new(&w.resource::<Library>().classes[class]);
     w.spawn((Transform::from_xyz(0.0, 0.0, -2000.0), combat::BaseSide(Side::Enemy), health, combat::ArmedBase { class }));
-    w.insert_resource(crate::Config {
-        groups: vec![],
-        player: String::new(),
-        allies: vec![],
-        enemies: vec![],
-        map: None,
-        shot: None,
-        frame: 0,
-        speed: 1.0,
-        ended: None,
-        script: None,
-        autolaunch: false,
-        shot_frame: 0,
-        shot_frames: vec![],
-        late_frame: 0,
-    });
+    w.insert_resource(crate::Config { speed: 1.0, ..default() });
     w.init_resource::<crate::environment::Sensors>();
     w.init_resource::<CaptainTargets>();
     w.init_resource::<Time>();

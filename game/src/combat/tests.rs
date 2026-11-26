@@ -241,23 +241,7 @@ fn hostile_island_towers_shoot_the_player_and_neutral_ones_do_not() {
     spawn_base(&mut app, "NO PLAYER", 40.0);
     let c = lib.index("Ship_Navy_Torpedo");
     let ship = Ship { heading: 0.0, ..Ship::new(c, Side::Player) };
-    let ms = crate::campaign::MissionShip {
-        id: 1,
-        name: "p".into(),
-        owner: player.into(),
-        hold_fire: false,
-        invuln: 1.0,
-        visible: true,
-        stance: crate::rules::Stance::Neutral,
-        ordered: None,
-        attack: vec![],
-        flag: String::new(),
-        banner: String::new(),
-        looping: None,
-        stop_at_end: false,
-        create_lifeboats: false,
-        ..Default::default()
-    };
+    let ms = crate::campaign::MissionShip { id: 1, name: "p".into(), owner: player.into(), invuln: 1.0, visible: true, ..Default::default() };
     let player_ship = app.world_mut().spawn((Transform::from_xyz(0.0, 0.0, -120.0), ship, Health::new(&lib.classes[c]), Fires::default(), ms, PlayerShip)).id();
     for _ in 0..300 {
         app.world_mut().resource_mut::<Time>().advance_by(std::time::Duration::from_secs_f32(0.05));
@@ -1075,27 +1059,7 @@ fn shell_into_a_hull_damages_it_and_reports_the_hit() {
     app.insert_resource(FxLib::with_names(&[impact]));
     let farther = app.world_mut().spawn((Transform::from_translation(-normal * 100.0), farther_ship, Health::new(&lib.classes[c]), Fires::default())).id();
     let at = (ta + tb + tc) / 3.0 + normal * 40.0;
-    let shell = Shell {
-        vel: -normal * 200.0,
-        age: 0.0,
-        lifetime: 5.0,
-        gravity: 0.0,
-        bullet: bullet.clone(),
-        torpedo: is_torpedo_bullet(&bullet),
-        side: Side::Player,
-        shooter,
-        target: None,
-        angular_velocity: 0.0,
-        payload: lib.bullets[&bullet].payload,
-        aim: None,
-        pd: false,
-        hp: 1.0,
-        harmless: false,
-        base: false,
-        ricochet: -1000.0,
-        mine_scan: Default::default(),
-        lost_target: false,
-    };
+    let shell = Shell { vel: -normal * 200.0, lifetime: 5.0, hp: 1.0, ..test_shell(&lib, &bullet, shooter) };
     let id = app.world_mut().spawn((shell, Transform::from_translation(at))).id();
     app.insert_resource(lib);
     let full: f32 = app.world().get::<Health>(target).unwrap().sections.iter().sum();
@@ -1151,27 +1115,7 @@ fn a_mine_glances_off_allied_hulls_and_strikes_others() {
     }
     let mut mines = Vec::new();
     for i in 0..2 {
-        let shell = Shell {
-            vel: -normal * 200.0,
-            age: 0.0,
-            lifetime: 1000.0,
-            gravity: 0.0,
-            bullet: bullet.clone(),
-            torpedo: is_torpedo_bullet(&bullet),
-            side: Side::Player,
-            shooter,
-            target: None,
-            angular_velocity: 0.0,
-            payload: lib.bullets[&bullet].payload,
-            aim: None,
-            pd: false,
-            hp: 20.0,
-            harmless: false,
-            base: false,
-            ricochet: -1000.0,
-            mine_scan: Default::default(),
-            lost_target: false,
-        };
+        let shell = Shell { vel: -normal * 200.0, lifetime: 1000.0, hp: 20.0, ..test_shell(&lib, &bullet, shooter) };
         mines.push(app.world_mut().spawn((shell, Transform::from_translation(at + Vec3::new(1000.0 * i as f32, 0.0, 0.0)))).id());
     }
     app.insert_resource(lib);
@@ -1219,27 +1163,7 @@ fn land_in_the_way_stops_a_shell_before_the_hull() {
     let farther_ship = app.world().get::<Ship>(target).unwrap().clone();
     let _farther = app.world_mut().spawn((Transform::from_translation(-normal * 100.0), farther_ship, Health::new(&lib.classes[c]), Fires::default())).id();
     let at = (ta + tb + tc) / 3.0 + normal * 40.0;
-    let shell = Shell {
-        vel: -normal * 200.0,
-        age: 0.0,
-        lifetime: 5.0,
-        gravity: 0.0,
-        bullet: bullet.clone(),
-        torpedo: is_torpedo_bullet(&bullet),
-        side: Side::Player,
-        shooter,
-        target: None,
-        angular_velocity: 0.0,
-        payload: lib.bullets[&bullet].payload,
-        aim: None,
-        pd: false,
-        hp: 1.0,
-        harmless: false,
-        base: false,
-        ricochet: -1000.0,
-        mine_scan: Default::default(),
-        lost_target: false,
-    };
+    let shell = Shell { vel: -normal * 200.0, lifetime: 5.0, hp: 1.0, ..test_shell(&lib, &bullet, shooter) };
     let id = app.world_mut().spawn((shell, Transform::from_translation(at))).id();
     // A wall of land across the line of fire, 20 units in front of the hull.
     let (u, v) = (normal.any_orthonormal_vector() * 500.0, normal.cross(normal.any_orthonormal_vector()) * 500.0);
@@ -1339,27 +1263,7 @@ fn a_mine_picks_its_target_five_seconds_after_it_is_laid() {
     app.world_mut().spawn((Transform::from_translation(Vec3::new(30.0, 0.0, 0.0)), ship, Health::new(&lib.classes[c]), Fires::default()));
     let shooter = app.world_mut().spawn_empty().id();
     let bullet = "Bullet_StarMine_Med".to_string();
-    let shell = Shell {
-        vel: Vec3::ZERO,
-        age: 0.0,
-        lifetime: 1000.0,
-        gravity: 0.0,
-        bullet: bullet.clone(),
-        torpedo: is_torpedo_bullet(&bullet),
-        side: Side::Player,
-        shooter,
-        target: None,
-        angular_velocity: 0.0,
-        payload: lib.bullets[&bullet].payload,
-        aim: None,
-        pd: false,
-        hp: 20.0,
-        harmless: false,
-        base: false,
-        ricochet: -1000.0,
-        mine_scan: Default::default(),
-        lost_target: false,
-    };
+    let shell = Shell { vel: Vec3::ZERO, lifetime: 1000.0, hp: 20.0, ..test_shell(&lib, &bullet, shooter) };
     let id = app.world_mut().spawn((shell, Transform::default())).id();
     app.insert_resource(lib);
     for _ in 0..4 {
@@ -1516,27 +1420,7 @@ fn a_new_shell_first_moves_in_the_tick_after_it_was_created() {
         .insert_resource(Spawn(None))
         .add_systems(Update, (crate::tick_start, spawn_once, shells).chain());
     let bullet = lib.guns["Gun_CannonBall_Heavy"].bullet.clone();
-    let shell = Shell {
-        vel: Vec3::new(0.0, 0.0, -100.0),
-        age: 0.0,
-        lifetime: 5.0,
-        gravity: 0.0,
-        bullet: bullet.clone(),
-        torpedo: is_torpedo_bullet(&bullet),
-        side: Side::Player,
-        shooter: Entity::PLACEHOLDER,
-        target: None,
-        angular_velocity: 0.0,
-        payload: lib.bullets[&bullet].payload,
-        aim: None,
-        pd: false,
-        hp: 1.0,
-        harmless: false,
-        base: false,
-        ricochet: -1000.0,
-        mine_scan: Default::default(),
-        lost_target: false,
-    };
+    let shell = Shell { vel: Vec3::new(0.0, 0.0, -100.0), lifetime: 5.0, hp: 1.0, ..test_shell(&lib, &bullet, Entity::PLACEHOLDER) };
     app.insert_resource(lib);
     app.world_mut().resource_mut::<Spawn>().0 = Some(shell);
     let tick = |app: &mut App| {
@@ -1915,4 +1799,29 @@ fn a_sinking_ship_sends_one_destroyed_credited_to_its_last_damager() {
     assert!(app.world().get::<Sinking>(victim).is_some() && app.world().get::<Sinking>(unhit).is_some(), "all three start sinking");
     app.update();
     assert!(app.world_mut().resource_mut::<Messages<Destroyed>>().drain().next().is_none(), "once, not every frame");
+}
+
+/// A shell of `bullet` fired by `shooter` for the player's side: at rest, no target, no ricochet; a test sets what it needs.
+fn test_shell(lib: &Library, bullet: &str, shooter: Entity) -> Shell {
+    Shell {
+        vel: Vec3::ZERO,
+        age: 0.0,
+        lifetime: 5.0,
+        gravity: 0.0,
+        bullet: bullet.into(),
+        torpedo: is_torpedo_bullet(bullet),
+        side: Side::Player,
+        shooter,
+        target: None,
+        angular_velocity: 0.0,
+        payload: lib.bullets[bullet].payload,
+        aim: None,
+        pd: false,
+        hp: 1.0,
+        harmless: false,
+        base: false,
+        ricochet: -1000.0,
+        mine_scan: Default::default(),
+        lost_target: false,
+    }
 }

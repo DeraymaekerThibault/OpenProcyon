@@ -138,22 +138,7 @@ mod rotation_tests {
             .init_resource::<ship::Fleets>()
             .init_resource::<Target>()
             .insert_resource(Orbit { yaw: 0.0, pitch: 0.0, dist: 60.0, focus: None })
-            .insert_resource(Config {
-                groups: vec![],
-                player: "Ship_Navy_Tender".into(),
-                allies: vec![],
-                enemies: vec!["Ship_Navy_Cutter".into()],
-                map: Some("red_rover".into()),
-                shot: None,
-                frame: 0,
-                speed: 1.0,
-                ended: None,
-                script: None,
-                autolaunch: false,
-                shot_frame: 0,
-                shot_frames: vec![],
-                late_frame: 0,
-            });
+            .insert_resource(Config { player: "Ship_Navy_Tender".into(), enemies: vec!["Ship_Navy_Cutter".into()], map: Some("red_rover".into()), speed: 1.0, ..default() });
         app.world_mut()
             .run_system_once(|mut c: Commands, a: Res<AssetServer>, l: Res<Library>, f: Res<fx::FxLib>, s: Res<collision::Shapes>, r: Res<data::AsteroidDefs>, cfg: Res<Config>| {
                 spawn_scenario(&mut c, &a, &l, &f, &s, &r, &cfg)
@@ -188,20 +173,10 @@ mod rotation_tests {
         use bevy::ecs::system::RunSystemOnce;
         let mut app = App::new();
         app.init_resource::<Time>().insert_resource(Outcome::Victory).init_resource::<EndMessage>().init_resource::<EndLine>().insert_resource(Config {
-            groups: vec![],
             player: "Ship_Navy_Cutter".into(),
-            allies: vec![],
-            enemies: vec![],
             map: Some("red_rover".into()),
-            shot: None,
-            frame: 0,
             speed: 1.0,
-            ended: None,
-            script: None,
-            autolaunch: false,
-            shot_frame: 0,
-            shot_frames: vec![],
-            late_frame: 0,
+            ..default()
         });
         app.world_mut().run_system_once(outcome).unwrap(); // no PlayerShip left
         assert!(*app.world().resource::<Outcome>() == Outcome::Victory);
@@ -217,20 +192,9 @@ mod rotation_tests {
             let mut script = crate::rules::Script::new(&data, serde_json::Value::Null);
             script.ended = Some(("Mission complete.".into(), won));
             app.init_resource::<Time>().insert_resource(Outcome::Playing).init_resource::<EndMessage>().init_resource::<EndLine>().insert_resource(Config {
-                groups: vec![],
-                player: String::new(),
-                allies: vec![],
-                enemies: vec![],
-                map: None,
-                shot: None,
                 frame: 5,
                 speed: 1.0,
-                ended: None,
-                script: None,
-                autolaunch: false,
-                shot_frame: 0,
-                shot_frames: vec![],
-                late_frame: 0,
+                ..default()
             });
             app.insert_resource(campaign::Mission { id: "synthetic".into(), script, data, opening: None });
             app.world_mut().run_system_once(outcome).unwrap();

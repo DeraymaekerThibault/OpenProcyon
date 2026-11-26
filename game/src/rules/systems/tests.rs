@@ -61,22 +61,7 @@ fn script_app(map: &str) -> App {
         .add_message::<crate::nebula::MeteorRoute>()
         .add_message::<crate::combat::Detonate>()
         .insert_resource(Orbit { yaw: 0.0, pitch: 0.4, dist: 90.0, focus: None })
-        .insert_resource(Config {
-            groups: vec![],
-            player: "Ship_Navy_Torpedo".into(),
-            allies: vec![],
-            enemies: vec![],
-            map: Some(map.into()),
-            shot: None,
-            frame: 0,
-            speed: 1.0,
-            ended: None,
-            script: None,
-            autolaunch: false,
-            shot_frame: 0,
-            shot_frames: vec![],
-            late_frame: 0,
-        })
+        .insert_resource(Config { player: "Ship_Navy_Torpedo".into(), map: Some(map.into()), speed: 1.0, ..default() })
         .add_systems(Update, update);
     app
 }
@@ -262,16 +247,10 @@ fn mission_ships_halt_when_their_script_route_runs_out() {
         name: "Test".into(),
         owner: "Navy Tenders".into(),
         hold_fire: true,
-        invuln: 0.0,
         visible: true,
         stance: Stance::Dummy,
-        ordered: None,
-        attack: vec![],
-        flag: String::new(),
-        banner: String::new(),
         looping,
         stop_at_end: stop,
-        create_lifeboats: false,
         ..Default::default()
     };
     let done = app.world_mut().spawn((ship.clone(), health(), Transform::default(), ms(true, None))).id();
@@ -819,22 +798,7 @@ fn win_and_lose_end_a_battle_with_no_script_through_the_outcome_path() {
     use crate::scenario::{EndLine, EndMessage, Outcome};
     for (word, outcome, end) in [("win", Outcome::Victory, "IDGS_TPINGAMEMESSAGE_GAME_WON"), ("lose", Outcome::Defeat, "IDGS_TPINGAMEMESSAGE_GAME_LOST")] {
         let mut app = console_battle();
-        app.insert_resource(Outcome::Playing).init_resource::<EndMessage>().init_resource::<EndLine>().insert_resource(Config {
-            groups: vec![],
-            player: String::new(),
-            allies: vec![],
-            enemies: vec![],
-            map: None,
-            shot: None,
-            frame: 7,
-            speed: 1.0,
-            ended: None,
-            script: None,
-            autolaunch: false,
-            shot_frame: 0,
-            shot_frames: vec![],
-            late_frame: 0,
-        });
+        app.insert_resource(Outcome::Playing).init_resource::<EndMessage>().init_resource::<EndLine>().insert_resource(Config { frame: 7, speed: 1.0, ..default() });
         lobby_ship(&mut app, "player0", Vec3::ZERO, true);
         let log = say(&mut app, &[word]);
         assert!(!log.contains("needs"), "{log}");
