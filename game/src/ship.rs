@@ -366,7 +366,7 @@ pub fn ai(
         Query<(Option<&docking::Docker>, Option<&docking::Tower>, Option<&boarding::GrappleOrder>, Option<&boarding::Boarding>)>,
     ),
     (lib, fleets): (Res<combat::Library>, Res<Fleets>),
-    bases: Query<(Entity, &Transform, &combat::BaseSide, &Health, &combat::ArmedBase)>,
+    bases: Query<(Entity, &Transform, Option<&combat::BaseSide>, &Health, &combat::ArmedBase, Option<&campaign::MissionBase>)>,
     mut scripted: Query<&mut campaign::MissionShip>,
     (dying, cloaks, table, rocks): (
         Query<(), With<combat::Sinking>>,
@@ -439,7 +439,8 @@ pub fn ai(
         // What it could pick: hostile ships and dragons, and hostile bases. Armed volcano islands fire
         // on everyone but are no base to go for (retail Diablo Strait: the computer came for our ships).
         let island = |b: &combat::ArmedBase| lib.classes[b.class].name.starts_with("Island_");
-        let hostile_base = |b: &(Entity, &Transform, &combat::BaseSide, &Health, &combat::ArmedBase)| table.hostile(b.2.0, s.side) && !b.3.destroyed && !island(b.4);
+        type Base<'a> = (Entity, &'a Transform, Option<&'a combat::BaseSide>, &'a Health, &'a combat::ArmedBase, Option<&'a campaign::MissionBase>);
+        let hostile_base = |b: &Base| table.base_side(b.5, b.2).is_some_and(|o| table.hostile(o, s.side)) && !b.3.destroyed && !island(b.4);
         let dragon = |t: Entity| dragons.get(t).ok().filter(|d| d.2.visible && d.3.hp > 0.0 && table.hostile(table.side_or_neutral(&d.2.owner), s.side));
         let rock = |t: Entity| rocks.get(t).ok().filter(|r| r.1.hp > 0.0); // a rock the script ordered attacked ('attack Asteroid Belt')
         let seen = |at: Vec3, t, base, targets_me| Seen { e: t, dist: at.distance(tf.translation), base, in_scan: sensors.in_sight(e, t, None), targets_me };

@@ -1057,3 +1057,26 @@ fn a_ship_the_human_controls_keeps_its_stance_and_is_not_captained() {
     }
     assert_eq!(w.get::<campaign::MissionShip>(own).unwrap().stance, crate::rules::Stance::Defensive, "its stance stays");
 }
+
+/// A base whose owner is no player of the battle is hostile to everyone: a computer captain goes for it (and for a base of the
+/// no-owner owner never).
+#[test]
+fn a_base_of_an_owner_outside_the_battle_is_a_target_one_of_no_owner_is_not() {
+    let target_of = |owner: &str| {
+        let mut w = captain_world(false);
+        let ship = captain_ship(&mut w, Side::Enemy, Vec3::ZERO);
+        let base = w
+            .spawn((
+                Transform::from_xyz(0.0, 0.0, -3000.0),
+                campaign::MissionBase { id: 1, owner: owner.into() },
+                Health { sections: vec![], core: 100.0, destroyed: false },
+                combat::ArmedBase { class: 0 },
+            ))
+            .id();
+        think(&mut w);
+        (w.resource::<CaptainTargets>().of(ship), base)
+    };
+    let (t, base) = target_of("player 8");
+    assert_eq!(t, Some(base), "outside the battle: hostile, attacked");
+    assert_eq!(target_of("NO PLAYER").0, None, "no owner: everyone's ally");
+}

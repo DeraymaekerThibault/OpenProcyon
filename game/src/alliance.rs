@@ -137,9 +137,11 @@ fn click(
     }
 }
 
-/// The side of things whose owner is no player of the battle ('NO PLAYER', an unset owner): allied with every player, so never a
+/// The side of things of the no-owner owner ('NO PLAYER', an unset owner): allied with every player, so never a
 /// captain's target, a friend's dock, and an order against one is dropped; the human may still fire at one by hand. PROVISIONAL.
 pub const NEUTRAL: Side = Side(u8::MAX - 1);
+/// The sides kept for owners that name no player of the battle (`Alliances::side_or_neutral`); the battle's players come first.
+const OUTSIDERS: std::ops::Range<u8> = 128..252;
 
 /// The battle's alliance table: the one answer to "is X hostile to Y" for ships, shells, bases, docks, boarding and the rules. Each
 /// player has a side (the human's is `Side::Player`); two sides are allied only while each counts the other an ally, and hostile
@@ -165,9 +167,18 @@ impl Alliances {
     pub fn side_of(&self, owner: &str) -> Option<Side> {
         self.sides.iter().find(|p| p.0 == owner).map(|p| p.1)
     }
-    /// The side a thing of `owner` fights for: its player's, else `NEUTRAL`.
+    /// The side a thing of `owner` fights for: its player's; `NEUTRAL` for no owner ('NO PLAYER', unset); and for an owner that names
+    /// no player of this battle (a map's base player whose slot is not in play, say) a side of its own, allied with nobody else, so
+    /// hostile to everyone (PROVISIONAL). Such a side is the same for one name every time (`OUTSIDERS`).
     pub fn side_or_neutral(&self, owner: &str) -> Side {
-        self.side_of(owner).unwrap_or(NEUTRAL)
+        if let Some(side) = self.side_of(owner) {
+            return side;
+        }
+        if owner.trim().is_empty() || owner.trim().eq_ignore_ascii_case("NO PLAYER") {
+            return NEUTRAL;
+        }
+        let hash = owner.bytes().fold(2166136261u32, |h, b| (h ^ u32::from(b)).wrapping_mul(16777619));
+        Side(OUTSIDERS.start + (hash % u32::from(OUTSIDERS.end - OUTSIDERS.start)) as u8)
     }
     /// `a` counts `b` an ally.
     pub fn offered(&self, a: Side, b: Side) -> bool {
@@ -306,5 +317,24 @@ mod tests {
         }
         assert_eq!(t.base_side(Some(&camp), None), Some(nobody), "its base is a friendly dock");
         assert!(t.targetable(Side::Player, nobody, true) && !t.targetable(Side::Player, Side::Player, true), "by hand: things of no player only");
+    }
+
+    /// Only the no-owner owner is everyone's ally; an owner that names no player of this battle (Border Dispute's base players when
+    /// their slots are not in play) fights alone, hostile to every player and to other such owners.
+    #[test]
+    fn an_owner_outside_the_battle_fights_alone_and_only_no_owner_is_everyones_ally() {
+        let mut t = Alliances::default();
+        t.add_player("Hero", Side::Player);
+        t.add_player("Raiders", Side(1));
+        let (outsider, other) = (t.side_or_neutral("player 8"), t.side_or_neutral("player 9"));
+        assert_eq!(outsider, t.side_or_neutral("player 8"), "the same side every time");
+        for s in [Side::Player, Side(1), other] {
+            assert!(t.hostile(outsider, s) && t.targetable(s, outsider, false), "hostile and a target");
+        }
+        for nobody in ["NO PLAYER", "", "No Player"] {
+            assert_eq!(t.side_or_neutral(nobody), NEUTRAL, "{nobody:?}");
+        }
+        let base = crate::campaign::MissionBase { id: 9, owner: "player 9".into() };
+        assert_eq!(t.base_side(Some(&base), None), Some(other));
     }
 }

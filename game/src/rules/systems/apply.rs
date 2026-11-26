@@ -309,8 +309,8 @@ pub(in crate::rules) fn apply(
                     info!("map script: {} ship(s) now belong to '{o}'", u.len());
                 }
                 // Not retail: a placed mine fights for the side its new owner has in the alliance table.
-                let side = env.script.alliances.side_of(&o);
-                let mine_side = Some(side.unwrap_or(crate::alliance::NEUTRAL));
+                let side = env.script.alliances.side_or_neutral(&o);
+                let mine_side = Some(side);
                 for e in u {
                     if let Ok((_, mut base, ..)) = env.bases.get_mut(e) {
                         base.owner = o.clone();
@@ -327,9 +327,7 @@ pub(in crate::rules) fn apply(
                         }
                     }
                     if let Ok(RuleShipItem { ship: mut sh, mission: mut ms, .. }) = ships.get_mut(e) {
-                        if let Some(side) = side {
-                            sh.side = side;
-                        }
+                        sh.side = side;
                         ms.owner = o.as_str().into();
                     }
                 }
