@@ -28,6 +28,14 @@ fn rule_keys_latch_until_a_tick_and_opening_skip_is_not_queued_twice() {
 
 /// The rules `update` system on its own, with the resources and messages it reads; `mission` is the script under test.
 fn rules_app(mission: Mission) -> App {
+    let map = mission.id.clone();
+    let mut app = script_app(&map);
+    app.insert_resource(mission);
+    app
+}
+
+/// `rules_app` without a script (a test inserts the mission or the skirmish map's script).
+fn script_app(map: &str) -> App {
     let mut app = App::new();
     app.add_plugins((TaskPoolPlugin::default(), AssetPlugin::default()))
         .init_asset::<Image>()
@@ -58,7 +66,7 @@ fn rules_app(mission: Mission) -> App {
             player: "Ship_Navy_Torpedo".into(),
             allies: vec![],
             enemies: vec![],
-            map: Some(mission.id.clone()),
+            map: Some(map.into()),
             shot: None,
             frame: 0,
             speed: 1.0,
@@ -69,9 +77,74 @@ fn rules_app(mission: Mission) -> App {
             shot_frames: vec![],
             late_frame: 0,
         })
-        .insert_resource(mission)
         .add_systems(Update, update);
     app
+}
+
+/// A skirmish map's script in the one rule update, with a script-named ship of player "Reds" (half its hull gone) and a base of
+/// "Blues": the units a mission script would see. Asset-free.
+fn skirmish_rules_app(data: serde_json::Value) -> (App, Entity, Entity) {
+    let mut app = script_app("synthetic_map");
+    app.insert_resource(skirmish_script(data));
+    let class = crate::fixed_tests::synthetic_class();
+    let health = || {
+        let mut h = Health::new(&class);
+        h.core = class.core_hp / 2.0;
+        h
+    };
+    let ship = app
+        .world_mut()
+        .spawn((
+            Ship::new(0, Side::Player),
+            health(),
+            Transform::default(),
+            Visibility::Inherited,
+            MissionShip { id: 1, name: "Red One".into(), owner: "Reds".into(), visible: true, ..default() },
+        ))
+        .id();
+    let base = app.world_mut().spawn((MissionBase { id: 2, owner: "Blues".into() }, Transform::from_xyz(100.0, 0.0, 0.0), crate::combat::ArmedBase { class: 0 }, health())).id();
+    app.insert_resource(Library { classes: vec![class], guns: default(), bullets: default(), names: default(), clips: default() });
+    (app, ship, base)
+}
+
+#[test]
+fn a_skirmish_script_sees_damage_vital_sections_and_bases_as_a_mission_does() {
+    let (mut app, ship, base) = skirmish_rules_app(serde_json::json!({"rules": []}));
+    app.update();
+    let units = &app.world().resource::<RuleWorld>().0;
+    let red = units.iter().find(|u| u.e == ship).expect("the ship is a unit");
+    assert!((red.damage - 0.5).abs() < 1e-4 && red.vital.is_some(), "damage {} and vital sections", red.damage);
+    assert!(units.iter().any(|u| u.e == base), "the base is a unit");
+}
+
+#[test]
+fn hit_and_fire_events_reach_a_skirmish_script() {
+    let (mut app, ship, base) = skirmish_rules_app(serde_json::json!({"rules": []}));
+    app.world_mut().write_message(Hit { shooter: ship, victim: base });
+    app.world_mut().write_message(Fired { shooter: ship, target: Some(base), bullet: "Bullet_CannonBall_Light".into(), torpedo: false, mine: false });
+    app.update();
+    let sc = &app.world().resource::<SkirmishScript>().script;
+    assert_eq!(sc.hits_by.get(&("Reds".to_string(), base)), Some(&1), "the hit is the shooter's player's");
+    assert_eq!(sc.fired_at.get(&ship).map(|f| f.1), Some(base));
+}
+
+/// The rules run on game time and not under the in-game menu: a skirmish script's clock (and so its timers) stops while Esc is open.
+#[test]
+fn a_skirmish_scripts_clock_stops_under_the_esc_menu() {
+    let (mut app, ..) = skirmish_rules_app(serde_json::json!({"rules": []}));
+    app.world_mut().get_resource_mut::<Schedules>().unwrap().remove(Update);
+    app.add_systems(Update, super::rule_update());
+    let clock = |app: &mut App| {
+        app.world_mut().resource_mut::<Time>().advance_by(std::time::Duration::from_millis(500));
+        app.update();
+        app.world().resource::<SkirmishScript>().script.time
+    };
+    let running = clock(&mut app);
+    assert!(running > 0.0);
+    app.insert_resource(State::new(crate::menu::Overlay::Open(crate::menu::Page::Menu)));
+    assert_eq!(clock(&mut app), running, "stopped under Esc");
+    app.insert_resource(State::new(crate::menu::Overlay::Closed));
+    assert!(clock(&mut app) > running, "runs again once it closes");
 }
 
 /// Mission 9's "Dark Matter Ignited" hands the Longboat back to the human, then sets the group's throttle to 0 in the same rule.

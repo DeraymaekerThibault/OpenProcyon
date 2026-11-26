@@ -228,7 +228,6 @@ pub fn run(view: fn(&mut App), setup_view: fn(&mut App)) {
             audio::plugin,
             menu::plugin,
             rules::plugin,
-            rules::skirmish::plugin,
             docking::plugin,
             boarding::plugin,
             options_menu::plugin,
