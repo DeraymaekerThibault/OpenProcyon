@@ -37,6 +37,28 @@ pub struct Dragon {
     roars: usize,
 }
 impl Dragon {
+    /// An Aggressive dragon of `hp` with no orders (test worlds).
+    #[cfg(test)]
+    pub(crate) fn test(hp: f32) -> Dragon {
+        Dragon {
+            stance: Stance::Aggressive,
+            threshold: 1.0,
+            border: None,
+            home: None,
+            attack: vec![],
+            hold: false,
+            hp,
+            max_hp: hp,
+            target: None,
+            pass: None,
+            pass_start: 0.0,
+            cooldown: 0.0,
+            drive: Vec3::ZERO,
+            face: None,
+            roar_in: 4.0,
+            roars: 0,
+        }
+    }
     /// Its current target.
     pub fn target(&self) -> Option<Entity> {
         self.target

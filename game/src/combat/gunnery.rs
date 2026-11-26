@@ -251,6 +251,12 @@ pub(super) struct AimTarget {
     pub(super) velocity: Vec3,
 }
 
+/// The object `t` (a rock, an animal or a base, with the side it fights for) if a ship of side `shooter` may shoot it: a rock always,
+/// anything else when it is hostile to the shooter's own side (`by_hand`: the human's own aim may also take a thing of no player).
+pub(super) fn object_target(space: &[(AimTarget, Option<Side>)], table: &crate::alliance::Alliances, t: Entity, shooter: Side, by_hand: bool) -> Option<AimTarget> {
+    space.iter().find(|o| o.0.entity == t && o.1.is_none_or(|s| table.targetable(shooter, s, by_hand))).map(|o| o.0)
+}
+
 /// The line-of-fire hold covers the attack routine's guns: point-defence and mine-laying guns are fired by their own routines.
 pub(super) fn held_by_line(blocked: bool, gun: &crate::data::GunDef, mine: bool) -> bool {
     blocked && !gun.point_defense && !mine
@@ -406,22 +412,21 @@ pub(super) fn fire(
             velocity: transform.rotation * Vec3::NEG_Z * ship.speed,
         })
         .collect();
-    let rocks: Vec<AimTarget> = objects
+    // Rocks, animals and bases with the side each fights for (none for a rock; a hidden animal is left out). Whether a ship may shoot
+    // one is its own side's question (`rock`): a computer ship's foes are its owner's, not the human's.
+    let space: Vec<(AimTarget, Option<Side>)> = objects
         .iter()
-        .filter(|(e, _, a, base, side)| {
-            // The human may also aim at a thing of no player by hand.
-            let by_hand = target.0 == Some(*e);
-            a.is_none_or(|a| a.visible && table.targetable(Side::Player, table.side_or_neutral(&a.owner), by_hand))
-                && base.is_none_or(|(_, _, b)| table.base_side(Some(b), *side).is_some_and(|s| table.targetable(Side::Player, s, by_hand)))
-        })
-        .filter_map(|(entity, transform, animal, base, _)| {
+        .filter(|(_, _, a, ..)| a.is_none_or(|a| a.visible))
+        .filter_map(|(entity, transform, animal, base, side)| {
             let position = match base {
                 Some((b, h, _)) => transform.transform_point(base_aim_point(&lib.classes[b.class], h, (target.0 == Some(entity)).then_some(target.1).flatten())?),
                 None => transform.translation,
             };
-            Some(AimTarget { entity, position, velocity: animal.map_or(Vec3::ZERO, |a| a.velocity) })
+            let owner = animal.map(|a| table.side_or_neutral(&a.owner)).or_else(|| base.and_then(|(_, _, b)| table.base_side(Some(b), side)));
+            Some((AimTarget { entity, position, velocity: animal.map_or(Vec3::ZERO, |a| a.velocity) }, owner))
         })
         .collect();
+    let rock = |t: Entity, shooter: Side, by_hand: bool| object_target(&space, &table, t, shooter, by_hand);
     // Bases of any side, for the computer captains that hunt a hostile base.
     let base_targets: Vec<(AimTarget, Side)> = objects
         .iter()
@@ -454,9 +459,9 @@ pub(super) fn fire(
         let ship_target = if pilot.is_some_and(|p| p.hold_fire) || mission.is_some_and(|m| m.hold_fire) {
             None
         } else if let Some(t) = pilot.filter(|_| !primary).and_then(|p| p.target) {
-            seen.iter().find(|c| c.entity == t && table.hostile(c.side, ship.side) && c.visible).map(Contact::aim).or_else(|| rocks.iter().find(|r| r.entity == t).copied())
-        } else if let (Side::Player, Some(r)) = (ship.side, target.0.filter(|_| primary).and_then(|t| rocks.iter().find(|r| r.entity == t))) {
-            Some(*r) // selected space object (asteroid or whale)
+            seen.iter().find(|c| c.entity == t && table.hostile(c.side, ship.side) && c.visible).map(Contact::aim).or_else(|| rock(t, ship.side, false))
+        } else if let (Side::Player, Some(r)) = (ship.side, target.0.filter(|_| primary).and_then(|t| rock(t, ship.side, true))) {
+            Some(r) // selected space object (asteroid or whale)
         } else {
             match ship.side {
                 Side::Player => seen
@@ -464,8 +469,8 @@ pub(super) fn fire(
                     .find(|c| primary && Some(c.entity) == target.0 && table.targetable(ship.side, c.side, true) && c.visible)
                     .or_else(|| crate::nearest(seen.iter().filter(|c| !primary && !c.with_human && c.visible), tf.translation, |c| c.aim_point))
                     .map(Contact::aim),
-                // Computer ships fire at their captain's target (ship::CaptainTargets): a ship, a hostile base or a rock the script ordered
-                // attacked; without one, the player ship when it is hostile.
+                // Computer ships fire at their captain's target (ship::CaptainTargets): a ship, a base or an animal hostile to their own
+                // side, or a rock the script ordered attacked; without one, the player ship when it is hostile.
                 // A ship target is aimed at the section its captain picked on choosing it (ship::CaptainTargets), not the hull's centre.
                 _ => match captains.as_deref().and_then(|c| c.aim_of(me)) {
                     Some((t, local)) => seen
@@ -473,7 +478,7 @@ pub(super) fn fire(
                         .find(|c| c.entity == t && c.visible && table.hostile(c.side, ship.side))
                         .map(|c| AimTarget { position: others.get(t).map_or(c.aim_point, |o| o.1.transform_point(local)), ..c.aim() })
                         .or_else(|| base_targets.iter().find(|b| b.0.entity == t && table.hostile(b.1, ship.side)).map(|b| b.0))
-                        .or_else(|| rocks.iter().find(|r| r.entity == t).copied()),
+                        .or_else(|| rock(t, ship.side, false)),
                     None => seen.iter().find(|c| c.is_player && c.visible && table.hostile(c.side, ship.side)).map(Contact::aim),
                 },
             }

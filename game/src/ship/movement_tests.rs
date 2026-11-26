@@ -994,3 +994,25 @@ fn a_persistent_ship_fires_from_its_path_then_holds_and_attacks_without_one() {
     assert_eq!(w.get::<Ship>(free).unwrap().order, EngineOrder::Emergency, "no path: it attacks");
     assert_eq!(w.get::<Ship>(formed).unwrap().order, EngineOrder::Full, "a formation comes first");
 }
+
+/// The captain judges a dragon by its own owner's alliances, not the human's: a dragon allied with the human but hostile to the
+/// computer's side is its target; one allied with that side is not.
+#[test]
+fn a_computer_captain_takes_a_dragon_hostile_to_its_own_side() {
+    let target_of = |allied_with_reds: bool| {
+        let mut w = captain_world(false);
+        let mut table = crate::alliance::Alliances::default();
+        table.add_player("Dragons", Side(2));
+        table.set(Side::Player, Side(2), true);
+        table.set(Side(1), Side(2), allied_with_reds);
+        w.insert_resource(table);
+        let ship = captain_ship(&mut w, Side(1), Vec3::ZERO);
+        let dragon =
+            w.spawn((Transform::from_xyz(30.0, 0.0, 0.0), crate::environment::SpaceAnimal::new("Dragons", 9.0, Vec3::ZERO, 1, true), crate::dragons::Dragon::test(100.0))).id();
+        think(&mut w);
+        (w.resource::<CaptainTargets>().of(ship), dragon)
+    };
+    let (t, dragon) = target_of(false);
+    assert_eq!(t, Some(dragon), "hostile to its side, though the human's ally");
+    assert_eq!(target_of(true).0, None, "allied with its side");
+}

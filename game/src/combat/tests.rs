@@ -1825,3 +1825,21 @@ fn test_shell(lib: &Library, bullet: &str, shooter: Entity) -> Shell {
         lost_target: false,
     }
 }
+
+/// A computer ship may shoot an animal (a dragon) hostile to its own side even when the human is allied with it, and not one allied
+/// with its side; a rock is anyone's.
+#[test]
+fn a_computer_ship_shoots_animals_hostile_to_its_own_side_not_the_humans() {
+    use super::gunnery::{AimTarget, object_target};
+    let (reds, dragons) = (Side(1), Side(2));
+    let mut table = crate::alliance::Alliances::default();
+    table.set(Side::Player, dragons, true);
+    let at = |i| AimTarget { entity: Entity::from_raw_u32(i).unwrap(), position: Vec3::ZERO, velocity: Vec3::ZERO };
+    let space = [(at(1), Some(dragons)), (at(2), None)];
+    let hit = |t: u32, shooter, table: &crate::alliance::Alliances| object_target(&space, table, at(t).entity, shooter, false).is_some();
+    assert!(hit(1, reds, &table), "hostile to the computer's side: its target, though the human's ally");
+    assert!(!hit(1, Side::Player, &table), "not the human's foe");
+    table.set(reds, dragons, true);
+    assert!(!hit(1, reds, &table), "allied with its side: never");
+    assert!(hit(2, reds, &table) && hit(2, Side::Player, &table), "a rock is anyone's");
+}
