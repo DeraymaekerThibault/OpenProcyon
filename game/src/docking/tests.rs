@@ -183,7 +183,10 @@ fn computer_ship_with_two_half_sections_sails_for_the_nearest_dock() {
 fn campaign_repair_skips_persistent_captains_and_docks_out_of_sight() {
     use crate::rules::Stance;
     let (mut app, lib) = app();
-    app.insert_resource(crate::campaign::load_id("mission10")).add_systems(Update, ai_repair_dock.before(handle_messages));
+    // "merchants" is a player of the battle, on the ships' side: an owner outside the table would be a side of its own, hostile to them.
+    let mut table = crate::alliance::Alliances::default();
+    table.add_player("merchants", Side::Enemy);
+    app.insert_resource(table).insert_resource(crate::campaign::load_id("mission10")).add_systems(Update, ai_repair_dock.before(handle_messages));
     let docks = load_docks();
     let dock = app.world_mut().spawn((Transform::default(), dockable_for(&docks, "Base_Safetytown").unwrap(), MissionBase { id: 1, owner: "merchants".into() })).id();
     let sight = lib.classes[lib.index("Ship_Pirate_Barque")].sight;
