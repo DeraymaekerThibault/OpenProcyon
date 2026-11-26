@@ -1139,6 +1139,18 @@ fn the_captain_never_steers_the_humans_ship_in_a_mission_cutscene() {
     assert_eq!(w.resource::<CaptainTargets>().of(me), None);
 }
 
+/// A cutscene redirects only the human's input: the computer captains keep picking targets and steering while it plays.
+#[test]
+fn computer_captains_keep_steering_in_a_cutscene() {
+    let mut w = captain_world(true);
+    w.resource_mut::<campaign::Mission>().script.nis = true;
+    let foe = captain_ship(&mut w, Side::Player, Vec3::X * 50.0);
+    let computer = captain_ship(&mut w, Side::Enemy, Vec3::ZERO);
+    think(&mut w);
+    assert_eq!(w.resource::<CaptainTargets>().of(computer), Some(foe));
+    assert_eq!(w.get::<Ship>(computer).unwrap().order, EngineOrder::Emergency, "under way after its target");
+}
+
 /// Retaliation: a Defensive ship answers an attacker that holds it as its target (before any shot), when it is visible, hostile and
 /// within scan range; not one out of scan range, nor a fully cloaked one.
 #[test]
