@@ -373,7 +373,21 @@ Static analysis of the original's captain AI, written as rules. Nothing in it de
 - **Target:** kept for 6 s, then chosen again (at once when it sinks or turns friendly); a held target is followed anywhere. An Aggressive
   captain takes the nearer of the nearest hostile ship in its scan range and the nearest hostile base (at any range in skirmish, within
   scan range in a campaign). Failing both it takes the target of a ship of its own fleet, else of an allied ship. Other stances only
-  answer ships that target them.
+  answer ships that target them. The 6 s re-choice applies only while the ship's "AI can override" flag is set (nearly all ships in
+  the retail saved games have it). Remake (PROVISIONAL, read, not observed): one captain (`ship::ai`) runs skirmish and mission ships. The
+  flag belongs to the target: the captain's own pick can be overridden, a target an order names (Attack, help-attack, Board, Grapple,
+  Dock, Tow, the script's attack, ram, dock, tow, board and grapple actions, a chosen repair dock) cannot and is kept until lost.
+  Aggressive takes the nearest hostile ship or dragon in scan range, else a base as above, else a friend's target, else explores (an
+  order on a target that is gone or not hostile counts as none, and an ended path or a stopped ship's leftover points as no path), and
+  with no working gun rams; Persistent, Defensive and Neutral only answer an attacker: a visible hostile in scan range that holds the
+  ship as its current target (no shot needed; volcanoes, ground lobs and mines never count). A ship scans again only with no target,
+  or every 6 s while its target can be overridden, and keeps its old target when that scan finds nothing. Defensive and Neutral stop
+  with no target unless on a course or in formation, and a Dummy does nothing. A Persistent ship on a path fires from it and holds
+  position when it ends. A player's Attack or "fire when possible" makes a ship Aggressive; a ship nothing gives a stance is
+  Aggressive, and a stance name the parser does not know is a state of its own that picks nothing but obeys orders and paths. Every
+  ship of the human's fleet but the one the human steers is captained, never explores and never docks on its own. Exploring draws its
+  quarter point from the battle's seeded generator. Only NO PLAYER is no one (every player's ally); a volcano is everyone's foe.
+  Cutscenes redirect only the human's input.
 - **Which attack:** the primary gun bank is the one whose live guns cost the most victory points. Its guns' directions and arc edges
   (counted counter-clockwise from the bow in quadrants; an arc over 180° covers all four) decide: only forward quadrants → **frontal**;
   both rear quadrants → **rear**; otherwise **broadside** on the side it covers (port if only port quadrants). No live gun → **ram**
@@ -410,8 +424,8 @@ Static analysis of the original's captain AI, written as rules. Nothing in it de
   charge course already held stands: the submarine presses in to 0.2 R and keeps its course and its fire there. Only if the hulls touch
   (gap 0 or less) does it sail the break-off, 0 x R from its own position, i.e. stop. An ordinary ship, or a submarine not fully
   submerged, uses R for both. Remake: `attack::course_to` in `ship/attack.rs` takes the two ranges (`frontal_ranges`) and returns no course when none is
-  set (the ship keeps the one it held); the skirmish captain in `ship.rs` passes them when its cloak level is exactly 1. Campaign
-  mission ships' own captain still uses R for both (PROVISIONAL: no cloak read there).
+  set (the ship keeps the one it held); the captain in `ship.rs` passes them when its cloak level is exactly 1, for mission
+  ships too.
 - **Throttle:** full while the next course point is within 11.25° of the bow, else the ship's own minimum, 0.65-0.75 of full (drawn
   per ship). That minimum is a floor under every slow-down but the collision avoider's, so nothing else slows an attacker near its
   course points.

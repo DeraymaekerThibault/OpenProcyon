@@ -28,6 +28,14 @@ fn rule_keys_latch_until_a_tick_and_opening_skip_is_not_queued_twice() {
 
 /// The rules `update` system on its own, with the resources and messages it reads; `mission` is the script under test.
 fn rules_app(mission: Mission) -> App {
+    let map = mission.id.clone();
+    let mut app = script_app(&map);
+    app.insert_resource(mission);
+    app
+}
+
+/// `rules_app` without a script (a test inserts the mission or the skirmish map's script).
+fn script_app(map: &str) -> App {
     let mut app = App::new();
     app.add_plugins((TaskPoolPlugin::default(), AssetPlugin::default()))
         .init_asset::<Image>()
@@ -53,25 +61,75 @@ fn rules_app(mission: Mission) -> App {
         .add_message::<crate::nebula::MeteorRoute>()
         .add_message::<crate::combat::Detonate>()
         .insert_resource(Orbit { yaw: 0.0, pitch: 0.4, dist: 90.0, focus: None })
-        .insert_resource(Config {
-            groups: vec![],
-            player: "Ship_Navy_Torpedo".into(),
-            allies: vec![],
-            enemies: vec![],
-            map: Some(mission.id.clone()),
-            shot: None,
-            frame: 0,
-            speed: 1.0,
-            ended: None,
-            script: None,
-            autolaunch: false,
-            shot_frame: 0,
-            shot_frames: vec![],
-            late_frame: 0,
-        })
-        .insert_resource(mission)
+        .insert_resource(Config { player: "Ship_Navy_Torpedo".into(), map: Some(map.into()), speed: 1.0, ..default() })
         .add_systems(Update, update);
     app
+}
+
+/// A skirmish map's script in the one rule update, with a script-named ship of player "Reds" (half its hull gone) and a base of
+/// "Blues": the units a mission script would see. Asset-free.
+fn skirmish_rules_app(data: serde_json::Value) -> (App, Entity, Entity) {
+    let mut app = script_app("synthetic_map");
+    app.insert_resource(skirmish_script(data));
+    let class = crate::fixed_tests::synthetic_class();
+    let health = || {
+        let mut h = Health::new(&class);
+        h.core = class.core_hp / 2.0;
+        h
+    };
+    let ship = app
+        .world_mut()
+        .spawn((
+            Ship::new(0, Side::Player),
+            health(),
+            Transform::default(),
+            Visibility::Inherited,
+            MissionShip { id: 1, name: "Red One".into(), owner: "Reds".into(), visible: true, ..default() },
+        ))
+        .id();
+    let base = app.world_mut().spawn((MissionBase { id: 2, owner: "Blues".into() }, Transform::from_xyz(100.0, 0.0, 0.0), crate::combat::ArmedBase { class: 0 }, health())).id();
+    app.insert_resource(Library { classes: vec![class], guns: default(), bullets: default(), names: default(), clips: default() });
+    (app, ship, base)
+}
+
+#[test]
+fn a_skirmish_script_sees_damage_vital_sections_and_bases_as_a_mission_does() {
+    let (mut app, ship, base) = skirmish_rules_app(serde_json::json!({"rules": []}));
+    app.update();
+    let units = &app.world().resource::<RuleWorld>().0;
+    let red = units.iter().find(|u| u.e == ship).expect("the ship is a unit");
+    assert!((red.damage - 0.5).abs() < 1e-4 && red.vital.is_some(), "damage {} and vital sections", red.damage);
+    assert!(units.iter().any(|u| u.e == base), "the base is a unit");
+}
+
+#[test]
+fn hit_and_fire_events_reach_a_skirmish_script() {
+    let (mut app, ship, base) = skirmish_rules_app(serde_json::json!({"rules": []}));
+    app.world_mut().write_message(Hit { shooter: ship, victim: base });
+    app.world_mut().write_message(Fired { shooter: ship, target: Some(base), bullet: "Bullet_CannonBall_Light".into(), torpedo: false, mine: false });
+    app.update();
+    let sc = &app.world().resource::<SkirmishScript>().script;
+    assert_eq!(sc.hits_by.get(&("Reds".to_string(), base)), Some(&1), "the hit is the shooter's player's");
+    assert_eq!(sc.fired_at.get(&ship).map(|f| f.1), Some(base));
+}
+
+/// The rules run on game time and not under the in-game menu: a skirmish script's clock (and so its timers) stops while Esc is open.
+#[test]
+fn a_skirmish_scripts_clock_stops_under_the_esc_menu() {
+    let (mut app, ..) = skirmish_rules_app(serde_json::json!({"rules": []}));
+    app.world_mut().get_resource_mut::<Schedules>().unwrap().remove(Update);
+    app.add_systems(Update, super::rule_update());
+    let clock = |app: &mut App| {
+        app.world_mut().resource_mut::<Time>().advance_by(std::time::Duration::from_millis(500));
+        app.update();
+        app.world().resource::<SkirmishScript>().script.time
+    };
+    let running = clock(&mut app);
+    assert!(running > 0.0);
+    app.insert_resource(State::new(crate::menu::Overlay::Open(crate::menu::Page::Menu)));
+    assert_eq!(clock(&mut app), running, "stopped under Esc");
+    app.insert_resource(State::new(crate::menu::Overlay::Closed));
+    assert!(clock(&mut app) > running, "runs again once it closes");
 }
 
 /// Mission 9's "Dark Matter Ignited" hands the Longboat back to the human, then sets the group's throttle to 0 in the same rule.
@@ -178,6 +236,7 @@ fn mission_ships_halt_when_their_script_route_runs_out() {
         .init_resource::<Time>()
         .init_resource::<crate::environment::Sensors>()
         .add_systems(PreUpdate, crate::environment::refresh_sensors)
+        .init_resource::<crate::ship::CaptainTargets>()
         .add_systems(Update, mission_ai);
     let ship = Ship { heading: 0.0, speed: 5.0, order: EngineOrder::Full, ..Ship::new(0, Side::Player) };
     let n = lib.classes[0].sections.len();
@@ -188,16 +247,10 @@ fn mission_ships_halt_when_their_script_route_runs_out() {
         name: "Test".into(),
         owner: "Navy Tenders".into(),
         hold_fire: true,
-        invuln: 0.0,
         visible: true,
         stance: Stance::Dummy,
-        target: None,
-        attack: vec![],
-        flag: String::new(),
-        banner: String::new(),
         looping,
         stop_at_end: stop,
-        create_lifeboats: false,
         ..Default::default()
     };
     let done = app.world_mut().spawn((ship.clone(), health(), Transform::default(), ms(true, None))).id();
@@ -225,7 +278,7 @@ fn mission_ships_halt_when_their_script_route_runs_out() {
         ))
         .id();
     app.update();
-    assert_eq!(app.world().get::<MissionShip>(persistent).unwrap().target, Some(foe));
+    assert_eq!(app.world().get::<MissionShip>(persistent).unwrap().ordered, Some(foe), "the attack order names the target for the captain");
     assert_eq!(app.world().get::<Ship>(persistent).unwrap().waypoints, route, "persistent attack order must not cancel the scripted swoop");
     let order = |e| app.world().get::<Ship>(e).unwrap().order;
     assert_eq!(order(done), EngineOrder::Stop, "finished route stops");
@@ -237,9 +290,6 @@ fn mission_ships_halt_when_their_script_route_runs_out() {
     assert_eq!(order(near), EngineOrder::Stop, "last point within 2 x radius counts as reached");
     assert!(app.world().get::<Ship>(near).unwrap().waypoints.is_empty());
     assert_eq!(order(looping), EngineOrder::Full, "loops restart instead");
-    app.world_mut().get_mut::<MissionShip>(persistent).unwrap().stance = Stance::Aggressive;
-    app.update();
-    assert!(app.world().get::<Ship>(persistent).unwrap().waypoints.is_empty(), "aggressive stance switches to combat steering");
 
     use bevy::ecs::system::RunSystemOnce;
     app.world_mut().entity_mut(persistent).insert(Visibility::Inherited);
@@ -269,6 +319,7 @@ fn ai_world() -> App {
         .init_resource::<Time>()
         .init_resource::<crate::environment::Sensors>()
         .add_systems(PreUpdate, crate::environment::refresh_sensors)
+        .init_resource::<crate::ship::CaptainTargets>()
         .add_systems(Update, mission_ai);
     app
 }
@@ -331,7 +382,7 @@ fn an_abandoned_hull_takes_no_orders_and_is_held_at_zero_speed_whatever_a_rule_s
     app.update();
     let (ship, ms) = (app.world().get::<Ship>(hull).unwrap(), app.world().get::<MissionShip>(hull).unwrap());
     assert_eq!((ship.cap, ship.order, ship.waypoints.len()), (0.0, EngineOrder::Stop, 0));
-    assert!(ms.hold_fire && ms.target.is_none());
+    assert!(ms.hold_fire && ms.ordered.is_none());
     app.world_mut().get_mut::<Ship>(hull).unwrap().cap = 1.0; // a later `Set Group Throttle Percent`
     app.update();
     assert_eq!(app.world().get::<Ship>(hull).unwrap().cap, 0.0, "held again");
@@ -669,13 +720,7 @@ fn say(app: &mut App, lines: &[&str]) -> String {
     app.world().resource::<Console>().log.join("\n")
 }
 fn skirmish_script(data: serde_json::Value) -> SkirmishScript {
-    SkirmishScript {
-        script: Script::new(&data, serde_json::json!({})),
-        sides: [("Player0".to_string(), Side::Player)].into(),
-        paths: data["paths"].clone(),
-        environment: serde_json::Value::Null,
-        map_text: serde_json::Value::Null,
-    }
+    SkirmishScript { script: Script::new(&data, serde_json::json!({})), paths: data["paths"].clone(), environment: serde_json::Value::Null, map_text: serde_json::Value::Null }
 }
 
 #[test]
@@ -753,22 +798,7 @@ fn win_and_lose_end_a_battle_with_no_script_through_the_outcome_path() {
     use crate::scenario::{EndLine, EndMessage, Outcome};
     for (word, outcome, end) in [("win", Outcome::Victory, "IDGS_TPINGAMEMESSAGE_GAME_WON"), ("lose", Outcome::Defeat, "IDGS_TPINGAMEMESSAGE_GAME_LOST")] {
         let mut app = console_battle();
-        app.insert_resource(Outcome::Playing).init_resource::<EndMessage>().init_resource::<EndLine>().insert_resource(Config {
-            groups: vec![],
-            player: String::new(),
-            allies: vec![],
-            enemies: vec![],
-            map: None,
-            shot: None,
-            frame: 7,
-            speed: 1.0,
-            ended: None,
-            script: None,
-            autolaunch: false,
-            shot_frame: 0,
-            shot_frames: vec![],
-            late_frame: 0,
-        });
+        app.insert_resource(Outcome::Playing).init_resource::<EndMessage>().init_resource::<EndLine>().insert_resource(Config { frame: 7, speed: 1.0, ..default() });
         lobby_ship(&mut app, "player0", Vec3::ZERO, true);
         let log = say(&mut app, &[word]);
         assert!(!log.contains("needs"), "{log}");
@@ -841,4 +871,35 @@ fn a_script_nis_that_never_aims_the_camera_leaves_the_chase_camera_running() {
     assert!(crate::rules::nis_camera_idle(Some(&mission)));
     mission.script.cam.focus_unit = Some("Player0 Group".into());
     assert!(!crate::rules::nis_camera_idle(Some(&mission)), "a focus makes the NIS camera the script's");
+}
+
+/// 'Set Group/Unit Owner' on a base in a named group changes its owner at once, in a skirmish as in a mission: its side follows the
+/// owner (its guns take the new owner's foes from the next update), and its flag still shows the old owner. Asset-free.
+#[test]
+fn set_owner_moves_a_bases_side_but_not_its_flag_in_skirmish_and_mission() {
+    let data = serde_json::json!({
+        "players": ["Reds", "Blues"], "groups": {"Camp": [2]},
+        "rules": [{"name": "hand over", "conditions": [], "actions": [{"Type": "Set Group/Unit Owner", "Group/Unit Name": "Camp", "New Owner": "Reds"}]}],
+    });
+    let check = |mut app: App, base: Entity| {
+        let mut table = crate::alliance::Alliances::default();
+        table.add_player("Reds", Side(1));
+        table.add_player("Blues", Side(2));
+        app.insert_resource(table);
+        app.world_mut().entity_mut(base).insert(crate::combat::BaseFlag::new("Blues"));
+        app.update();
+        let (owner, flag) = (app.world().get::<MissionBase>(base).unwrap().owner.clone(), app.world().get::<crate::combat::BaseFlag>(base).unwrap().shows.clone());
+        let table = app.world().resource::<crate::alliance::Alliances>();
+        let side = table.base_side(app.world().get::<MissionBase>(base), app.world().get::<crate::combat::BaseSide>(base));
+        assert_eq!((owner.as_str(), side), ("Reds", Some(Side(1))), "the new owner, and its side");
+        assert!(table.hostile(side.unwrap(), Side(2)) && !table.hostile(side.unwrap(), Side(1)), "it now fights the new owner's foes");
+        assert_eq!(flag, "Blues", "a rule does not repaint the flag");
+    };
+    let (app, _, base) = skirmish_rules_app(data.clone());
+    check(app, base);
+    let mission = Mission { id: "synthetic".into(), script: Script::new(&data, serde_json::json!({})), data, opening: None };
+    let mut app = rules_app(mission);
+    app.insert_resource(Library { classes: vec![crate::fixed_tests::synthetic_class()], guns: default(), bullets: default(), names: default(), clips: default() });
+    let base = app.world_mut().spawn((MissionBase { id: 2, owner: "Blues".into() }, Transform::default())).id();
+    check(app, base);
 }

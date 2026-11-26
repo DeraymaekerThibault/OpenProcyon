@@ -1,11 +1,10 @@
 //! Applying the effects a `Script::step` returned to the world: ship orders, flags, docking and tow messages, effects. One
 //! implementation for both callers: the campaign (`systems::update`) and a skirmish map's script (`skirmish::run`), so a rule
-//! action does the same thing wherever the rule runs. What differs is in `FxEnv`: a skirmish passes its map player -> side table
-//! (an owner change then moves the ship to the new owner's side) and has no orbit camera.
+//! action does the same thing wherever the rule runs. What differs is in `FxEnv`: whether a mission is loaded and the orbit camera
+//! (a skirmish has none). An owner change moves a ship to its new owner's side in the alliance table the script holds while it runs.
 
 use super::*;
 use crate::EngineOrder;
-use std::collections::HashMap;
 
 /// Base queries as the rule dispatcher reads them (bases carry no `Ship`).
 pub(in crate::rules) type Bases<'w, 's> = Query<
@@ -43,8 +42,8 @@ pub(in crate::rules) struct FxEnv<'a, 'w, 's> {
     pub difficulty: u8,
     /// The orbit camera (the campaign's; a skirmish has none).
     pub orbit: Option<&'a mut Orbit>,
-    /// A skirmish's map players and the side each fights for; none in the campaign.
-    pub sides: Option<&'a HashMap<String, Side>>,
+    /// A mission is loaded (the campaign, a tutorial or a mod's mission); false in a skirmish.
+    pub campaign: bool,
     /// The map's placed mines (skirmish).
     pub mines: Option<&'a mut Mines<'w, 's>>,
 }
@@ -70,16 +69,8 @@ pub(in crate::rules) struct FxParam<'w, 's> {
 }
 
 impl<'w, 's> FxParam<'w, 's> {
-    /// The effect environment for `script`'s effects. The campaign passes its orbit camera and no side table; a skirmish map's script
-    /// passes its map players' sides and no camera (`apply` reads `sides.is_some()` as "this is a skirmish").
-    pub fn env<'a>(
-        &'a mut self,
-        script: &'a mut Script,
-        paths: &'a Value,
-        lib: &'a Library,
-        orbit: Option<&'a mut Orbit>,
-        sides: Option<&'a HashMap<String, Side>>,
-    ) -> FxEnv<'a, 'w, 's> {
+    /// The effect environment for `script`'s effects. The campaign passes its orbit camera; a skirmish map's script none.
+    pub fn env<'a>(&'a mut self, script: &'a mut Script, paths: &'a Value, lib: &'a Library, orbit: Option<&'a mut Orbit>, campaign: bool) -> FxEnv<'a, 'w, 's> {
         FxEnv {
             script,
             paths,
@@ -97,7 +88,7 @@ impl<'w, 's> FxParam<'w, 's> {
             toggles: self.toggles.as_deref_mut(),
             difficulty: self.difficulty.as_deref().copied().unwrap_or_default().0,
             orbit,
-            sides,
+            campaign,
             mines: Some(&mut self.mines),
         }
     }
@@ -121,7 +112,7 @@ pub(in crate::rules) fn apply(
     ships: &mut Query<RuleShip>,
     animals: &mut Query<(Entity, &mut crate::environment::SpaceAnimal, &mut Transform, &mut Visibility), Without<Ship>>,
 ) {
-    let skirmish = env.sides.is_some();
+    let skirmish = !env.campaign;
     for fx in fxs {
         match fx {
             Fx::Formation(owner, kind, hold) => {
@@ -272,7 +263,7 @@ pub(in crate::rules) fn apply(
                 s.ship.cap = 0.0;
                 s.mission.hold_fire = true;
                 s.mission.attack.clear();
-                s.mission.target = None;
+                s.mission.ordered = None;
                 commands.entity(s.entity).insert(crate::lifeboats::Abandoned);
             }),
             // Not retail: `OP Place Mines`. The mines are the map's own kind (combat/minefield.rs arms them); one of an unknown bullet is skipped.
@@ -281,7 +272,7 @@ pub(in crate::rules) fn apply(
                     warn!("OP Place Mines: no bullet '{bullet}'");
                     continue;
                 }
-                let side = (!owner.is_empty()).then(|| env.sides.and_then(|s| s.get(&owner)).copied().unwrap_or_else(|| mission_side(env.script, &owner)));
+                let side = Some(env.script.alliances.side_or_neutral(&owner));
                 for p in env.script.point_sets[&set].as_array().into_iter().flatten() {
                     let mine = crate::combat::MapMine { id: -1, bullet: bullet.clone(), owner: owner.clone(), side };
                     commands.spawn((Scenario, mine, Transform::from_translation(game_to_bevy(&p["pos"]))));
@@ -317,9 +308,9 @@ pub(in crate::rules) fn apply(
                 if skirmish {
                     info!("map script: {} ship(s) now belong to '{o}'", u.len());
                 }
-                let side = env.sides.and_then(|s| s.get(&o)).copied();
-                // Not retail: a custom mission's placed mine fights for the side its new owner has in the mission's alliance table.
-                let mine_side = side.or_else(|| env.sides.is_none().then(|| mission_side(env.script, &o)));
+                // Not retail: a placed mine fights for the side its new owner has in the alliance table.
+                let side = env.script.alliances.side_or_neutral(&o);
+                let mine_side = Some(side);
                 for e in u {
                     if let Ok((_, mut base, ..)) = env.bases.get_mut(e) {
                         base.owner = o.clone();
@@ -336,9 +327,7 @@ pub(in crate::rules) fn apply(
                         }
                     }
                     if let Ok(RuleShipItem { ship: mut sh, mission: mut ms, .. }) = ships.get_mut(e) {
-                        if let Some(side) = side {
-                            sh.side = side;
-                        }
+                        sh.side = side;
                         ms.owner = o.as_str().into();
                     }
                 }
@@ -454,11 +443,12 @@ pub(in crate::rules) fn apply(
                         // starts in the ordered state. PROVISIONAL: that last case is the remake's.
                         commands.queue(move |w: &mut World| {
                             let side = w.get::<Ship>(e).map(|s| s.side);
+                            let table = w.get_resource::<crate::alliance::Alliances>().cloned().unwrap_or_default();
                             match (w.get_mut::<crate::cloak::Cloak>(e), side) {
                                 (Some(mut c), Some(side)) => {
                                     c.ai_modify = ai_override;
                                     if on {
-                                        c.start(side);
+                                        c.start(side, &table);
                                     } else {
                                         c.stop();
                                     }
@@ -527,11 +517,6 @@ pub(in crate::rules) fn apply(
             }
         }
     }
-}
-
-/// The side a mission player's thing fights for: the enemy side when the owner is hostile to the human player, else the player's.
-fn mission_side(script: &Script, owner: &str) -> Side {
-    if script.hostile(owner, script.player()) { Side::Enemy } else { Side::Player }
 }
 
 /// Moves one unit to `p` (the retail `Teleport Group/Unit`, with `heading` and `clear_speed` off): a ship loses its waypoints, an animal its

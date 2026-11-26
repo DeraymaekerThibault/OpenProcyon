@@ -5,8 +5,8 @@
 use bevy::prelude::*;
 use std::collections::{BTreeMap, HashMap};
 
+use crate::Ship;
 use crate::combat::{Health, Hit};
-use crate::{Ship, Side};
 
 #[derive(Default, Clone, Debug, PartialEq)]
 pub struct Line {
@@ -59,8 +59,8 @@ fn reset(mut commands: Commands) {
     commands.insert_resource(GameStats::default());
 }
 
-fn owner(ship: &Ship, m: Option<&crate::campaign::MissionShip>) -> String {
-    m.map_or_else(|| if ship.side == Side::Player { "Your fleet".into() } else { "Enemy fleet".into() }, |m| m.owner.to_string())
+fn owner(ours: bool, m: Option<&crate::campaign::MissionShip>) -> String {
+    m.map_or_else(|| if ours { "Your fleet".into() } else { "Enemy fleet".into() }, |m| m.owner.to_string())
 }
 
 pub(crate) fn collect(
@@ -68,8 +68,9 @@ pub(crate) fn collect(
     lib: Res<crate::combat::Library>,
     mut hits: MessageReader<Hit>,
     ships: Query<(Entity, &Ship, &Health, Option<&crate::campaign::MissionShip>, Has<crate::blackhole::Swallowed>), Without<crate::lifeboats::Lifeboat>>,
+    table: crate::alliance::Hostility,
 ) {
-    let owners: HashMap<Entity, String> = ships.iter().map(|(e, s, _, m, _)| (e, owner(s, m))).collect();
+    let owners: HashMap<Entity, String> = ships.iter().map(|(e, s, _, m, _)| (e, owner(table.with_human(s.side), m))).collect();
     for h in hits.read() {
         if let (Some(by), Some(entry)) = (owners.get(&h.shooter).cloned(), stats.hulls.get_mut(&h.victim)) {
             entry.3 = Some(by);

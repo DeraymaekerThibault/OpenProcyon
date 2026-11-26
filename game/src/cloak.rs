@@ -9,6 +9,7 @@ use std::collections::HashMap;
 
 use bevy::prelude::*;
 
+use crate::alliance::Alliances;
 use crate::audio::Sfx;
 use crate::combat::{Health, Hit, Library, Splashed};
 use crate::environment::ScanFactor;
@@ -84,14 +85,18 @@ impl Cloak {
     pub fn stop_shown(&self) -> bool {
         matches!(self.state, State::Cloaking | State::Full)
     }
-    /// The order to cloak; false when it is not allowed now.
-    pub fn start(&mut self, side: Side) -> bool {
+    /// The order to cloak; false when it is not allowed now. The list keeps the sides still allied with the ship's `side`.
+    pub fn start(&mut self, side: Side, table: &Alliances) -> bool {
         if !self.can_start() {
             return false;
         }
         (self.state, self.elapsed) = (State::Cloaking, 0.0);
-        self.knows.retain(|t| *t == side); // pruned to mutual allies (they share a side)
+        self.knows.retain(|t| table.allied(*t, side));
         true
+    }
+    /// `team` knows the ship is there: it, or a side mutually allied with it now (allies share cloak knowledge), is in the list.
+    pub fn known_to(&self, team: Side, table: &Alliances) -> bool {
+        self.knows.iter().any(|k| table.allied(*k, team))
     }
     /// The order to decloak: accepted while cloaking or fully cloaked.
     pub fn stop(&mut self) -> bool {
@@ -104,13 +109,13 @@ impl Cloak {
         true
     }
     /// How opaque the hull is to a viewer of `team`.
-    pub fn alpha_for(&self, team: Side) -> f32 {
+    pub fn alpha_for(&self, team: Side, table: &Alliances) -> f32 {
         let open = 1.0 - self.level();
-        if self.knows.contains(&team) { KNOWN_FLOOR + (1.0 - KNOWN_FLOOR) * open } else { open }
+        if self.known_to(team, table) { KNOWN_FLOOR + (1.0 - KNOWN_FLOOR) * open } else { open }
     }
     /// Fully gone to a viewer of `team` (cursor picking, labels, contacts and every AI target filter skip it).
-    pub fn hidden_from(&self, team: Side) -> bool {
-        self.state == State::Full && !self.knows.contains(&team)
+    pub fn hidden_from(&self, team: Side, table: &Alliances) -> bool {
+        self.state == State::Full && !self.known_to(team, table)
     }
     /// Guns that cannot fire while cloaked hold from the first moment of cloaking until the decloak is over.
     pub fn holds_fire(&self) -> bool {
@@ -180,7 +185,7 @@ fn spotted(
     lib: Res<Library>,
     mut ships: Query<(&mut Cloak, &Transform)>,
     watchers: Query<(Entity, &Ship, &Transform, &Health, Option<&ScanFactor>)>,
-    spawn_order: Query<&crate::scenario::SpawnIndex>,
+    (spawn_order, table): (Query<&crate::scenario::SpawnIndex>, crate::alliance::Hostility),
 ) {
     let rng = &mut rng.cloak;
     let watchers = crate::scenario::in_spawn_order(&spawn_order, watchers.iter(), |w| w.0);
@@ -192,7 +197,7 @@ fn spotted(
         for &(_, w, wtf, wh, scan) in &watchers {
             let factor = scan.map_or(0.0, |s| s.0);
             let reach = lib.classes[w.class].sight * factor * DETECT_REACH;
-            if wh.destroyed || c.knows.contains(&w.side) || wtf.translation.distance(tf.translation) >= reach || rng.f() >= factor - 1.0 {
+            if wh.destroyed || c.known_to(w.side, &table) || wtf.translation.distance(tf.translation) >= reach || rng.f() >= factor - 1.0 {
                 continue;
             }
             c.knows.push(w.side);
@@ -217,6 +222,7 @@ fn ai(
     targets: Option<Res<crate::ship::CaptainTargets>>,
     mut ships: Query<(Entity, &mut Cloak, &Ship, &Transform, &Health, Has<crate::commands::Commander>, Option<&ScanFactor>)>,
     others: Query<(Entity, &Ship, &Transform, &Health)>,
+    table: crate::alliance::Hostility,
 ) {
     for (e, mut c, ship, tf, health, primary, scan) in &mut ships {
         c.ai_in -= time.delta_secs();
@@ -228,14 +234,16 @@ fn ai(
         let scan_range = class.sight * scan.map_or(1.0, |s| s.0);
         let hostile: Vec<Entity> = others
             .iter()
-            .filter(|(o, s, otf, oh)| *o != e && s.side != ship.side && !oh.destroyed && !lib.classes[s.class].is_lifeboat && otf.translation.distance(tf.translation) < scan_range)
+            .filter(|(o, s, otf, oh)| {
+                *o != e && table.hostile(s.side, ship.side) && !oh.destroyed && !lib.classes[s.class].is_lifeboat && otf.translation.distance(tf.translation) < scan_range
+            })
             .map(|(o, ..)| o)
             .collect();
         let targeted = targets.as_deref().is_some_and(|t| hostile.iter().any(|h| t.of(*h) == Some(e)));
         if hostile.is_empty() || (c.state == State::Full && targeted) {
             c.stop();
         } else if wants_cloak(c.state, class.mounts.iter().map(|m| lib.guns[&m.gun].cloak_fire)) {
-            c.start(ship.side);
+            c.start(ship.side, &table);
         } else {
             c.stop();
         }
@@ -263,7 +271,7 @@ fn cloak_smoke(world: &mut World) {
     let mut keeper = world.entity_mut(me).take::<Cloak>().unwrap_or_default();
     keeper.idle = IDLE_GATE;
     if frame == 10 {
-        assert!(keeper.start(side), "cloak smoke: the start was refused");
+        assert!(keeper.start(side, crate::alliance::empty()), "cloak smoke: the start was refused");
     } else {
         assert!(keeper.stop(), "cloak smoke: the stop was refused");
     }
@@ -345,12 +353,12 @@ fn fade(
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut ships: Query<(Entity, &Cloak, &mut Visibility, Option<&mut Faded>, Option<&crate::campaign::MissionShip>)>,
     children: Query<&Children>,
-    mut meshes: Query<&mut MeshMaterial3d<StandardMaterial>>,
+    (mut meshes, table): (Query<&mut MeshMaterial3d<StandardMaterial>>, crate::alliance::Hostility),
 ) {
     for (e, c, mut vis, faded, ms) in &mut ships {
-        let alpha = c.alpha_for(Side::Player);
+        let alpha = c.alpha_for(Side::Player, &table);
         let script_visible = ms.is_none_or(|m| m.visible);
-        vis.set_if_neq(if !script_visible || c.hidden_from(Side::Player) { Visibility::Hidden } else { Visibility::Inherited });
+        vis.set_if_neq(if !script_visible || c.hidden_from(Side::Player, &table) { Visibility::Hidden } else { Visibility::Inherited });
         if alpha >= 1.0 {
             if let Some(f) = faded {
                 for (m, original) in &f.originals {
@@ -390,13 +398,14 @@ fn fade(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::alliance::empty as e;
 
     #[test]
     fn a_cloak_takes_five_seconds_each_way_and_waits_out_the_idle_gate() {
         let mut c = Cloak::default();
-        assert!(!c.start(Side::Enemy), "not before the ship is five seconds old");
+        assert!(!c.start(Side::Enemy, e()), "not before the ship is five seconds old");
         c.idle = IDLE_GATE;
-        assert!(c.start(Side::Enemy) && c.state == State::Cloaking);
+        assert!(c.start(Side::Enemy, e()) && c.state == State::Cloaking);
         c.elapsed = 2.5;
         assert_eq!(c.level(), 0.5);
         // A stop halfway decloaks over the time already spent, without a jump.
@@ -411,13 +420,13 @@ mod tests {
     fn viewers_see_the_hull_at_the_inverse_level_or_a_third_when_their_team_knows_it() {
         let mut c = Cloak::new(true);
         c.knows = vec![Side::Player];
-        assert_eq!(c.alpha_for(Side::Player), KNOWN_FLOOR);
-        assert_eq!(c.alpha_for(Side::Enemy), 0.0);
-        assert!(c.hidden_from(Side::Enemy) && !c.hidden_from(Side::Player));
+        assert_eq!(c.alpha_for(Side::Player, e()), KNOWN_FLOOR);
+        assert_eq!(c.alpha_for(Side::Enemy, e()), 0.0);
+        assert!(c.hidden_from(Side::Enemy, e()) && !c.hidden_from(Side::Player, e()));
         c.state = State::Cloaking;
         c.elapsed = 2.5;
-        assert_eq!(c.alpha_for(Side::Enemy), 0.5);
-        assert!(!c.hidden_from(Side::Enemy), "only a fully cloaked ship drops out of every list");
+        assert_eq!(c.alpha_for(Side::Enemy, e()), 0.5);
+        assert!(!c.hidden_from(Side::Enemy, e()), "only a fully cloaked ship drops out of every list");
         assert!(c.holds_fire() && (c.speed_factor() - 0.7).abs() < 1e-6);
     }
 
@@ -434,7 +443,7 @@ mod tests {
     fn the_hull_sinks_with_the_level_and_a_stopped_decloak_ramps_over_the_full_five_seconds() {
         let mut c = Cloak { idle: IDLE_GATE, ..default() };
         assert_eq!(c.dive(), None);
-        c.start(Side::Enemy);
+        c.start(Side::Enemy, e());
         c.elapsed = 2.0;
         assert!((c.dive().unwrap() + DIVE * 0.4).abs() < 1e-5);
         // Retail quirk: stopping at 2 s jumps to the full dive, then climbs back at 1/5 per second.
@@ -458,10 +467,22 @@ mod tests {
             assert!(wants_cloak(s, some(&[false, true])), "a torpedo launcher is never held");
         }
     }
+
+    /// Allies share cloak knowledge through the alliance table: an allied computer's fully cloaked ship stays at the known floor for
+    /// the human (its own side knows it), an enemy's is gone; a break of the alliance ends it.
     #[test]
-    fn a_new_cloak_keeps_only_the_own_team_in_the_list() {
-        let mut c = Cloak { idle: IDLE_GATE, knows: vec![Side::Player, Side::Enemy], ..default() };
-        c.start(Side::Player);
-        assert_eq!(c.knows, vec![Side::Player]);
+    fn an_allys_cloaked_ship_stays_visible_to_the_human_an_enemys_does_not() {
+        let (ally, enemy) = (Side(1), Side(2));
+        let mut table = Alliances::default();
+        table.set(Side::Player, ally, true);
+        let cloaked = |owner| Cloak { knows: vec![owner], ..Cloak::new(true) };
+        assert_eq!(cloaked(ally).alpha_for(Side::Player, &table), KNOWN_FLOOR);
+        assert!(!cloaked(ally).hidden_from(Side::Player, &table));
+        assert!(cloaked(enemy).hidden_from(Side::Player, &table) && cloaked(enemy).alpha_for(Side::Player, &table) == 0.0);
+        let mut c = Cloak { idle: IDLE_GATE, knows: vec![Side::Player, ally, enemy], ..default() };
+        c.start(ally, &table);
+        assert_eq!(c.knows, vec![Side::Player, ally], "a new cloak keeps only the sides still allied with the owner");
+        table.set(Side::Player, ally, false);
+        assert!(cloaked(ally).hidden_from(Side::Player, &table), "a broken alliance shares nothing");
     }
 }

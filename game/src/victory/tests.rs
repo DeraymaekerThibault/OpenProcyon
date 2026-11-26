@@ -14,7 +14,13 @@ fn teams() -> Vec<(String, Vec<Side>)> {
     vec![(NAVY.into(), vec![Side::Player]), (PROC.into(), vec![Side(1)])]
 }
 fn state(ships: &[ShipState], bases: &[(i64, f32)]) -> Snapshot<'static> {
-    Snapshot { ships: Box::leak(ships.to_vec().into_boxed_slice()), bases: Box::leak(bases.to_vec().into_boxed_slice()), captured: &[], points: &[] }
+    Snapshot {
+        ships: Box::leak(ships.to_vec().into_boxed_slice()),
+        bases: Box::leak(bases.to_vec().into_boxed_slice()),
+        captured: &[],
+        points: &[],
+        table: crate::alliance::empty(),
+    }
 }
 
 fn border_dispute() -> Victory {
@@ -194,7 +200,9 @@ fn the_retail_maps_load() {
     let (navy, pirates) = ("IDGS_TPTEAMNAMES_NAVY", "IDGS_TPTEAMNAMES_PIRATES");
     let real = vec![(navy.to_string(), vec![Side::Player]), (pirates.to_string(), vec![Side(1)])];
     let convoy = Victory::from_map(&crate::data::map_json("convoy_raid").unwrap(), real).unwrap();
-    let at = |points: &[(String, i32)]| convoy.decide(&Snapshot { ships: &fleets, bases: &[], captured: &[], points: Box::leak(points.to_vec().into_boxed_slice()) });
+    let at = |points: &[(String, i32)]| {
+        convoy.decide(&Snapshot { ships: &fleets, bases: &[], captured: &[], points: Box::leak(points.to_vec().into_boxed_slice()), table: crate::alliance::empty() })
+    };
     assert_eq!(at(&[(navy.into(), 340), (pirates.into(), 390)]), None);
     assert_eq!(at(&[(navy.into(), 350)]), Some(Outcome::Victory));
     assert_eq!(at(&[(pirates.into(), 400)]), Some(Outcome::Defeat));

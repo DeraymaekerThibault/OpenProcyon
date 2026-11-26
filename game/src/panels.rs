@@ -148,7 +148,7 @@ fn decide_world_marks(
         }
     }
     if !hud_off {
-        let ordered = fleets.selected.map(|e| (pilots.get(e).ok().and_then(|p| p.target), ships.get(e).ok().and_then(|s| s.2.and_then(|m| m.target))));
+        let ordered = fleets.selected.map(|e| (pilots.get(e).ok().and_then(|p| p.target), ships.get(e).ok().and_then(|s| s.2.and_then(|m| m.ordered))));
         let (pilot, mission_target) = ordered.unwrap_or((None, None));
         next.reticle = reticle_target(fleets.direct(), target.0, pilot, mission_target).filter(|&e| {
             let shown = match ships.get(e) {
@@ -598,7 +598,7 @@ fn update_contacts(
     mission: Option<Res<crate::campaign::Mission>>,
     player: Single<&Transform, With<PlayerShip>>,
     others: Query<(Entity, &Ship, &Health, &Transform, Option<&crate::campaign::MissionShip>), Without<PlayerShip>>,
-    sensors: Res<crate::environment::Sensors>,
+    (sensors, table): (Res<crate::environment::Sensors>, crate::alliance::Hostility),
     mut q: Query<(&Contact, &mut Node, &mut Visibility)>,
 ) {
     let Some(radar) = radar else { return };
@@ -611,7 +611,7 @@ fn update_contacts(
         others
             .iter()
             .filter(|_| on)
-            .filter(|(e, sh, h, _, ms)| (sh.side == crate::Side::Player) == friendly && !h.destroyed && ms.is_none_or(|m| m.visible) && sensors.player_sees(*e, mission.as_deref()))
+            .filter(|(e, sh, h, _, ms)| table.with_human(sh.side) == friendly && !h.destroyed && ms.is_none_or(|m| m.visible) && sensors.player_sees(*e, mission.as_deref()))
             .map(|(_, _, _, tf, _)| {
                 let l = inv * (tf.translation - player.translation);
                 Vec2::new(l.x, -l.z) / RADAR_RANGE
@@ -945,22 +945,7 @@ pub mod tests {
     fn a_crew_line_opens_the_talking_head_on_its_speaker() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins).init_resource::<Talk>().init_resource::<HeadState>().add_message::<crate::audio::Sfx>().add_systems(Update, talking_head);
-        app.insert_resource(crate::Config {
-            groups: vec![],
-            player: String::new(),
-            allies: vec![],
-            enemies: vec![],
-            map: None,
-            shot: None,
-            frame: 0,
-            speed: 1.0,
-            ended: None,
-            script: None,
-            autolaunch: false,
-            shot_frame: 0,
-            shot_frames: vec![],
-            late_frame: 0,
-        });
+        app.insert_resource(crate::Config { speed: 1.0, ..default() });
         let line = app.world_mut().spawn(CrewSpeech("TalkingHead_Character_Aquanogs_0".into())).id();
         app.update();
         let head = app.world().resource::<HeadState>();

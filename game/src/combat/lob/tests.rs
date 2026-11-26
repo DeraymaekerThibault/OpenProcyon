@@ -116,7 +116,7 @@ fn storm_wind_uses_weather_damage_and_respects_mission_protection() {
         app.world_mut().write_message(Strike { victim: p, damage: tables["wind"].clone(), section: k });
     }
     app.update();
-    let f = super::super::shells::side_damage_scale(crate::Side::Enemy, crate::Side::Player, crate::menu::difficulty(), false);
+    let f = super::super::shells::side_damage_scale(false, true, crate::menu::difficulty(), false);
     let lost = before2 - app.world().get::<Health>(p).unwrap().sections[k];
     assert!(f < 1.0 && lost <= 21.0 * f + 3.0, "the human's ship takes the difficulty factor ({lost} lost, factor {f})");
 }

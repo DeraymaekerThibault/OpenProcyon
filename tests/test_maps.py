@@ -108,6 +108,26 @@ class MapTests(unittest.TestCase):
         self.assertFalse(m["islands_make_sounds"])
         self.assertEqual(m["players"][0]["color"], [0.0, 0.0, 1.0, 1.0])
 
+    def test_twt_alliance_pairs_by_player_name(self):
+        # Two invented players and pairs: one valid, one naming a player the map does not have (a mod's dangling index).
+        second = TWT.split("\t00000032 Player")[1].replace("'navy'", "'pirates'")
+        pairs = """\t00000002 PlayerAllianceInfoVector - Element
+\t{
+\t\tPlayer0 Int 0
+\t\tPlayer1 Int 1
+\t}
+\t00000002 PlayerAllianceInfoVector - Element
+\t{
+\t\tPlayer0 Int 0
+\t\tPlayer1 Int 7
+\t}
+"""
+        m = parse_twt(TWT + "\t00000032 Player" + second + pairs)
+        self.assertEqual(m["alliances"], [["navy", "pirates"]])
+        self.assertEqual(
+            parse_twt(TWT)["alliances"], [], "a map without pairs: everyone hostile"
+        )
+
     def test_twt(self):
         m = parse_twt(TWT)
         self.assertTrue(m["assemble"])

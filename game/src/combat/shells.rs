@@ -146,19 +146,14 @@ pub(super) fn damage_sfx(pool: &str, at: Vec3, rng: &mut Rng) -> Sfx {
 /// Measured on retail (headless 1-vs-1 skirmishes per difficulty): the bullet table's damage is scaled by side and difficulty.
 /// Player shells on computer ships: Easy x3, Normal x2, Hard x1; computer shells on the player's: x0.25, x0.5, x1.
 /// Our base's guns on a computer ship hit at x1 on Normal (retail HP log of a Minelayer sunk by the base alone), so the outgoing
-/// factor is the player's ships' only. PROVISIONAL: computer-vs-computer, allied and hostile-base-on-player hits are not measured.
-pub(super) fn side_damage_scale(shooter: Side, victim: Side, difficulty: u8, base: bool) -> f32 {
+/// factor is the player's ships' only. `ours`: on the human's side of the alliance table (`Alliances::with_human`).
+/// PROVISIONAL: computer-vs-computer, allied and hostile-base-on-player hits are not measured.
+pub(super) fn side_damage_scale(shooter_ours: bool, victim_ours: bool, difficulty: u8, base: bool) -> f32 {
     let d = difficulty.min(2) as usize;
     let (out, inc) = (super::damage::OUTGOING_BY_DIFFICULTY[d], super::damage::INCOMING_BY_DIFFICULTY[d]);
-    match (shooter, victim) {
-        (Side::Player, v) if v != Side::Player => {
-            if base {
-                1.0
-            } else {
-                out
-            }
-        }
-        (s, Side::Player) if s != Side::Player => inc,
+    match (shooter_ours, victim_ours) {
+        (true, false) if !base => out,
+        (false, true) => inc,
         _ => 1.0,
     }
 }
@@ -379,7 +374,7 @@ pub(super) fn shells(
     mut rocks: Query<(Entity, &Transform, &mut Asteroid, &crate::collision::Drift), Without<Shell>>,
     animals: Query<(Entity, &Transform, &crate::environment::SpaceAnimal), Without<Shell>>,
     mut bases: Query<(Entity, &Transform, &ArmedBase, &mut Health, &crate::campaign::MissionBase, Option<&BaseSide>), (Without<Shell>, Without<Ship>)>,
-    campaign: Option<Res<crate::campaign::Mission>>,
+    table: crate::alliance::Hostility,
     mut q: Query<(Entity, &mut Shell, &mut Transform), (Without<Ship>, Without<crate::Joining>)>,
     // Shells pass through lifeboats (no weapon-vs-lifeboat response is registered in the original; PROVISIONAL, docs/re/lifeboats.md §2.4).
     mut ships: ShipTargets,
@@ -427,7 +422,7 @@ pub(super) fn shells(
                 s.mine_scan.prey = ships
                     .iter()
                     .filter(|(_, t, sh, h, _, m, _)| {
-                        !h.destroyed && sh.side != s.side && m.is_none_or(|m| m.visible) && t.translation.distance(p0) < sight + lib.classes[sh.class].radius
+                        !h.destroyed && table.hostile(sh.side, s.side) && m.is_none_or(|m| m.visible) && t.translation.distance(p0) < sight + lib.classes[sh.class].radius
                     })
                     .map(|(se, t, ..)| (se, t.translation))
                     .nearest_to(p0, |a| a.1)
@@ -444,7 +439,7 @@ pub(super) fn shells(
             let target = s
                 .target
                 .and_then(|target| ships.get(target).ok())
-                .filter(|(_, _, ship, health, _, mission, _)| !health.destroyed && ship.side != s.side && mission.is_none_or(|m| m.visible))
+                .filter(|(_, _, ship, health, _, mission, _)| !health.destroyed && table.hostile(ship.side, s.side) && mission.is_none_or(|m| m.visible))
                 .map(|(_, tf, ship, _, _, _, drift)| {
                     let point = tf.transform_point(lib.classes[ship.class].homing_point);
                     let velocity = Vec3::new(-ship.heading.sin(), 0.0, -ship.heading.cos()) * ship.speed + drift.map_or(Vec3::ZERO, |d| d.0);
@@ -523,7 +518,7 @@ pub(super) fn shells(
             {
                 let [lo, hi, ..] = bd.damage["Dragon"];
                 // Retail rolls the same difficulty factor against a dragon as against a computer ship (decoded; not measured on a dragon).
-                d.hurt(rng.range(lo, hi).round() * side_damage_scale(s.side, Side::Enemy, difficulty.0, s.base));
+                d.hurt(rng.range(lo, hi).round() * side_damage_scale(table.with_human(s.side), false, difficulty.0, s.base));
             }
             hit_fx(&mut commands, &fxl, bd, p0 + (p1 - p0) * t, s.vel, None, Surface::default());
             crate::queue_removal(&mut commands, e);
@@ -547,16 +542,7 @@ pub(super) fn shells(
         // Island gun towers: hit only by the side the base's owner is hostile to (neutral islands let shells pass).
         let base_hit = bases
             .iter()
-            .filter(|(.., hp, mb, side)| {
-                !hp.destroyed
-                    && match side {
-                        Some(side) => side.0 != s.side,
-                        None => campaign.as_deref().is_some_and(|c| {
-                            let enemy = c.script.hostile(c.script.player(), &mb.owner);
-                            (if enemy { Side::Enemy } else { Side::Player }) != s.side
-                        }),
-                    }
-            })
+            .filter(|(.., hp, mb, side)| !hp.destroyed && table.base_side(Some(mb), *side).is_some_and(|b| table.hostile(b, s.side)))
             .filter_map(|(be, btf, ab, bhp, ..)| {
                 let class = &lib.classes[ab.class];
                 let inv = btf.to_matrix().inverse();
@@ -614,10 +600,8 @@ pub(super) fn shells(
             let hull = Vec3::new(-ship.heading.sin(), 0.0, -ship.heading.cos()) * ship.speed + drift.map_or(Vec3::ZERO, |d| d.0);
             let key = material_key(&class.sections[k].material);
             hull_normal = seg_mesh_hit(inv.transform_point3(p0), inv.transform_point3(p1), &class.sections[k]).map(|(_, n)| (stf.rotation * n).normalize());
-            // A mine bounces off any ship whose owner is allied with the mine's owner (own side included).
-            let owner = |ship: Entity| ships.get(ship).ok().and_then(|x| x.5.map(|m| m.owner.as_str()));
-            let allied_hull =
-                matches!(s.payload, Payload::Mine { .. }) && crate::boarding::allied_pair(campaign.as_deref(), (owner(s.shooter), Some(s.side)), (owner(si), Some(ship.side)));
+            // A mine bounces off any ship allied with the mine's side (its own included).
+            let allied_hull = matches!(s.payload, Payload::Mine { .. }) && table.allied(s.side, ship.side);
             if let Some(n) = hull_normal
                 && ricochet(&mut s, &mut tf, bd, key, at, n, hull, allied_hull, &mut rng, &mut sfx)
             {
@@ -641,9 +625,10 @@ pub(super) fn shells(
         }
         if let (Some((_, k, at)), Some(si)) = (best, best_ship) {
             let (se, stf, ship, mut hp, mut fires, mission, _) = ships.get_mut(si).unwrap();
-            let target = ShipTarget { entity: se, transform: stf, side: ship.side, class: &lib.classes[ship.class], invuln: mission.map_or(0.0, |m| m.invuln) };
+            let scale = side_damage_scale(table.with_human(s.side), table.with_human(ship.side), difficulty.0, s.base);
+            let target = ShipTarget { entity: se, transform: stf, class: &lib.classes[ship.class], invuln: mission.map_or(0.0, |m| m.invuln) };
             let surface = Surface { body: Some(se), normal: hull_normal, material: Some(material_key(&target.class.sections[k].material)) };
-            hit_ship(&mut commands, &fxl, &mut rng, (&mut sfx, &mut hits, &mut scars), bd, &s, target, &mut hp, &mut fires, k, at, 1.0, difficulty.0);
+            hit_ship(&mut commands, &fxl, &mut rng, (&mut sfx, &mut hits, &mut scars), bd, &s, target, &mut hp, &mut fires, k, at, 1.0, scale);
             hit_fx(&mut commands, &fxl, bd, at, s.vel, Some((se, stf)), surface);
             if matches!(s.payload, Payload::Blast { .. }) {
                 detonate.write(Detonate { bullet: s.bullet.clone(), at, shooter: Some(s.shooter), owner: Some((s.side, s.base)) });
@@ -683,14 +668,13 @@ pub(super) fn shells(
 pub(super) struct ShipTarget<'a> {
     pub(super) entity: Entity,
     pub(super) transform: &'a Transform,
-    pub(super) side: Side,
     pub(super) class: &'a crate::data::Class,
     /// Script vulnerability: 'Invulnerable Percent' 1.0 takes no damage and no fire; partial values are a hull floor (`floor_hull`).
     pub(super) invuln: f32,
 }
 
 /// A shell striking section `k` of a ship at `at`: damage, fire, hull scar and sounds (the impact effect is the caller's). `power`
-/// multiplies the damage roll (1 for shells; a beam's ramp, `combat/beam.rs`).
+/// multiplies the damage roll (1 for shells; a beam's ramp, `combat/beam.rs`), `scale` is the difficulty factor (`side_damage_scale`).
 #[allow(clippy::too_many_arguments)]
 /// Damage rules of one shell hit on section `k` (`damage` = [lower, upper, crit, fire chance, fire strength]).
 /// Criticals are not modelled: in the original they only feed a tally and crew speech (docs/re/movement.md).
@@ -707,14 +691,13 @@ pub(super) fn hit_ship(
     k: usize,
     at: Vec3,
     power: f32,
-    difficulty: u8,
+    scale: f32,
 ) {
-    let ShipTarget { entity: se, transform: stf, side, class, invuln } = target;
+    let ShipTarget { entity: se, transform: stf, class, invuln } = target;
     let sec = &class.sections[k];
     let key = material_key(&sec.material);
     // Criticals are not modelled: in the original they only feed a tally and crew speech (docs/re/movement.md).
     let mut damage = bd.damage[key];
-    let scale = side_damage_scale(s.side, side, difficulty, s.base);
     damage[0] *= scale * power;
     damage[1] *= scale * power;
     hits.write(Hit { shooter: s.shooter, victim: se });

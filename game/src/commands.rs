@@ -195,12 +195,22 @@ pub fn apply(world: &mut World, player: PlayerId, kind: &Kind) {
                     t.2.panic = false;
                 }
             } else if let Some(target) = target
+                && attackable(world, ship, target)
                 && let Some(mut p) = world.get_mut::<crate::ship::FleetPilot>(ship)
             {
                 p.attack(target);
+                crate::ship::aggressive(world, ship);
             }
         }
     }
+}
+
+/// A captain's attack order stands only against a thing hostile to its ship (an order against an ally or a thing of no player is
+/// dropped); a target without a side (a rock, an animal) stands.
+fn attackable(world: &World, ship: Entity, target: Entity) -> bool {
+    let table = world.get_resource::<crate::alliance::Alliances>().unwrap_or(crate::alliance::empty());
+    let side = |e: Entity| world.get::<Ship>(e).map(|s| s.side).or_else(|| table.base_side(world.get(e), world.get(e)));
+    side(ship).zip(side(target)).is_none_or(|(a, b)| table.hostile(a, b))
 }
 
 /// The fleet a fleet order commands: the local player's (single-player; #369 phase 2 makes it the command's player's).
@@ -330,9 +340,10 @@ fn apply_menu(world: &mut World, kind: &Kind) {
         }
         Kind::Cloak { ship, on } => {
             let side = world.get::<Ship>(ship).map(|s| s.side);
+            let table = world.get_resource::<crate::alliance::Alliances>().cloned().unwrap_or_default();
             if let (Some(mut c), Some(side)) = (world.get_mut::<crate::cloak::Cloak>(ship), side) {
                 if on {
-                    c.start(side);
+                    c.start(side, &table);
                 } else {
                     c.stop();
                 }

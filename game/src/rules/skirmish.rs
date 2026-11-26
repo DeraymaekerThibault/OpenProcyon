@@ -1,20 +1,15 @@
 //! Not retail: a skirmish map's own script (`maps/<id>/script.json`), the same interpreter as the campaign, driving the map's convoys, timers and
-//! team points. Its effects are applied by the code the campaign uses (`systems::apply`). Retail maps keep their end rules with
+//! team points. It runs in the campaign's rule update (`systems::update`): the same units, events and effects. Retail maps keep their end rules with
 //! victory.rs (`without_end_rules`); a map that opts in with `"victory": "script"` lets its own rules end the game (`script_end`).
 use bevy::prelude::*;
 use serde_json::Value;
 use std::collections::HashMap;
 
 use super::eval::schema;
-use super::systems::{RuleShip, WorldKind, apply, build_world};
 use super::*;
-use crate::combat::Destroyed;
-use crate::{Ship, Side};
 #[derive(Resource)]
 pub struct SkirmishScript {
     pub script: Script,
-    /// The side each map player fights for (an owner change moves a ship to the new owner's side).
-    pub sides: HashMap<String, Side>,
     pub(in crate::rules) paths: Value,
     /// The script's environment block (space animal and dragon definitions).
     pub environment: Value,
@@ -23,9 +18,8 @@ pub struct SkirmishScript {
 }
 
 impl SkirmishScript {
-    /// The map's script (`script.json`, already read: `data`) as a running script. `teams`: (team name id, its players); `sides`: the side of
-    /// each map player.
-    pub fn load(map: &str, data: &Value, teams: Vec<(String, Vec<String>)>, sides: HashMap<String, Side>) -> Self {
+    /// The map's script (`script.json`, already read: `data`) as a running script. `teams`: (team name id, its players).
+    pub fn load(map: &str, data: &Value, teams: Vec<(String, Vec<String>)>) -> Self {
         let dir = crate::assets_dir().join(format!("maps/{map}"));
         // Optional speech lines, end messages and ship names, as a mission's `media.json`.
         let media = crate::data::try_json(&dir.join("media.json")).unwrap_or(Value::Null);
@@ -37,48 +31,12 @@ impl SkirmishScript {
         script.decide_game(decides);
         // `--fire-rule` / `--start-at` work in a skirmish as in a mission: the script's first step runs them.
         crate::campaign::apply_start(&mut script);
-        SkirmishScript { script, sides, paths: data["paths"].clone(), environment: data["environment"].clone(), map_text: data["map_text"].clone() }
+        SkirmishScript { script, paths: data["paths"].clone(), environment: data["environment"].clone(), map_text: data["map_text"].clone() }
     }
     /// Team points so far (victory.rs 'Team has X points').
     pub fn points(&self) -> Vec<(String, i32)> {
         self.script.team_points.iter().map(|(t, p)| (t.clone(), *p)).collect()
     }
-}
-
-pub fn plugin(app: &mut App) {
-    app.add_systems(Update, run.in_set(crate::FrameRules).run_if(in_state(crate::menu::Screen::Battle)).run_if(resource_exists::<SkirmishScript>));
-}
-
-#[allow(clippy::too_many_arguments)]
-fn run(
-    mut sk: ResMut<SkirmishScript>,
-    time: Res<Time>,
-    lib: Res<crate::data::Library>,
-    mut killed: MessageReader<Destroyed>,
-    mut captured: MessageReader<crate::boarding::Captured>,
-    mut ships: Query<RuleShip>,
-    mut animals: Query<(Entity, &mut crate::environment::SpaceAnimal, &mut Transform, &mut Visibility), Without<Ship>>,
-    rocks: Query<(Entity, &Transform, &crate::combat::Asteroid), (Without<Ship>, Without<crate::environment::SpaceAnimal>)>,
-    mut fx: apply::FxParam,
-    assets: Res<AssetServer>,
-    mut commands: Commands,
-) {
-    let sk = &mut *sk;
-    let world = build_world(&mut sk.script, WorldKind::Skirmish, &ships, &animals, &rocks, &fx, &lib);
-    for d in killed.read() {
-        if let Some(by) = world.iter().find(|u| u.e == d.by) {
-            sk.script.record_destroyed(&by.owner.clone(), d.victim);
-        }
-    }
-    for c in captured.read() {
-        sk.script.record_capture(&c.by, &c.victim, c.unit, false);
-    }
-    let (fxs, voice) = sk.script.step(&world, time.delta_secs(), false);
-    if let Some(file) = voice {
-        apply::spawn_voice(&mut commands, &assets, &file);
-    }
-    let mut env = fx.env(&mut sk.script, &sk.paths, &lib, None, Some(&sk.sides));
-    apply::apply(fxs, &mut env, &mut commands, &mut ships, &mut animals);
 }
 
 /// The rules' names of the map-placed ships ('Setup Ship' names) by world-object id; none when the script lists no ships.

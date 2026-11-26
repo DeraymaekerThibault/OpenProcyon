@@ -1,12 +1,13 @@
 //! The in-battle player list (docs/re/player-names.md): one row per lobby slot with its flag, name, whether its fleet still floats
 //! and, on every row but the human's, the alliance icon, which on free-for-all maps (`Is Alliance Change Allowed`) is a button.
-//! State, rules and input live here; the view only draws `Roster` and spawns the `AllianceIcon` / `RosterName` buttons.
+//! State, rules and input live here (with the battle's alliance table, `Alliances`); the view only draws `Roster` and spawns the
+//! `AllianceIcon` / `RosterName` buttons.
 use bevy::prelude::*;
 
 use crate::combat::Health;
-use crate::scenario::MapObject;
+use crate::names::Owner;
 use crate::ship::{FleetMember, Fleets};
-use crate::{Orbit, Ship, Side};
+use crate::{Orbit, Side};
 
 #[derive(Clone, PartialEq)]
 pub struct Row {
@@ -25,10 +26,12 @@ pub struct Row {
     /// The local player has offered an alliance / this player has offered one to the local player.
     pub request_out: bool,
     pub request_in: bool,
+    /// The slot's side in the alliance table.
+    pub side: Side,
 }
 impl Row {
-    pub fn new(owner: crate::names::Owner, name: Option<String>, flag: usize, colour: Color, allied: bool) -> Row {
-        Row { owner, name, flag, colour, local: false, alive: true, allied, request_out: false, request_in: false }
+    pub fn new(owner: crate::names::Owner, name: Option<String>, flag: usize, colour: Color, side: Side) -> Row {
+        Row { owner, name, flag, colour, local: false, alive: true, allied: side == Side::Player, request_out: false, request_in: false, side }
     }
 }
 
@@ -67,127 +70,204 @@ pub fn press(allied: bool, out: bool, inn: bool) -> Press {
 }
 
 pub fn plugin(app: &mut App) {
-    app.add_systems(Update, update.run_if(resource_exists::<Roster>).run_if(in_state(crate::menu::Screen::Battle))).add_systems(
+    app.init_resource::<Alliances>().add_systems(Update, update.run_if(resource_exists::<Roster>).run_if(in_state(crate::menu::Screen::Battle))).add_systems(
         PreUpdate,
         click.after(bevy::ui::UiSystems::Focus).run_if(resource_exists::<Roster>).run_if(in_state(crate::menu::Screen::Battle)).run_if(crate::menu::overlay_closed),
     );
 }
 
-/// Alive and allied are read from the ships each tick (an owner change or a break moves a fleet to another side).
-fn update(mut roster: ResMut<Roster>, fleets: Res<Fleets>, ships: Query<(&Ship, &FleetMember, &Health)>) {
-    let next: Vec<(bool, bool, bool)> = roster
+/// Alive, allied and the offers are read each tick: from the ships and the alliance table.
+fn update(mut roster: ResMut<Roster>, fleets: Res<Fleets>, ships: Query<(&FleetMember, &Health)>, table: Hostility) {
+    let local = table.side_of(&fleets.local);
+    let next: Vec<[bool; 5]> = roster
         .rows
         .iter()
         .map(|r| {
-            let mine = || ships.iter().filter(|s| s.1.0 == r.owner);
-            (r.owner == fleets.local, mine().any(|s| !s.2.destroyed), mine().next().map_or(r.allied, |s| s.0.side == Side::Player))
+            let alive = ships.iter().any(|s| s.0.0 == r.owner && !s.1.destroyed);
+            let (me, them) = (local.unwrap_or(Side::Player), table.side_of(&r.owner).unwrap_or(r.side));
+            let allied = table.allied(me, them);
+            [r.owner == fleets.local, alive, allied, !allied && table.offered(me, them), !allied && table.offered(them, me)]
         })
         .collect();
-    if roster.rows.iter().zip(&next).all(|(r, n)| (r.local, r.alive, r.allied) == *n) {
+    if roster.rows.iter().zip(&next).all(|(r, n)| [r.local, r.alive, r.allied, r.request_out, r.request_in] == *n) {
         return;
     }
     for (r, n) in roster.rows.iter_mut().zip(next) {
-        (r.local, r.alive, r.allied) = n;
+        [r.local, r.alive, r.allied, r.request_out, r.request_in] = n;
+    }
+}
+
+/// Pressing row `them`'s alliance icon, as the local player `me` (`press`): edits the table.
+pub fn apply_press(table: &mut Alliances, me: Side, them: Side) {
+    match press(table.allied(me, them), table.offered(me, them), table.offered(them, me)) {
+        Press::Break => table.set(me, them, false),
+        Press::Withdraw => table.offer(me, them, false),
+        Press::Accept => table.set(me, them, true),
+        Press::Offer => table.offer(me, them, true),
     }
 }
 
 #[allow(deprecated)] // Interaction, see pointer.rs
 fn click(
     mouse: Res<ButtonInput<MouseButton>>,
-    mut roster: ResMut<Roster>,
+    roster: Res<Roster>,
     icons: Query<(&AllianceIcon, &Interaction)>,
     names: Query<(&RosterName, &Interaction)>,
     mut orbit: ResMut<Orbit>,
-    mut ships: Query<(Entity, &mut Ship, &FleetMember, &Health, Option<&mut MapObject>)>,
-    sk: Option<ResMut<crate::rules::skirmish::SkirmishScript>>,
+    ships: Query<(Entity, &FleetMember, &Health)>,
+    (fleets, mut table): (Res<Fleets>, ResMut<Alliances>),
 ) {
     if !mouse.just_pressed(MouseButton::Left) {
         return;
     }
     let local_alive = roster.rows.iter().any(|r| r.local && r.alive);
     if let Some((AllianceIcon(i), _)) = icons.iter().find(|(_, i)| crate::pointer::over(i)) {
-        let i = *i;
-        let Some(row) = roster.rows.get(i).filter(|r| roster.changeable && !r.local && local_alive) else { return };
-        let (owner, side) = match press(row.allied, row.request_out, row.request_in) {
-            Press::Break => (row.owner.clone(), Some(Side(ships.iter().map(|s| s.1.side.0).max().unwrap_or(1) + 1))),
-            Press::Accept => (row.owner.clone(), Some(Side::Player)),
-            _ => (row.owner.clone(), None),
-        };
-        let row = &mut roster.rows[i];
-        match press(row.allied, row.request_out, row.request_in) {
-            Press::Withdraw => row.request_out = false,
-            Press::Offer => row.request_out = true,
-            Press::Break | Press::Accept => (row.request_out, row.request_in) = (false, false),
-        }
-        if let Some(side) = side {
-            row.allied = side == Side::Player;
-            for (_, mut ship, m, _, object) in &mut ships {
-                if m.0 == owner {
-                    ship.side = side;
-                    if let Some(mut o) = object {
-                        o.start = side;
-                    }
-                }
-            }
-            if let Some(mut sk) = sk
-                && let Some(s) = sk.sides.get_mut(owner.as_str())
-            {
-                *s = side;
-            }
-        }
+        let Some(row) = roster.rows.get(*i).filter(|r| roster.changeable && !r.local && local_alive) else { return };
+        let me = table.side_of(&fleets.local).unwrap_or(Side::Player);
+        let them = table.side_of(&row.owner).unwrap_or(row.side);
+        apply_press(&mut table, me, them);
         return;
     }
     if let Some((RosterName(i), _)) = names.iter().find(|(_, i)| crate::pointer::over(i)) {
         // The camera goes to the player's first ship, when the local player has none left or is allied with it.
         let Some(row) = roster.rows.get(*i).filter(|r| r.alive && !r.local && (!local_alive || r.allied)) else { return };
-        if let Some((e, ..)) = ships.iter().filter(|s| s.2.0 == row.owner && !s.3.destroyed).min_by_key(|s| s.2.1) {
+        if let Some((e, ..)) = ships.iter().filter(|s| s.1.0 == row.owner && !s.2.destroyed).min_by_key(|s| s.1.1) {
             orbit.focus = Some(e);
         }
     }
 }
 
-/// The answers to "is X hostile to Y" that the battle code gives today, each under its own name. They are NOT one rule and do not
-/// always agree (see `three_factions_show_where_the_two_answers_part`); callers keep the one they always used. MAINTAINER QUESTION:
-/// which of them is the original's?
-pub mod hostility {
-    use crate::campaign::{Mission, MissionBase};
-    use crate::{Ship, Side};
+/// The side of things of the no-owner owner ('NO PLAYER', an unset owner): allied with every player, so never a
+/// captain's target, a friend's dock, and an order against one is dropped; the human may still fire at one by hand. PROVISIONAL.
+pub const NEUTRAL: Side = Side(u8::MAX - 1);
+/// The sides handed out, in turn, to owners that name no player of the battle (`Alliances::side_or_neutral`); the battle's players
+/// come first.
+const OUTSIDERS: std::ops::Range<u8> = 128..252;
+/// The side every further outsider shares once `OUTSIDERS` is used up (a debug build stops there instead): such owners are then
+/// allied with each other, still hostile to every player.
+pub const OUTSIDER_OVERFLOW: Side = Side(OUTSIDERS.end);
 
-    /// By skirmish side: hostile when the sides differ. Used by gunnery, shells, cloak, crew and the captain's target check.
-    pub fn by_side(a: Side, b: Side) -> bool {
-        a != b
+/// The sides given to owners outside the battle, by name, in the order first asked for. Filled while the table is read (a shared
+/// read hands one out), so it sits behind a lock; it goes with the table, so each battle starts with none.
+#[derive(Default, Debug)]
+struct Outsiders(std::sync::Mutex<Vec<(Owner, Side)>>);
+impl Clone for Outsiders {
+    fn clone(&self) -> Self {
+        Outsiders(std::sync::Mutex::new(self.0.lock().map(|v| v.clone()).unwrap_or_default()))
     }
+}
 
-    /// By the mission script's alliance table (owner names): hostile when the pair is at war; false for one owner and for non-players.
-    pub fn by_script(script: &crate::rules::Script, a: &str, b: &str) -> bool {
-        script.hostile(a, b)
-    }
+/// The battle's alliance table: the one answer to "is X hostile to Y" for ships, shells, bases, docks, boarding and the rules. Each
+/// player has a side (the human's is `Side::Player`); two sides are allied only while each counts the other an ally, and hostile
+/// otherwise. A side is always its own ally. Filled at setup (each lobby team, a mission's allied player pairs), then changed by the
+/// rules' 'Set alliance' and the player list's alliance button.
+#[derive(Resource, Clone, Default, Debug)]
+pub struct Alliances {
+    /// The side of each player name (several may share one: a skirmish map's base player fights for its race's fleet).
+    sides: Vec<(Owner, Side)>,
+    /// One-way offers: (a, b) = a counts b as an ally.
+    offers: Vec<(Side, Side)>,
+    outsiders: Outsiders,
+}
 
-    /// Two objects (owner, side): by the mission's table when both have owners in a mission, else by side when both have one.
-    pub fn pair(mission: Option<&Mission>, a: (Option<&str>, Option<Side>), b: (Option<&str>, Option<Side>)) -> bool {
-        if let (Some(m), Some(x), Some(y)) = (mission, a.0, b.0) {
-            return by_script(&m.script, x, y);
+static EMPTY: Alliances = Alliances { sides: Vec::new(), offers: Vec::new(), outsiders: Outsiders(std::sync::Mutex::new(Vec::new())) };
+
+impl Alliances {
+    pub fn add_player(&mut self, owner: &str, side: Side) {
+        if self.side_of(owner).is_none() {
+            self.sides.push((owner.into(), side));
         }
-        matches!((a.1, b.1), (Some(x), Some(y)) if by_side(x, y))
     }
-
-    /// A mission base is hostile when the script says so of its owner and the player; in a skirmish when its side is not the player's.
-    pub fn base(mission: Option<&Mission>, base: Option<&MissionBase>, side: Option<&crate::combat::BaseSide>) -> bool {
-        let Some(base) = base else { return false };
-        match mission {
-            Some(m) => by_script(&m.script, m.script.player(), &base.owner),
-            None => side.is_some_and(|s| s.0 != Side::Player),
+    /// The side of player `owner`; none for a name that is no player.
+    pub fn side_of(&self, owner: &str) -> Option<Side> {
+        self.sides.iter().find(|p| p.0 == owner).map(|p| p.1)
+    }
+    /// The side a thing of `owner` fights for: its player's; `NEUTRAL` for no owner ('NO PLAYER', unset); and for an owner that names
+    /// no player of this battle (a map's base player whose slot is not in play, say) a side of its own, allied with nobody else, so
+    /// hostile to everyone (PROVISIONAL). Each such name gets the next free side the first time it is asked for, and keeps it for the
+    /// battle; two names never share one (`OUTSIDERS`, then `OUTSIDER_OVERFLOW`).
+    pub fn side_or_neutral(&self, owner: &str) -> Side {
+        if let Some(side) = self.side_of(owner) {
+            return side;
+        }
+        if owner.trim().is_empty() || owner.trim().eq_ignore_ascii_case("NO PLAYER") {
+            return NEUTRAL;
+        }
+        let Ok(mut given) = self.outsiders.0.lock() else { return OUTSIDER_OVERFLOW };
+        if let Some(side) = given.iter().find(|g| g.0 == owner).map(|g| g.1) {
+            return side;
+        }
+        let next = OUTSIDERS.start as usize + given.len();
+        debug_assert!(next < OUTSIDERS.end as usize, "more than {} owners outside the battle: '{owner}' shares a side", OUTSIDERS.len());
+        let side = if next < OUTSIDERS.end as usize { Side(next as u8) } else { OUTSIDER_OVERFLOW };
+        given.push((owner.into(), side));
+        side
+    }
+    /// `a` counts `b` an ally.
+    pub fn offered(&self, a: Side, b: Side) -> bool {
+        a == b || self.offers.contains(&(a, b))
+    }
+    /// Two sides allied both ways (a side with itself; NO PLAYER's with every side). A volcano's side (`HOSTILE_TO_ALL`) is nobody's
+    /// ally, NO PLAYER's included: it fires at every ship near it, whatever the owner (PROVISIONAL).
+    pub fn allied(&self, a: Side, b: Side) -> bool {
+        let volcano = crate::scenario::HOSTILE_TO_ALL;
+        if a != b && (a == volcano || b == volcano) {
+            return false;
+        }
+        a == NEUTRAL || b == NEUTRAL || (self.offered(a, b) && self.offered(b, a))
+    }
+    pub fn hostile(&self, a: Side, b: Side) -> bool {
+        !self.allied(a, b)
+    }
+    /// A ship of side `shooter` may shoot at `target`: a hostile, or (`by_hand`, the human's own aim) a thing of no player. PROVISIONAL.
+    pub fn targetable(&self, shooter: Side, target: Side, by_hand: bool) -> bool {
+        self.hostile(shooter, target) || (by_hand && target == NEUTRAL)
+    }
+    /// On the human's side of the table (the human's own ships included).
+    pub fn with_human(&self, s: Side) -> bool {
+        self.allied(Side::Player, s)
+    }
+    /// `a` offers (or withdraws) its alliance to `b`; it holds once `b` offers back.
+    pub fn offer(&mut self, a: Side, b: Side, on: bool) {
+        self.offers.retain(|o| *o != (a, b));
+        if on && a != b {
+            self.offers.push((a, b));
         }
     }
-
-    /// A dock owner is a friend of `me` (its owner, in a mission) when the script does not call them hostile; without a mission or an
-    /// owner on either side, when the dock's ship (if any) is on `me`'s side.
-    pub fn friendly_dock(script: Option<&crate::rules::Script>, my_owner: Option<&str>, my_side: Side, dock_ship: Option<&Ship>, dock_owner: Option<&str>) -> bool {
-        match (my_owner, script, dock_owner) {
-            (Some(m), Some(sc), Some(o)) => !by_script(sc, m, o),
-            _ => dock_ship.is_none_or(|d| !by_side(d.side, my_side)),
-        }
+    /// Both directions at once.
+    pub fn set(&mut self, a: Side, b: Side, on: bool) {
+        self.offer(a, b, on);
+        self.offer(b, a, on);
     }
+    /// By player names (non-players are neutral).
+    pub fn hostile_owners(&self, a: &str, b: &str) -> bool {
+        self.hostile(self.side_or_neutral(a), self.side_or_neutral(b))
+    }
+    /// Two players allied with each other (one player with itself); a name that is no player is nobody's ally.
+    pub fn players_allied(&self, a: &str, b: &str) -> bool {
+        a == b || self.side_of(a).zip(self.side_of(b)).is_some_and(|(x, y)| self.allied(x, y))
+    }
+    /// The side of a base: a skirmish base's own, else its mission owner's.
+    pub fn base_side(&self, base: Option<&crate::campaign::MissionBase>, side: Option<&crate::combat::BaseSide>) -> Option<Side> {
+        side.map(|s| s.0).or_else(|| base.map(|b| self.side_or_neutral(&b.owner)))
+    }
+}
+
+/// The battle's `Alliances` as a system parameter; a world without one (a unit test) has the empty table: each side on its own.
+#[derive(bevy::ecs::system::SystemParam)]
+pub struct Hostility<'w> {
+    table: Option<Res<'w, Alliances>>,
+}
+impl std::ops::Deref for Hostility<'_> {
+    type Target = Alliances;
+    fn deref(&self) -> &Alliances {
+        self.table.as_deref().unwrap_or(&EMPTY)
+    }
+}
+
+/// The empty table: each side on its own.
+pub fn empty() -> &'static Alliances {
+    &EMPTY
 }
 
 #[cfg(test)]
@@ -203,20 +283,128 @@ mod tests {
         assert_eq!(press(false, false, false), Press::Offer);
     }
 
-    /// Three factions, A and B each at war with the player and with each other: by script they are hostile to each other, by side
-    /// both sit on the enemy side and are "the same". The skirmish-side answer (gunnery, shells, cloak, crew) and the script answer
-    /// (mission AI, boarding, docking) disagree here today. MAINTAINER QUESTION: which does the original use for three-way maps?
+    /// Three factions, A and B each at war with the player and with each other: the one table says A and B are hostile to each other
+    /// too, by name and by side alike, and every ship's side comes from it (each player its own).
     #[test]
-    fn three_factions_show_where_the_two_answers_part() {
-        let data = serde_json::json!({"rules": [], "players": ["Hero", "A", "B"], "alliances": []});
-        let sc = crate::rules::Script::new(&data, serde_json::Value::Null);
-        // Mission ships are sorted into two sides: the player's group and everyone hostile to it.
-        let side = |owner: &str| if hostility::by_script(&sc, owner, "Hero") { Side::Enemy } else { Side::Player };
-        for (x, y) in [("A", "Hero"), ("B", "Hero"), ("Hero", "A")] {
-            assert!(hostility::by_script(&sc, x, y) && hostility::by_side(side(x), side(y)), "{x} vs {y}: both answers say hostile");
+    fn three_factions_are_each_hostile_to_the_other_two() {
+        let data = serde_json::json!({"rules": [], "players": ["Hero", "A", "B"], "alliances": [], "player_start": {"name": "Hero"}});
+        let t = crate::rules::Script::new(&data, serde_json::Value::Null).alliances;
+        let side = |o: &str| t.side_of(o).unwrap();
+        assert_eq!((side("Hero"), side("A"), side("B")), (Side::Player, Side(1), Side(2)), "each player its own side, the human's first");
+        for (x, y) in [("A", "Hero"), ("B", "Hero"), ("A", "B"), ("B", "A")] {
+            assert!(t.hostile_owners(x, y) && t.hostile(side(x), side(y)), "{x} vs {y}");
         }
-        assert!(hostility::by_script(&sc, "A", "B") && hostility::by_script(&sc, "B", "A"));
-        assert!(!hostility::by_side(side("A"), side("B")), "by side, A and B are on the same (enemy) side");
-        assert!(!hostility::by_script(&sc, "A", "A"));
+        assert!(!t.hostile_owners("A", "A") && !t.hostile_owners("A", "NO PLAYER"), "a player is its own ally; a non-player is nobody's foe");
+    }
+
+    #[test]
+    fn an_alliance_needs_both_directions() {
+        let (a, b) = (Side(1), Side(2));
+        let mut t = Alliances::default();
+        assert!(t.hostile(a, b) && t.allied(a, a));
+        t.offer(a, b, true);
+        assert!(t.hostile(a, b) && t.hostile(b, a), "one offer is no alliance");
+        t.offer(b, a, true);
+        assert!(t.allied(a, b) && t.allied(b, a));
+        assert!(t.allied(NEUTRAL, a), "neutral things are nobody's foe");
+    }
+
+    #[test]
+    fn the_alliance_button_offers_accepts_and_breaks() {
+        let (me, them) = (Side::Player, Side(1));
+        let mut t = Alliances::default();
+        apply_press(&mut t, me, them);
+        assert!(t.offered(me, them) && t.hostile(me, them), "an offer");
+        apply_press(&mut t, me, them);
+        assert!(!t.offered(me, them), "pressed again: withdrawn");
+        t.offer(them, me, true);
+        apply_press(&mut t, me, them);
+        assert!(t.allied(me, them), "their offer accepted");
+        apply_press(&mut t, me, them);
+        assert!(t.hostile(me, them) && !t.offered(them, me), "a break clears both directions");
+    }
+
+    #[test]
+    fn the_lobby_team_starts_allied() {
+        let group = |side, team| crate::Group { player: side as usize, side: Side(side), team, ..default() };
+        let t = crate::scenario::battle_alliances(&[group(0, 1), group(1, 1), group(2, 2), group(3, -1), group(4, -1)], &[], None);
+        assert!(t.allied(Side(0), Side(1)), "same lobby team");
+        assert!(t.hostile(Side(0), Side(2)) && t.hostile(Side(1), Side(2)), "another team");
+        assert!(t.hostile(Side(3), Side(4)), "slots on no team are each their own");
+    }
+
+    /// A thing of no player is allied with every player: never a target or a foe's dock, its mines bounce off every hull (they damage
+    /// no one); only the human's own aim may still fire at it.
+    #[test]
+    fn a_thing_of_no_player_is_everyones_ally_but_can_be_fired_on_by_hand() {
+        let mut t = Alliances::default();
+        t.add_player("Hero", Side::Player);
+        let nobody = t.side_or_neutral("NO PLAYER");
+        let camp = crate::campaign::MissionBase { id: 1, owner: "NO PLAYER".into() };
+        for s in [Side::Player, Side(1)] {
+            assert!(t.allied(nobody, s) && !t.targetable(s, nobody, false), "never a captain's target");
+        }
+        assert_eq!(t.base_side(Some(&camp), None), Some(nobody), "its base is a friendly dock");
+        assert!(t.targetable(Side::Player, nobody, true) && !t.targetable(Side::Player, Side::Player, true), "by hand: things of no player only");
+    }
+
+    /// Only the no-owner owner is everyone's ally; an owner that names no player of this battle (Border Dispute's base players when
+    /// their slots are not in play) fights alone, hostile to every player and to other such owners.
+    #[test]
+    fn an_owner_outside_the_battle_fights_alone_and_only_no_owner_is_everyones_ally() {
+        let mut t = Alliances::default();
+        t.add_player("Hero", Side::Player);
+        t.add_player("Raiders", Side(1));
+        let (outsider, other) = (t.side_or_neutral("player 8"), t.side_or_neutral("player 9"));
+        assert_eq!(outsider, t.side_or_neutral("player 8"), "the same side every time");
+        for s in [Side::Player, Side(1), other] {
+            assert!(t.hostile(outsider, s) && t.targetable(s, outsider, false), "hostile and a target");
+        }
+        for nobody in ["NO PLAYER", "", "No Player"] {
+            assert_eq!(t.side_or_neutral(nobody), NEUTRAL, "{nobody:?}");
+        }
+        let base = crate::campaign::MissionBase { id: 9, owner: "player 9".into() };
+        assert_eq!(t.base_side(Some(&base), None), Some(other));
+    }
+
+    /// A skirmish's table: the map's allied pairs hold for slots nobody plays (each its own side), and the lobby's teams decide every
+    /// pair of slots in play, whatever the map says; a map without pairs (an older import) works as before.
+    #[test]
+    fn the_maps_pairs_ally_unplayed_slots_and_the_lobby_decides_the_played_ones() {
+        let group = |player, side, team| crate::Group { player, side: Side(side), team, ..default() };
+        let players: Vec<serde_json::Value> = ["A", "B", "C", "D"].iter().map(|n| serde_json::json!({"name": n, "team": 5})).collect();
+        let pairs = serde_json::json!([["A", "C"], ["A", "B"], ["C", "D"]]);
+        let t = crate::scenario::battle_alliances(&[group(0, 0, 0), group(1, 1, 1)], &players, Some(&pairs));
+        let side = |n: &str| t.side_of(n).unwrap();
+        assert!(side("C") != side("D") && side("C").0 >= 2, "each unplayed slot its own side");
+        assert!(t.allied(side("A"), side("C")) && t.allied(side("C"), side("D")), "the map's pairs");
+        assert!(t.hostile(side("A"), side("B")), "played slots: the lobby's teams, not the map");
+        assert!(t.hostile(side("B"), side("C")) && t.allied(side("C"), NEUTRAL), "the rest: only with itself and with no one");
+        let old = crate::scenario::battle_alliances(&[group(0, 0, 0), group(1, 1, 5)], &players, None);
+        assert_eq!(old.side_of("C"), Some(Side(1)), "without pairs: its team's group, as before");
+    }
+
+    /// Two owners outside the battle never share a side: each gets its own, kept for the battle, and they are hostile to each other.
+    #[test]
+    fn two_outsiders_get_different_sides_and_are_hostile_to_each_other() {
+        let t = Alliances::default();
+        let names: Vec<String> = (0..OUTSIDERS.len()).map(|i| format!("player {i}")).collect();
+        let sides: Vec<Side> = names.iter().map(|n| t.side_or_neutral(n)).collect();
+        let mut distinct = sides.clone();
+        distinct.sort_by_key(|s| s.0);
+        distinct.dedup();
+        assert_eq!(distinct.len(), names.len(), "no two share a side");
+        assert_eq!(t.side_or_neutral("player 8"), sides[8], "the same name keeps its side");
+        assert!(t.hostile(sides[8], sides[9]) && t.hostile(sides[9], sides[8]));
+        assert!(Alliances::default().side_or_neutral("player 9") == Side(OUTSIDERS.start), "a new battle's table starts afresh");
+    }
+
+    /// A volcano fires at every ship near it, a ship of NO PLAYER's included, in every mode.
+    #[test]
+    fn a_volcano_is_everyones_foe_no_player_included() {
+        let (t, volcano) = (Alliances::default(), crate::scenario::HOSTILE_TO_ALL);
+        for s in [Side::Player, Side(1), NEUTRAL, Side(200)] {
+            assert!(t.hostile(volcano, s) && t.hostile(s, volcano), "{s:?}");
+        }
     }
 }

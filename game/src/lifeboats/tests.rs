@@ -20,23 +20,7 @@ fn ship(app: &mut App, class: &str, owner: &str, at: Vec3, flag: bool) -> Entity
     let ci = lib.index(class);
     let health = Health::new(&lib.classes[ci]);
     let s = Ship { heading: 0.0, ..Ship::new(ci, Side::Player) };
-    let ms = MissionShip {
-        id: -1,
-        name: class.into(),
-        owner: owner.into(),
-        hold_fire: false,
-        invuln: 0.0,
-        visible: true,
-        stance: crate::rules::Stance::Neutral,
-        target: None,
-        attack: vec![],
-        flag: String::new(),
-        banner: String::new(),
-        looping: None,
-        stop_at_end: false,
-        create_lifeboats: flag,
-        ..Default::default()
-    };
+    let ms = MissionShip { id: -1, name: class.into(), owner: owner.into(), visible: true, create_lifeboats: flag, ..Default::default() };
     app.world_mut().spawn((s, health, Transform::from_translation(at), ms)).id()
 }
 fn boats(app: &mut App) -> Vec<(crate::names::Owner, String, Vec3)> {

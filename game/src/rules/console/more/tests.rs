@@ -5,6 +5,7 @@ use crate::rules::fixtures::{e, script_with, unit as base_unit};
 fn script() -> Script {
     let data = json!({
         "player_start": {"name": "Hero"},
+        "players": ["Hero", "Raiders"],
         "rules": [
             {"name": "Gate", "conditions": [], "actions": [{"Type": "Set Flag Action", "Flag Name": "g", "Boolean Value": "TRUE"}]},
             {"name": "Patrol", "Run Once": false, "conditions": [], "actions": []},

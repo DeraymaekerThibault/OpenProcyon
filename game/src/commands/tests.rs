@@ -548,3 +548,38 @@ fn a_recorded_session_replays_tick_for_tick_on_another_frame_rate() {
     }
     assert_eq!(again, seen);
 }
+
+/// An attack order against a ship of no player (allied with every player) is dropped; one against a hostile stands.
+#[test]
+fn an_attack_order_on_a_thing_of_no_player_is_dropped() {
+    let mut app = battle();
+    let (_, captain, enemy) = fleet(&mut app);
+    let nobody = app.world_mut().spawn((Ship::new(0, crate::alliance::NEUTRAL), SpawnIndex(3))).id();
+    loaded(&mut app);
+    send(&mut app, Kind::Target { ship: captain, target: Some(nobody), spot: None });
+    frame(&mut app, 40);
+    assert_eq!(app.world().get::<crate::ship::FleetPilot>(captain).unwrap().target, None, "dropped");
+    send(&mut app, Kind::Target { ship: captain, target: Some(enemy), spot: None });
+    frame(&mut app, 40);
+    assert_eq!(app.world().get::<crate::ship::FleetPilot>(captain).unwrap().target, Some(enemy));
+}
+
+/// A player's Attack, and "fire when possible", make the ship Aggressive (PROVISIONAL).
+#[test]
+fn an_attack_or_fire_when_possible_order_makes_the_ship_aggressive() {
+    use crate::rules::Stance;
+    let mut app = battle();
+    let (_, captain, enemy) = fleet(&mut app);
+    let stance = |app: &App| app.world().get::<crate::campaign::MissionShip>(captain).unwrap().stance;
+    app.world_mut().entity_mut(captain).insert(crate::campaign::MissionShip { stance: Stance::Neutral, ..default() });
+    loaded(&mut app);
+    send(&mut app, Kind::Target { ship: captain, target: Some(enemy), spot: None });
+    frame(&mut app, 40);
+    assert_eq!(stance(&app), Stance::Aggressive);
+    app.world_mut().get_mut::<crate::campaign::MissionShip>(captain).unwrap().stance = Stance::Defensive;
+    let owner = app.world().resource::<crate::ship::Fleets>().local.clone();
+    app.world_mut().resource_mut::<crate::ship::Fleets>().groups.get_mut(&owner).unwrap().cease_fire = true;
+    send(&mut app, Kind::CeaseFire);
+    frame(&mut app, 40);
+    assert_eq!(stance(&app), Stance::Aggressive, "fire when possible");
+}

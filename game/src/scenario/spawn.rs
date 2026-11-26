@@ -194,6 +194,8 @@ pub fn spawn_scenario(commands: &mut Commands, assets: &AssetServer, lib: &Libra
         commands.entity(m).insert(Scenario);
     }
     let ours: Vec<String> = std::iter::once(cfg.player.clone()).chain(cfg.allies.iter().cloned()).collect();
+    // Each battle starts with its own alliance table (the mission's or the lobby's replace this one).
+    commands.insert_resource(alliance::Alliances::default());
     if let Some(map) = &map {
         let bases = spawn_map_objects(commands, assets, fxl, shapes, asteroids, map);
         nebula::spawn(commands, assets, fxl, map);
@@ -211,6 +213,39 @@ pub fn spawn_scenario(commands: &mut Commands, assets: &AssetServer, lib: &Libra
     }
     commands.insert_resource(Target::default());
     commands.insert_resource(Outcome::Playing);
+}
+
+/// The alliance table a skirmish starts with (PROVISIONAL). At load every map player is allied only with itself (and with NO PLAYER,
+/// everyone's ally): a played slot holds its group's side; one nobody plays gets a side of its own when the map lists its allied pairs
+/// (`alliances`), else (older imports) its team's or its fleet type's group's. The map's pairs are then allied, and at launch every
+/// pair of groups in the battle is set from the lobby: allied when on one team, hostile otherwise.
+pub fn battle_alliances(groups: &[crate::Group], players: &[serde_json::Value], pairs: Option<&serde_json::Value>) -> alliance::Alliances {
+    let mut table = alliance::Alliances::default();
+    let mut next = groups.iter().map(|g| g.side.0 + 1).max().unwrap_or(0);
+    for (i, p) in players.iter().enumerate() {
+        let Some(name) = p["name"].as_str() else { continue };
+        let team = p["team"].as_i64().unwrap_or(-1) as i32;
+        let side = match (groups.iter().find(|g| g.player == i), pairs) {
+            (Some(g), _) => Some(g.side),
+            (None, Some(_)) => {
+                next += 1;
+                Some(Side(next - 1))
+            }
+            (None, None) => groups.iter().find(|g| team >= 0 && g.team == team).or_else(|| faction(name).and_then(|f| groups.iter().find(|g| g.race == f))).map(|g| g.side),
+        };
+        if let Some(side) = side {
+            table.add_player(name, side);
+        }
+    }
+    for pair in pairs.and_then(|p| p.as_array()).into_iter().flatten() {
+        if let (Some(a), Some(b)) = (pair[0].as_str().and_then(|a| table.side_of(a)), pair[1].as_str().and_then(|b| table.side_of(b))) {
+            table.set(a, b, true);
+        }
+    }
+    for (a, b) in groups.iter().flat_map(|a| groups.iter().map(move |b| (a, b))).filter(|(a, b)| a.side != b.side) {
+        table.set(a.side, b.side, a.team >= 0 && a.team == b.team);
+    }
+    table
 }
 
 /// A skirmish map's battle: the fleets of its players at their start points, the victory rules, the map script, mines, animals and bases.
@@ -240,57 +275,25 @@ fn spawn_skirmish(
                 human: true,
                 race: Race::from_twt(players[0]["race"].as_u64().unwrap_or(4)),
                 team: players[0]["team"].as_i64().unwrap_or(-1) as i32,
-                row: None,
-                ids: vec![],
                 ships: fleet(ours),
-                weapons: vec![],
-                crew: vec![],
+                ..default()
             },
             Group {
                 player: them,
                 side: Side::Enemy,
-                human: false,
                 race: Race::from_twt(players[them]["race"].as_u64().unwrap_or(4)),
                 team: players[them]["team"].as_i64().unwrap_or(-1) as i32,
-                row: None,
-                ids: vec![],
                 ships: fleet(&cfg.enemies),
-                weapons: vec![],
-                crew: vec![],
+                ..default()
             },
         ]
     } else {
-        cfg.groups
-            .iter()
-            .map(|g| Group {
-                player: g.player,
-                side: g.side,
-                human: g.human,
-                race: g.race,
-                team: g.team,
-                row: g.row.clone(),
-                ids: g.ids.clone(),
-                ships: g.ships.clone(),
-                weapons: g.weapons.clone(),
-                crew: g.crew.clone(),
-            })
-            .collect()
+        cfg.groups.clone()
     };
     if cfg.script.as_deref() == Some("fleet")
         && let Some(player) = (0..players.len()).find(|i| !groups.iter().any(|g| g.player == *i))
     {
-        groups.push(Group {
-            player,
-            side: Side::Player,
-            human: false,
-            race: Race::Unchosen,
-            team: -1,
-            row: None,
-            ids: vec![],
-            ships: vec![(ship::DEFAULT_SHIP.into(), None, Some("Allied captain".into()))],
-            weapons: vec![],
-            crew: vec![],
-        });
+        groups.push(Group { player, side: Side::Player, team: -1, ships: vec![(ship::DEFAULT_SHIP.into(), None, Some("Allied captain".into()))], ..default() });
     }
     // A map with its own script (Convoy Raid's convoys, ...): the ships of its non-playable players join the battle on their
     // team's side, and every ship carries its map player and rule name for the script (rules::skirmish).
@@ -317,10 +320,7 @@ fn spawn_skirmish(
             groups.push(Group {
                 player: p,
                 side,
-                human: false,
-                race: Race::Unchosen,
                 team,
-                row: None,
                 ids: placed.iter().map(|o| o["id"].as_i64()).collect(),
                 ships: placed
                     .iter()
@@ -328,13 +328,13 @@ fn spawn_skirmish(
                         (o["type"].as_str().unwrap_or_default().into(), Some([0, 1, 2].map(|i| o["pos"][i].as_f64().unwrap_or(0.0) as f32)), o["name"].as_str().map(String::from))
                     })
                     .collect(),
-                weapons: vec![],
-                crew: vec![],
+                ..default()
             });
         }
     }
     let mut namer = Namer::new();
     let mut roster = alliance::Roster { changeable: map["alliance_change"].as_bool().unwrap_or(false), ..default() };
+    let mut alliances = battle_alliances(&groups, &players, map.get("alliances"));
     for g in &groups {
         let Some(p) = players.get(g.player) else { continue };
         let f = game_to_bevy(&p["forward"]);
@@ -350,8 +350,9 @@ fn spawn_skirmish(
                 .as_array()
                 .filter(|c| c.len() >= 3)
                 .map_or(Color::WHITE, |c| Color::srgb(c[0].as_f64().unwrap_or(1.0) as f32, c[1].as_f64().unwrap_or(1.0) as f32, c[2].as_f64().unwrap_or(1.0) as f32));
-            roster.rows.push(alliance::Row::new(owner.clone(), name.clone(), *flag, colour, g.side == Side::Player));
+            roster.rows.push(alliance::Row::new(owner.clone(), name.clone(), *flag, colour, g.side));
         }
+        alliances.add_player(&owner, g.side);
         if g.human {
             let owner = owner.clone();
             commands.queue(move |w: &mut World| {
@@ -368,11 +369,8 @@ fn spawn_skirmish(
                 commands.entity(e).insert(PlayerColor(Color::srgb(k(0), k(1), k(2))));
             }
             if let Some(names) = &script_names {
-                commands.entity(e).insert(campaign::MissionShip::placed(
-                    id.unwrap_or(-1),
-                    id.and_then(|id| names.get(&id).cloned()).unwrap_or_default(),
-                    p["name"].as_str().unwrap_or_default().into(),
-                ));
+                let name = id.and_then(|id| names.get(&id).cloned()).unwrap_or_default();
+                commands.entity(e).insert(campaign::MissionShip::placed(id.unwrap_or(-1), name, p["name"].as_str().unwrap_or_default().into()));
             }
             // A computer fleet built in the lobby carries its crew (`SkirmishCrew` below); its ships left without crew have empty posts
             // like ours (retail saves: factor 1.125, scan x1.125). Pre-placed computer ships keep the measured crewed factor.
@@ -397,7 +395,9 @@ fn spawn_skirmish(
             }
         }
         let owner = owner.clone();
-        commands.queue(move |w: &mut World| ship::set_formation(w, &owner, Some(kind), kind != ship::Formation::None));
+        // The fleet gets its map slot's formation type and its ships stand in their spots, but no ship holds formation: the original
+        // starts with hold off (docs/re/fleet-controls.md), so every ship picks its own target from the first think.
+        commands.queue(move |w: &mut World| ship::set_formation(w, &owner, Some(kind), false));
     }
     if roster.rows.is_empty() {
         commands.remove_resource::<alliance::Roster>();
@@ -407,10 +407,17 @@ fn spawn_skirmish(
     // The map's own end rules, when we model all of them (else the plain "no enemy ships left" outcome stays).
     let map_teams = map["teams"].as_array().cloned().unwrap_or_default();
     let teams: Vec<(String, Vec<Side>)> = if map_teams.is_empty() {
-        let mut sides: Vec<Side> = groups.iter().map(|g| g.side).collect();
-        sides.sort_by_key(|s| s.0);
-        sides.dedup();
-        sides.into_iter().map(|s| (format!("side{}", s.0), vec![s])).collect()
+        // Without map teams: one per lobby team (a slot on no team is its own).
+        let mut teams: Vec<(String, Vec<Side>)> = vec![];
+        for g in &groups {
+            let name = if g.team >= 0 { format!("team{}", g.team) } else { format!("side{}", g.side.0) };
+            match teams.iter_mut().find(|t| t.0 == name) {
+                Some(t) if !t.1.contains(&g.side) => t.1.push(g.side),
+                Some(_) => {}
+                None => teams.push((name, vec![g.side])),
+            }
+        }
+        teams
     } else {
         map_teams
             .iter()
@@ -427,19 +434,7 @@ fn spawn_skirmish(
         None if scripted => commands.insert_resource(victory::Victory::scripted(teams)),
         None => commands.remove_resource::<victory::Victory>(),
     }
-    // The map player -> side table and team rosters the script needs (a base player such as 'pirate base' fights for the fleet of
-    // its type, as the bases below do).
-    let sides: std::collections::HashMap<String, Side> = players
-        .iter()
-        .enumerate()
-        .filter_map(|(i, p)| {
-            let team = p["team"].as_i64().unwrap_or(-1) as i32;
-            let name = p["name"].as_str()?;
-            let side = groups.iter().find(|g| g.player == i).or_else(|| groups.iter().find(|g| team >= 0 && g.team == team)).map(|g| g.side);
-            let side = side.or_else(|| faction(name).and_then(|f| groups.iter().find(|g| g.race == f)).map(|g| g.side))?;
-            Some((name.to_string(), side))
-        })
-        .collect();
+    commands.insert_resource(alliances);
     let rosters = map_teams
         .iter()
         .enumerate()
@@ -448,7 +443,7 @@ fn spawn_skirmish(
             (t["name_id"].as_str().unwrap_or_default().to_string(), names)
         })
         .collect();
-    match script_json.as_ref().map(|data| crate::rules::skirmish::SkirmishScript::load(&map_id, data, rosters, sides)) {
+    match script_json.as_ref().map(|data| crate::rules::skirmish::SkirmishScript::load(&map_id, data, rosters)) {
         Some(s) => commands.insert_resource(s),
         None => {
             if campaign::start_requested() {
@@ -464,8 +459,8 @@ fn spawn_skirmish(
         crate::environment::spawn(commands, assets, script, true);
     }
     // The map script's Setup Island 'Combat Strength' is what boarders must wear down (retail: it seeds the base's strength).
-    let strengths = script_json.as_ref().map(setup_strengths).unwrap_or_default();
-    spawn_bases(commands, assets, lib, bases, &players, &groups, &strengths);
+    let setups = script_json.as_ref().map(setup_islands).unwrap_or_default();
+    spawn_bases(commands, assets, lib, bases, &players, &setups);
 }
 
 /// The mines a map places (`mines`: `[{type, id, pos}]`), resting where the map put them until a script hands them to a player.
@@ -476,19 +471,18 @@ fn spawn_mines(commands: &mut Commands, map: &serde_json::Value) {
     }
 }
 
-/// Armed bases and islands of a skirmish map: each fights for the side whose fleet type is theirs, with guns, damage and boarding state.
+/// Armed bases and islands of a skirmish map, with guns, damage and boarding state. A tower or camp belongs to the map object's
+/// player, unless the map script's Setup Island names another, and fights for that owner's side in the alliance table; a capture
+/// or a rule's owner change moves it. One of NO PLAYER never fires. Armed islands (the volcanoes) belong to nobody: they fire on every ship
+/// and cannot be boarded. The armed asteroids (Convoy Raid's belong to the pirate base's player) are owned like a base. PROVISIONAL.
 fn spawn_bases(
     commands: &mut Commands,
     assets: &AssetServer,
     lib: &Library,
     bases: &[(Entity, serde_json::Value)],
     players: &[serde_json::Value],
-    groups: &[Group],
-    strengths: &std::collections::HashMap<i64, i32>,
+    setups: &std::collections::HashMap<i64, (Option<String>, Option<i32>)>,
 ) {
-    // Bases fight for the side whose fleet type is theirs; a base no fleet claims stays neutral (and silent). Armed islands (the
-    // volcanoes) belong to nobody: they fire on every ship and cannot be boarded. The armed asteroids (Convoy Raid's belong to the
-    // pirate base's player) fight for their object's owner like a base.
     for (e, o) in bases {
         let Some(class) = o["type"]
             .as_str()
@@ -503,29 +497,27 @@ fn spawn_bases(
             continue;
         }
         let island = lib.classes[class].name.starts_with("Island_");
-        let owner = o["player"].as_u64().and_then(|i| players.get(i as usize)).and_then(|p| p["name"].as_str()).and_then(faction);
-        let Some(side) =
-            (if island { Some(HOSTILE_TO_ALL) } else { owner.or_else(|| o["type"].as_str().and_then(faction)).and_then(|f| groups.iter().find(|g| g.race == f)).map(|g| g.side) })
-        else {
-            continue;
-        };
         let id = o["id"].as_i64().unwrap_or(-1);
+        let setup = setups.get(&id);
+        let owner = base_owner(o, players, setup);
         let states = combat::spawn_guns(commands, assets, lib, *e, class);
         commands.entity(*e).insert((
-            campaign::MissionBase { id, owner: format!("base{id}") },
             combat::ArmedBase { class },
             combat::DamageFx::new(&lib.classes[class]),
-            combat::BaseSide(side),
-            combat::BaseOrigin(side),
+            combat::BaseFlag::new(&owner),
             combat::Health::new(&lib.classes[class]),
             states,
         ));
         if island {
-            // An island no setup rule touches shoots with perfect aim (docs/re/volcanoes.md).
+            // An island no setup rule touches shoots with perfect aim (docs/re/volcanoes.md); it is nobody's, its side fixed.
+            commands.entity(*e).insert((campaign::MissionBase { id, owner: String::new() }, combat::BaseSide(HOSTILE_TO_ALL)));
             commands.entity(*e).insert(combat::IslandGunnery { accuracy: 0.0, silent: false, neutral: false });
+        } else {
+            // A base fights for its owner's side, which follows the owner: a capture or a rule's owner change moves it.
+            commands.entity(*e).insert(campaign::MissionBase { id, owner });
         }
         if !island {
-            commands.entity(*e).insert(boarding::Boardable::base(&lib.classes[class].name, strengths.get(&id).copied().filter(|s| *s > 0).unwrap_or(SKIRMISH_BASE_STRENGTH), true));
+            commands.entity(*e).insert(boarding::Boardable::base(&lib.classes[class].name, setup.and_then(|s| s.1).filter(|s| *s > 0).unwrap_or(SKIRMISH_BASE_STRENGTH), true));
         }
     }
 }
@@ -552,10 +544,20 @@ fn spawn_arena(commands: &mut Commands, assets: &AssetServer, lib: &Library, fxl
     }
 }
 
-/// Setup Island 'Combat Strength' by world-object id, from a map script.
-pub(super) fn setup_strengths(script: &serde_json::Value) -> std::collections::HashMap<i64, i32> {
+/// The owner of a map's tower or camp: its Setup Island's 'Player/Owner' when the map script names one, else the map object's player
+/// (none: NO PLAYER). PROVISIONAL.
+pub(super) fn base_owner(object: &serde_json::Value, players: &[serde_json::Value], setup: Option<&(Option<String>, Option<i32>)>) -> String {
+    let placed = || object["player"].as_u64().and_then(|i| players.get(i as usize)).and_then(|p| p["name"].as_str()).unwrap_or_default().to_string();
+    setup.and_then(|s| s.0.clone()).unwrap_or_else(placed)
+}
+
+/// Setup Island's 'Player/Owner' and 'Combat Strength' by world-object id, from a map script.
+pub(super) fn setup_islands(script: &serde_json::Value) -> std::collections::HashMap<i64, (Option<String>, Option<i32>)> {
     let actions = script["rules"].as_array().into_iter().flatten().flat_map(|r| r["actions"].as_array().into_iter().flatten());
-    actions.filter(|a| a["Type"] == "*State Init* Setup Island").filter_map(|a| Some((a["World Object ID"].as_i64()?, a["Combat Strength"].as_i64()? as i32))).collect()
+    actions
+        .filter(|a| a["Type"] == "*State Init* Setup Island")
+        .filter_map(|a| Some((a["World Object ID"].as_i64()?, (a["Player/Owner"].as_str().map(String::from), a["Combat Strength"].as_i64().map(|s| s as i32)))))
+        .collect()
 }
 
 /// The side of an armed island: no ship belongs to it, so it fires on all of them.

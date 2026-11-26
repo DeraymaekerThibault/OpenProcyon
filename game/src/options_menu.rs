@@ -17,7 +17,7 @@ use crate::commands::{Kind as CommandKind, Orders};
 use crate::docking::Dockees;
 use crate::panels::hud_scale;
 use crate::sprites::{HudData, offset, size_of};
-use crate::{Orbit, Ship, Side};
+use crate::{Orbit, Ship};
 
 /// PROVISIONAL: the original's click tolerance is not measured.
 const CLICK_PX: f32 = 6.0;
@@ -314,8 +314,8 @@ fn pick_target(
             .filter_map(|(e, tf, sh, _)| ray_hit(&scene.lib.classes[sh.class], tf, ray).map(|t| (e, t)))
             .min_by(|a, b| a.1.total_cmp(&b.1))
     };
-    let ally = nearest(&|sh| sh.side == Side::Player, Some(actor));
-    let enemy = nearest(&|sh| sh.side != Side::Player, None);
+    let ally = nearest(&|sh| docks.table().with_human(sh.side), Some(actor));
+    let enemy = nearest(&|sh| !docks.table().with_human(sh.side), None);
     let own = ray_hit(&scene.lib.classes[player_class], player_at, ray);
     if let Some(e) = bar_target {
         if !scene.fleets.roster().contains(&e) {
@@ -650,14 +650,14 @@ fn context_cursor(
         } else if let Some((_, ok)) = docks.under(ray, actor) {
             if ok { "Cursor_Dock_With_WorldObject_Under_Cursor" } else { "Cursor_Cant_Do_Anything_To_WorldObject_Under_Cursor" }
         } else if docks.hostile_base_hit(ray, ships.get(actor).ok()?.1.translation).is_some()
-            || crate::view::object_hit(objects.iter(), ray, &sensors, mission.as_deref()).is_some()
+            || crate::view::object_hit(objects.iter(), ray, &sensors, mission.as_deref(), docks.table()).is_some()
         {
             if fleets.direct() { "Cursor_PrimaryShip_AttackShip" } else { "Cursor_SecondaryShip_AttackShip" }
         } else if let Some((_, _, sh, _)) =
             ships.iter().find(|(e, tf, sh, h)| !h.destroyed && sensors.player_sees(*e, mission.as_deref()) && ray_hit(&lib.classes[sh.class], tf, ray).is_some())
         {
             // Retail hover: attack an enemy; any other friendly ship that is not dockable is "can't do anything".
-            if sh.side != Side::Player {
+            if !docks.table().with_human(sh.side) {
                 if fleets.direct() { "Cursor_PrimaryShip_AttackShip" } else { "Cursor_SecondaryShip_AttackShip" }
             } else {
                 "Cursor_Cant_Do_Anything_To_WorldObject_Under_Cursor"

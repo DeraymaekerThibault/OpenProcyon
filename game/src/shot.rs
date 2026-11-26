@@ -3,7 +3,7 @@
 use crate::{Group, exit, loading, smoke};
 use bevy::prelude::*;
 
-#[derive(Resource)]
+#[derive(Resource, Default)]
 pub struct Config {
     pub(crate) groups: Vec<Group>, // from the lobby; empty = derive from --ship/--allies/--enemies
     pub(crate) player: String,

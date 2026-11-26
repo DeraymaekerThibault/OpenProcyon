@@ -77,15 +77,14 @@ fn gunners_shorten_reload() {
 
 #[test]
 fn damage_scales_with_side_and_difficulty() {
-    assert_eq!(side_damage_scale(Side::Player, Side::Enemy, 1, false), 2.0);
-    assert_eq!(side_damage_scale(Side::Enemy, Side::Player, 1, false), 0.5);
-    assert_eq!(side_damage_scale(Side::Enemy, Side::Player, 0, false), 0.25);
-    assert_eq!(side_damage_scale(Side::Player, Side::Enemy, 0, false), 3.0, "Easy is x3 out, not the inverse of x0.25 in");
-    assert_eq!(side_damage_scale(Side::Player, Side::Enemy, 2, false), 1.0);
-    assert_eq!(side_damage_scale(Side::Enemy, Side::Enemy, 0, false), 1.0);
-    assert_eq!(side_damage_scale(Side::Player, Side(2), 1, false), 2.0, "every computer team takes the difficulty factor");
-    assert_eq!(side_damage_scale(Side::Enemy, Side(2), 0, false), 1.0);
-    assert_eq!(side_damage_scale(Side::Player, Side::Enemy, 1, true), 1.0, "our base hits computer ships at x1 on Normal");
+    assert_eq!(side_damage_scale(true, false, 1, false), 2.0);
+    assert_eq!(side_damage_scale(false, true, 1, false), 0.5);
+    assert_eq!(side_damage_scale(false, true, 0, false), 0.25);
+    assert_eq!(side_damage_scale(true, false, 0, false), 3.0, "Easy is x3 out, not the inverse of x0.25 in");
+    assert_eq!(side_damage_scale(true, false, 2, false), 1.0);
+    assert_eq!(side_damage_scale(false, false, 0, false), 1.0, "computer on computer");
+    assert_eq!(side_damage_scale(true, true, 0, false), 1.0, "on an ally");
+    assert_eq!(side_damage_scale(true, false, 1, true), 1.0, "our base hits computer ships at x1 on Normal");
 }
 
 #[test]
@@ -223,10 +222,12 @@ fn hostile_island_towers_shoot_the_player_and_neutral_ones_do_not() {
         .init_resource::<crate::environment::Sensors>()
         .add_systems(PreUpdate, crate::environment::refresh_sensors)
         .add_systems(Update, base_fire);
-    let mission = crate::campaign::load_id("mission02");
+    let mut mission = crate::campaign::load_id("mission02");
     let player = mission.script.player().to_string();
     assert!(mission.script.hostile(&player, "SmugglerCampEnemy"), "the camp's enemy owner is hostile to the player");
     assert!(!mission.script.hostile(&player, "NO PLAYER"));
+    // The battle's table, as a mission's spawn hands it over: towers fight for their owner's side, NO PLAYER for nobody.
+    app.insert_resource(std::mem::take(&mut mission.script.alliances));
     app.insert_resource(mission);
     let assets = app.world().resource::<AssetServer>().clone();
     let lib = crate::testutil::lib();
@@ -242,23 +243,7 @@ fn hostile_island_towers_shoot_the_player_and_neutral_ones_do_not() {
     spawn_base(&mut app, "NO PLAYER", 40.0);
     let c = lib.index("Ship_Navy_Torpedo");
     let ship = Ship { heading: 0.0, ..Ship::new(c, Side::Player) };
-    let ms = crate::campaign::MissionShip {
-        id: 1,
-        name: "p".into(),
-        owner: player.into(),
-        hold_fire: false,
-        invuln: 1.0,
-        visible: true,
-        stance: crate::rules::Stance::Neutral,
-        target: None,
-        attack: vec![],
-        flag: String::new(),
-        banner: String::new(),
-        looping: None,
-        stop_at_end: false,
-        create_lifeboats: false,
-        ..Default::default()
-    };
+    let ms = crate::campaign::MissionShip { id: 1, name: "p".into(), owner: player.into(), invuln: 1.0, visible: true, ..Default::default() };
     let player_ship = app.world_mut().spawn((Transform::from_xyz(0.0, 0.0, -120.0), ship, Health::new(&lib.classes[c]), Fires::default(), ms, PlayerShip)).id();
     for _ in 0..300 {
         app.world_mut().resource_mut::<Time>().advance_by(std::time::Duration::from_secs_f32(0.05));
@@ -349,8 +334,10 @@ fn a_volcano_lobs_one_aimed_shell_at_a_time() {
         app.update();
     }
     let shells: Vec<Option<Vec3>> = app.world_mut().query::<&Shell>().iter(app.world()).map(|s| s.aim).collect();
-    assert_eq!(shells.len(), 1, "six mounts take turns: one shell per cycle");
-    assert!(shells[0].is_some(), "a lob shell bursts at its aim height, not through the sea");
+    // Each volcano fires at every ship near it, whatever its side (the old expectation of one shell let the Player-side volcano spare
+    // the player's ship); its six mounts take turns, one shell per cycle each.
+    assert_eq!(shells.len(), 2, "each of the two volcanoes: one shell per cycle");
+    assert!(shells.iter().all(Option::is_some), "a lob shell bursts at its aim height, not through the sea");
 }
 
 #[test]
@@ -470,7 +457,7 @@ fn a_skirmish_computer_ship_with_a_map_script_fires_at_its_captains_target() {
     // A skirmish map script tags every ship with MissionShip; there is no campaign Mission, so no rules AI sets its target.
     let enemy = spawn(&mut app, Side::Enemy, 60.0);
     app.world_mut().entity_mut(enemy).insert(crate::campaign::MissionShip { visible: true, ..default() });
-    app.world_mut().resource_mut::<crate::ship::CaptainTargets>().0.insert(enemy, (me, 0.0, Vec3::ZERO));
+    app.world_mut().resource_mut::<crate::ship::CaptainTargets>().0.insert(enemy, (me, 0.0, Vec3::ZERO, true));
     let mut bullets = std::collections::HashSet::new();
     for _ in 0..200 {
         app.world_mut().resource_mut::<Time>().advance_by(std::time::Duration::from_secs_f32(0.05));
@@ -891,11 +878,9 @@ fn computer_ships_use_their_own_crew_for_repair() {
     let lib = crate::testutil::lib();
     let c = lib.index("Ship_Pirate_Barque");
     let class = &lib.classes[c];
-    let ship = |side| Ship { heading: 0.0, ..Ship::new(c, side) };
     let slots = |skill: Skill, role: usize| {
-        let foe = ship(Side::Enemy);
         let boardable = Boardable::ship(&class.name, skill, true);
-        let generic = crate::crew_arms::fallback_posts(&foe, Some(&boardable), &class.name);
+        let generic = crate::crew_arms::fallback_posts(false, Some(&boardable), &class.name);
         damage::crew_slots(crate::scenario::SpawnIndex(0), class, generic.as_ref(), role, "engineering")
     };
     let (green, elite) = (slots(Skill::Green, 4), slots(Skill::Elite, 5));
@@ -903,7 +888,7 @@ fn computer_ships_use_their_own_crew_for_repair() {
     assert!(!elite.is_empty() && elite.iter().all(|v| (0.8..=1.0).contains(v)), "elite riggers {elite:?}");
     // The player's side keeps its own rule: no crew record, no generic crew.
     let boardable = Boardable::ship(&class.name, Skill::Elite, true);
-    assert!(crate::crew_arms::fallback_posts(&ship(Side::Player), Some(&boardable), &class.name).is_none());
+    assert!(crate::crew_arms::fallback_posts(true, Some(&boardable), &class.name).is_none());
     // A computer ship without a crew record carries rating-1 hands in every slot.
     let none = damage::crew_slots(crate::scenario::SpawnIndex(0), class, None, 4, "engineering");
     assert!(none.iter().all(|v| (*v - 0.1).abs() < 1e-6));
@@ -1079,27 +1064,7 @@ fn shell_into_a_hull_damages_it_and_reports_the_hit() {
     app.insert_resource(FxLib::with_names(&[impact]));
     let farther = app.world_mut().spawn((Transform::from_translation(-normal * 100.0), farther_ship, Health::new(&lib.classes[c]), Fires::default())).id();
     let at = (ta + tb + tc) / 3.0 + normal * 40.0;
-    let shell = Shell {
-        vel: -normal * 200.0,
-        age: 0.0,
-        lifetime: 5.0,
-        gravity: 0.0,
-        bullet: bullet.clone(),
-        torpedo: is_torpedo_bullet(&bullet),
-        side: Side::Player,
-        shooter,
-        target: None,
-        angular_velocity: 0.0,
-        payload: lib.bullets[&bullet].payload,
-        aim: None,
-        pd: false,
-        hp: 1.0,
-        harmless: false,
-        base: false,
-        ricochet: -1000.0,
-        mine_scan: Default::default(),
-        lost_target: false,
-    };
+    let shell = Shell { vel: -normal * 200.0, lifetime: 5.0, hp: 1.0, ..test_shell(&lib, &bullet, shooter) };
     let id = app.world_mut().spawn((shell, Transform::from_translation(at))).id();
     app.insert_resource(lib);
     let full: f32 = app.world().get::<Health>(target).unwrap().sections.iter().sum();
@@ -1155,27 +1120,7 @@ fn a_mine_glances_off_allied_hulls_and_strikes_others() {
     }
     let mut mines = Vec::new();
     for i in 0..2 {
-        let shell = Shell {
-            vel: -normal * 200.0,
-            age: 0.0,
-            lifetime: 1000.0,
-            gravity: 0.0,
-            bullet: bullet.clone(),
-            torpedo: is_torpedo_bullet(&bullet),
-            side: Side::Player,
-            shooter,
-            target: None,
-            angular_velocity: 0.0,
-            payload: lib.bullets[&bullet].payload,
-            aim: None,
-            pd: false,
-            hp: 20.0,
-            harmless: false,
-            base: false,
-            ricochet: -1000.0,
-            mine_scan: Default::default(),
-            lost_target: false,
-        };
+        let shell = Shell { vel: -normal * 200.0, lifetime: 1000.0, hp: 20.0, ..test_shell(&lib, &bullet, shooter) };
         mines.push(app.world_mut().spawn((shell, Transform::from_translation(at + Vec3::new(1000.0 * i as f32, 0.0, 0.0)))).id());
     }
     app.insert_resource(lib);
@@ -1223,27 +1168,7 @@ fn land_in_the_way_stops_a_shell_before_the_hull() {
     let farther_ship = app.world().get::<Ship>(target).unwrap().clone();
     let _farther = app.world_mut().spawn((Transform::from_translation(-normal * 100.0), farther_ship, Health::new(&lib.classes[c]), Fires::default())).id();
     let at = (ta + tb + tc) / 3.0 + normal * 40.0;
-    let shell = Shell {
-        vel: -normal * 200.0,
-        age: 0.0,
-        lifetime: 5.0,
-        gravity: 0.0,
-        bullet: bullet.clone(),
-        torpedo: is_torpedo_bullet(&bullet),
-        side: Side::Player,
-        shooter,
-        target: None,
-        angular_velocity: 0.0,
-        payload: lib.bullets[&bullet].payload,
-        aim: None,
-        pd: false,
-        hp: 1.0,
-        harmless: false,
-        base: false,
-        ricochet: -1000.0,
-        mine_scan: Default::default(),
-        lost_target: false,
-    };
+    let shell = Shell { vel: -normal * 200.0, lifetime: 5.0, hp: 1.0, ..test_shell(&lib, &bullet, shooter) };
     let id = app.world_mut().spawn((shell, Transform::from_translation(at))).id();
     // A wall of land across the line of fire, 20 units in front of the hull.
     let (u, v) = (normal.any_orthonormal_vector() * 500.0, normal.cross(normal.any_orthonormal_vector()) * 500.0);
@@ -1316,7 +1241,7 @@ fn a_map_mine_rests_where_the_map_put_it_and_fights_for_no_one_until_given_an_ow
     app.update();
     let shell = app.world().get::<Shell>(e).expect("the map mine became a shell");
     assert_eq!((shell.vel, shell.aim), (Vec3::ZERO, Some(at)));
-    assert_eq!(shell.side, crate::scenario::HOSTILE_TO_ALL, "hostile to every ship until the script names an owner");
+    assert_eq!(shell.side, crate::alliance::NEUTRAL, "allied with every ship (it damages none) until the script names an owner");
     assert!(matches!(shell.payload, Payload::Mine { sight, .. } if sight == 50.0));
 }
 
@@ -1343,27 +1268,7 @@ fn a_mine_picks_its_target_five_seconds_after_it_is_laid() {
     app.world_mut().spawn((Transform::from_translation(Vec3::new(30.0, 0.0, 0.0)), ship, Health::new(&lib.classes[c]), Fires::default()));
     let shooter = app.world_mut().spawn_empty().id();
     let bullet = "Bullet_StarMine_Med".to_string();
-    let shell = Shell {
-        vel: Vec3::ZERO,
-        age: 0.0,
-        lifetime: 1000.0,
-        gravity: 0.0,
-        bullet: bullet.clone(),
-        torpedo: is_torpedo_bullet(&bullet),
-        side: Side::Player,
-        shooter,
-        target: None,
-        angular_velocity: 0.0,
-        payload: lib.bullets[&bullet].payload,
-        aim: None,
-        pd: false,
-        hp: 20.0,
-        harmless: false,
-        base: false,
-        ricochet: -1000.0,
-        mine_scan: Default::default(),
-        lost_target: false,
-    };
+    let shell = Shell { vel: Vec3::ZERO, lifetime: 1000.0, hp: 20.0, ..test_shell(&lib, &bullet, shooter) };
     let id = app.world_mut().spawn((shell, Transform::default())).id();
     app.insert_resource(lib);
     for _ in 0..4 {
@@ -1520,27 +1425,7 @@ fn a_new_shell_first_moves_in_the_tick_after_it_was_created() {
         .insert_resource(Spawn(None))
         .add_systems(Update, (crate::tick_start, spawn_once, shells).chain());
     let bullet = lib.guns["Gun_CannonBall_Heavy"].bullet.clone();
-    let shell = Shell {
-        vel: Vec3::new(0.0, 0.0, -100.0),
-        age: 0.0,
-        lifetime: 5.0,
-        gravity: 0.0,
-        bullet: bullet.clone(),
-        torpedo: is_torpedo_bullet(&bullet),
-        side: Side::Player,
-        shooter: Entity::PLACEHOLDER,
-        target: None,
-        angular_velocity: 0.0,
-        payload: lib.bullets[&bullet].payload,
-        aim: None,
-        pd: false,
-        hp: 1.0,
-        harmless: false,
-        base: false,
-        ricochet: -1000.0,
-        mine_scan: Default::default(),
-        lost_target: false,
-    };
+    let shell = Shell { vel: Vec3::new(0.0, 0.0, -100.0), lifetime: 5.0, hp: 1.0, ..test_shell(&lib, &bullet, Entity::PLACEHOLDER) };
     app.insert_resource(lib);
     app.world_mut().resource_mut::<Spawn>().0 = Some(shell);
     let tick = |app: &mut App| {
@@ -1919,4 +1804,47 @@ fn a_sinking_ship_sends_one_destroyed_credited_to_its_last_damager() {
     assert!(app.world().get::<Sinking>(victim).is_some() && app.world().get::<Sinking>(unhit).is_some(), "all three start sinking");
     app.update();
     assert!(app.world_mut().resource_mut::<Messages<Destroyed>>().drain().next().is_none(), "once, not every frame");
+}
+
+/// A shell of `bullet` fired by `shooter` for the player's side: at rest, no target, no ricochet; a test sets what it needs.
+fn test_shell(lib: &Library, bullet: &str, shooter: Entity) -> Shell {
+    Shell {
+        vel: Vec3::ZERO,
+        age: 0.0,
+        lifetime: 5.0,
+        gravity: 0.0,
+        bullet: bullet.into(),
+        torpedo: is_torpedo_bullet(bullet),
+        side: Side::Player,
+        shooter,
+        target: None,
+        angular_velocity: 0.0,
+        payload: lib.bullets[bullet].payload,
+        aim: None,
+        pd: false,
+        hp: 1.0,
+        harmless: false,
+        base: false,
+        ricochet: -1000.0,
+        mine_scan: Default::default(),
+        lost_target: false,
+    }
+}
+
+/// A computer ship may shoot an animal (a dragon) hostile to its own side even when the human is allied with it, and not one allied
+/// with its side; a rock is anyone's.
+#[test]
+fn a_computer_ship_shoots_animals_hostile_to_its_own_side_not_the_humans() {
+    use super::gunnery::{AimTarget, object_target};
+    let (reds, dragons) = (Side(1), Side(2));
+    let mut table = crate::alliance::Alliances::default();
+    table.set(Side::Player, dragons, true);
+    let at = |i| AimTarget { entity: Entity::from_raw_u32(i).unwrap(), position: Vec3::ZERO, velocity: Vec3::ZERO };
+    let space = [(at(1), Some(dragons)), (at(2), None)];
+    let hit = |t: u32, shooter, table: &crate::alliance::Alliances| object_target(&space, table, at(t).entity, shooter, false).is_some();
+    assert!(hit(1, reds, &table), "hostile to the computer's side: its target, though the human's ally");
+    assert!(!hit(1, Side::Player, &table), "not the human's foe");
+    table.set(reds, dragons, true);
+    assert!(!hit(1, reds, &table), "allied with its side: never");
+    assert!(hit(2, reds, &table) && hit(2, Side::Player, &table), "a rock is anyone's");
 }

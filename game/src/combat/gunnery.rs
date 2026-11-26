@@ -229,6 +229,8 @@ pub(super) fn lob_velocity(d: Vec3, angle: f32, g: f32) -> Option<Vec3> {
 pub(super) struct Contact {
     pub(super) entity: Entity,
     pub(super) side: Side,
+    /// On the human's side of the alliance table.
+    pub(super) with_human: bool,
     /// Where shots go: the clicked section or the hull's aim point, in world space.
     pub(super) aim_point: Vec3,
     /// Alive, script-visible and (once filtered per shooter) in sight.
@@ -247,6 +249,12 @@ pub(super) struct AimTarget {
     pub(super) entity: Entity,
     pub(super) position: Vec3,
     pub(super) velocity: Vec3,
+}
+
+/// The object `t` (a rock, an animal or a base, with the side it fights for) if a ship of side `shooter` may shoot it: a rock always,
+/// anything else when it is hostile to the shooter's own side (`by_hand`: the human's own aim may also take a thing of no player).
+pub(super) fn object_target(space: &[(AimTarget, Option<Side>)], table: &crate::alliance::Alliances, t: Entity, shooter: Side, by_hand: bool) -> Option<AimTarget> {
+    space.iter().find(|o| o.0.entity == t && o.1.is_none_or(|s| table.targetable(shooter, s, by_hand))).map(|o| o.0)
 }
 
 /// The line-of-fire hold covers the attack routine's guns: point-defence and mine-laying guns are fired by their own routines.
@@ -282,7 +290,7 @@ pub(super) fn panic_fires(gun: &crate::data::GunDef, mine: bool) -> bool {
 pub(super) fn panic_target(contacts: &[Contact], tf: &Transform, mount: &crate::data::Mount, gun: &crate::data::GunDef) -> Option<AimTarget> {
     let origin = tf.transform_point(mount.pos);
     let to_mount = (tf.rotation * mount.rot).inverse();
-    let in_arc = contacts.iter().filter(|c| c.side != Side::Player && c.visible).filter(|c| {
+    let in_arc = contacts.iter().filter(|c| !c.with_human && c.visible).filter(|c| {
         let offset = c.aim_point - origin;
         let local = to_mount * offset;
         Vec2::new(offset.x, offset.z).length() <= gun.range[2] && crate::geom::arc_covers(local, mount.arc)
@@ -343,7 +351,7 @@ pub(super) fn fire(
         (Entity, &Transform, Option<&crate::environment::SpaceAnimal>, Option<(&ArmedBase, &Health, &crate::campaign::MissionBase)>, Option<&BaseSide>),
         (Or<(With<Asteroid>, With<crate::environment::SpaceAnimal>, With<ArmedBase>)>, Without<GunPart>),
     >,
-    campaign: Option<Res<crate::campaign::Mission>>,
+    (campaign, table): (Option<Res<crate::campaign::Mission>>, crate::alliance::Hostility),
     mut shooters: Query<(
         Entity,
         &Transform,
@@ -396,6 +404,7 @@ pub(super) fn fire(
         .map(|(entity, transform, ship, health, is_player, mission_ship, cloak)| Contact {
             entity,
             side: ship.side,
+            with_human: table.with_human(ship.side),
             aim_point: transform.transform_point(ship_aim_point(&lib.classes[ship.class], health, if Some(entity) == target.0 { target.1 } else { None })),
             // A fully cloaked ship is never picked as a gun target, whoever knows it is there.
             visible: !health.destroyed && mission_ship.is_none_or(|m| m.visible) && cloak.is_none_or(|c| c.state != crate::cloak::State::Full),
@@ -403,30 +412,29 @@ pub(super) fn fire(
             velocity: transform.rotation * Vec3::NEG_Z * ship.speed,
         })
         .collect();
-    let rocks: Vec<AimTarget> = objects
+    // Rocks, animals and bases with the side each fights for (none for a rock; a hidden animal is left out). Whether a ship may shoot
+    // one is its own side's question (`rock`): a computer ship's foes are its owner's, not the human's.
+    let space: Vec<(AimTarget, Option<Side>)> = objects
         .iter()
-        .filter(|(_, _, a, base, side)| {
-            a.is_none_or(|a| a.visible && campaign.as_deref().is_some_and(|m| m.script.hostile(m.script.player(), &a.owner)))
-                && base.is_none_or(|(_, _, b)| match side {
-                    Some(side) => side.0 != Side::Player,
-                    None => campaign.as_deref().is_some_and(|m| m.script.hostile(m.script.player(), &b.owner)),
-                })
-        })
-        .filter_map(|(entity, transform, animal, base, _)| {
+        .filter(|(_, _, a, ..)| a.is_none_or(|a| a.visible))
+        .filter_map(|(entity, transform, animal, base, side)| {
             let position = match base {
                 Some((b, h, _)) => transform.transform_point(base_aim_point(&lib.classes[b.class], h, (target.0 == Some(entity)).then_some(target.1).flatten())?),
                 None => transform.translation,
             };
-            Some(AimTarget { entity, position, velocity: animal.map_or(Vec3::ZERO, |a| a.velocity) })
+            let owner = animal.map(|a| table.side_or_neutral(&a.owner)).or_else(|| base.and_then(|(_, _, b)| table.base_side(Some(b), side)));
+            Some((AimTarget { entity, position, velocity: animal.map_or(Vec3::ZERO, |a| a.velocity) }, owner))
         })
         .collect();
-    // Skirmish bases of any side, for the computer captains that hunt the base of the other team.
+    let rock = |t: Entity, shooter: Side, by_hand: bool| object_target(&space, &table, t, shooter, by_hand);
+    // Bases of any side, for the computer captains that hunt a hostile base.
     let base_targets: Vec<(AimTarget, Side)> = objects
         .iter()
         .filter_map(|(entity, transform, _, base, side)| {
-            let ((b, h, _), side) = (base?, side?);
+            let (b, h, mb) = base?;
+            let side = table.base_side(Some(mb), side)?;
             let position = transform.transform_point(base_aim_point(&lib.classes[b.class], h, None)?);
-            Some((AimTarget { entity, position, velocity: Vec3::ZERO }, side.0))
+            Some((AimTarget { entity, position, velocity: Vec3::ZERO }, side))
         })
         .collect();
     let mut seen: Vec<Contact> = Vec::with_capacity(contacts.len()); // reused: refilled per shooter
@@ -436,7 +444,8 @@ pub(super) fn fire(
     let mut walk = shooters.iter_many_mut(&order);
     while let Some(item) = walk.fetch_next() {
         let Ok((me, tf, ship, mut states, health, mission, primary, pilot, cloak, posts, boarding, scan, abandoned)) = item else { continue };
-        if health.destroyed || abandoned {
+        // A Dummy fires nothing, mines and point defence included (PROVISIONAL).
+        if health.destroyed || abandoned || mission.is_some_and(|m| m.stance == crate::rules::Stance::Dummy) {
             ground.remove(&me);
             continue;
         }
@@ -444,35 +453,33 @@ pub(super) fn fire(
         seen.extend(contacts.iter().map(|c| Contact { visible: c.visible && sensors.in_sight(me, c.entity, campaign.as_deref()), ..*c }));
         let cloaked_now = cloak.as_ref().is_some_and(|c| c.holds_fire());
         let class = &lib.classes[ship.class];
-        let generic = posts.is_none().then(|| crate::crew_arms::fallback_posts(ship, boarding, &class.name)).flatten();
+        let generic = posts.is_none().then(|| crate::crew_arms::fallback_posts(table.with_human(ship.side), boarding, &class.name)).flatten();
         // Player's command ship: only the clicked target (retail: direct-fire guns need an enemy click or panic fire). Its other
         // ships: the nearest living enemy. Enemies: their captain's target.
-        // Mission ships other than the player's fire at the target the rules' AI chose (rules::mission_ai). Skirmish ships carry
-        // MissionShip too (map scripts), but no rules AI aims them: unless their script set a target, their captain's applies.
         let ship_target = if pilot.is_some_and(|p| p.hold_fire) || mission.is_some_and(|m| m.hold_fire) {
             None
         } else if let Some(t) = pilot.filter(|_| !primary).and_then(|p| p.target) {
-            seen.iter().find(|c| c.entity == t && c.side != ship.side && c.visible).map(Contact::aim).or_else(|| rocks.iter().find(|r| r.entity == t).copied())
-        } else if let (Some(m), false) = (mission.filter(|m| campaign.is_some() || m.target.is_some()), primary) {
-            m.target.and_then(|t| seen.iter().find(|c| c.entity == t && c.visible).map(Contact::aim).or_else(|| rocks.iter().find(|r| r.entity == t).copied()))
-        } else if let (Side::Player, Some(r)) = (ship.side, target.0.filter(|_| primary).and_then(|t| rocks.iter().find(|r| r.entity == t))) {
-            Some(*r) // selected space object (asteroid or whale)
+            seen.iter().find(|c| c.entity == t && table.hostile(c.side, ship.side) && c.visible).map(Contact::aim).or_else(|| rock(t, ship.side, false))
+        } else if let (Side::Player, Some(r)) = (ship.side, target.0.filter(|_| primary).and_then(|t| rock(t, ship.side, true))) {
+            Some(r) // selected space object (asteroid or whale)
         } else {
             match ship.side {
                 Side::Player => seen
                     .iter()
-                    .find(|c| primary && Some(c.entity) == target.0 && c.side != Side::Player && c.visible)
-                    .or_else(|| crate::nearest(seen.iter().filter(|c| !primary && c.side != Side::Player && c.visible), tf.translation, |c| c.aim_point))
+                    .find(|c| primary && Some(c.entity) == target.0 && table.targetable(ship.side, c.side, true) && c.visible)
+                    .or_else(|| crate::nearest(seen.iter().filter(|c| !primary && !c.with_human && c.visible), tf.translation, |c| c.aim_point))
                     .map(Contact::aim),
-                // Skirmish computer ships fire at their captain's target (ship::CaptainTargets): a ship, else a hostile base; without one, the player ship.
+                // Computer ships fire at their captain's target (ship::CaptainTargets): a ship, a base or an animal hostile to their own
+                // side, or a rock the script ordered attacked; without one, the player ship when it is hostile.
                 // A ship target is aimed at the section its captain picked on choosing it (ship::CaptainTargets), not the hull's centre.
                 _ => match captains.as_deref().and_then(|c| c.aim_of(me)) {
                     Some((t, local)) => seen
                         .iter()
-                        .find(|c| c.entity == t && c.visible)
+                        .find(|c| c.entity == t && c.visible && table.hostile(c.side, ship.side))
                         .map(|c| AimTarget { position: others.get(t).map_or(c.aim_point, |o| o.1.transform_point(local)), ..c.aim() })
-                        .or_else(|| base_targets.iter().find(|b| b.0.entity == t && b.1 != ship.side).map(|b| b.0)),
-                    None => seen.iter().find(|c| c.is_player && c.visible).map(Contact::aim),
+                        .or_else(|| base_targets.iter().find(|b| b.0.entity == t && table.hostile(b.1, ship.side)).map(|b| b.0))
+                        .or_else(|| rock(t, ship.side, false)),
+                    None => seen.iter().find(|c| c.is_player && c.visible && table.hostile(c.side, ship.side)).map(Contact::aim),
                 },
             }
         };
@@ -480,13 +487,10 @@ pub(super) fn fire(
         // A computer captain holds fire while a friendly ship or scenery is on the line to the aim point (docs/re/gunnery.md).
         let blocked = |t: &AimTarget| {
             let (start, end) = (tf.translation, t.position);
-            fn who<'a>(s: &Ship, m: Option<&'a crate::campaign::MissionShip>) -> (Option<&'a str>, Option<Side>) {
-                (m.map(|m| m.owner.as_str()), Some(s.side))
-            }
             let me_is_boat = class.is_lifeboat;
-            let friends = others.iter().filter(|o| o.0 != me).filter_map(|(_, otf, os, _, _, om, _)| {
+            let friends = others.iter().filter(|o| o.0 != me).filter_map(|(_, otf, os, ..)| {
                 let oc = &lib.classes[os.class];
-                let friendly = me_is_boat || oc.is_lifeboat || crate::boarding::allied_pair(campaign.as_deref(), who(ship, mission), who(os, om));
+                let friendly = me_is_boat || oc.is_lifeboat || table.allied(ship.side, os.side);
                 friendly.then(|| (otf.transform_point(oc.sphere.0), oc.sphere.1))
             });
             crate::line_of_fire::friend_in_line(start, end, friends)
@@ -537,8 +541,8 @@ pub(super) fn fire(
         let line_blocked = rock_busy.is_none() && !primary && ship_target.is_some_and(|t| blocked(&t));
         let is_mine = |gun: &str| matches!(lib.bullets[&lib.guns[gun].bullet].payload, Payload::Mine { .. });
         let laying = states.0.iter().any(|s| is_mine(&s.gun)) && {
-            let hostile = contacts.iter().any(|c| c.side != ship.side && c.visible);
-            let nearest = seen.iter().filter(|c| c.side != ship.side && c.visible).map(|c| c.aim_point.distance(tf.translation)).fold(f32::MAX, f32::min);
+            let hostile = contacts.iter().any(|c| table.hostile(c.side, ship.side) && c.visible);
+            let nearest = seen.iter().filter(|c| table.hostile(c.side, ship.side) && c.visible).map(|c| c.aim_point.distance(tf.translation)).fold(f32::MAX, f32::min);
             mine_laying.entry(me).or_default().step(dt, hostile, ship.speed.abs(), nearest)
         };
         // Computer ships' lob guns aim at ground points (see `ground_point`), renewed at the AI's think rate; with no target the
@@ -590,7 +594,7 @@ pub(super) fn fire(
                 }),
                 // Point defence: the nearest hostile torpedo or mine within its maximum range (retail: PD guns never fire at ships).
                 _ if gun.point_defense => crate::nearest(
-                    incoming.iter().filter(|(threat, side)| *side != ship.side && threat.position.distance(tf.transform_point(mount.pos)) <= gun.range[2]),
+                    incoming.iter().filter(|(threat, side)| table.hostile(*side, ship.side) && threat.position.distance(tf.transform_point(mount.pos)) <= gun.range[2]),
                     tf.translation,
                     |(threat, _)| threat.position,
                 )
@@ -737,6 +741,7 @@ pub(super) fn fire(
                         harmless: mission.is_some_and(|ms| ms.warning_shots),
                         base: false,
                         ricochet: band(gun, distance, gun.ricochet),
+                        ours: table.with_human(ship.side),
                     };
                     launch_shell(
                         &mut commands,
@@ -799,6 +804,8 @@ pub(super) struct Launch {
     pub(super) harmless: bool,
     pub(super) base: bool,
     pub(super) ricochet: f32,
+    /// Fired from the human's side of the alliance table: drawn as the player's shells.
+    pub(super) ours: bool,
 }
 
 /// Spawns one shell of gun `g` from muzzle `mz` (its fire sound, muzzle flash and bullet effect included).
@@ -825,7 +832,7 @@ pub(super) fn launch_shell(
     if let Some((n, vol, max)) = &g.sound {
         sfx.write(Sfx { name: n.clone(), at: Some(from), vol: *vol, max: *max });
     }
-    let mat = if side == Side::Player { look.shell.clone() } else { look.enemy_shell.clone() };
+    let mat = if shot.ours { look.shell.clone() } else { look.enemy_shell.clone() };
     let vel = shot.vel.unwrap_or_else(|| launch_velocity(dir, g.muzzle, g.bullet_torpedo));
     let stf = Transform::from_translation(from).looking_to(vel, Vec3::Y);
     let shell = commands
@@ -896,7 +903,7 @@ pub(super) fn base_fire(
     (mut rng, spawn_order): (ResMut<SimRng>, Query<&crate::scenario::SpawnIndex>),
     mut sfx: MessageWriter<Sfx>,
     mut fired: MessageWriter<Fired>,
-    campaign: Option<Res<crate::campaign::Mission>>,
+    (campaign, table): (Option<Res<crate::campaign::Mission>>, crate::alliance::Hostility),
     mut bases: Query<
         (Entity, &Transform, &crate::campaign::MissionBase, &ArmedBase, &Health, &mut GunStates, Option<&BaseSide>, Option<&IslandGunnery>, Option<&Visibility>),
         Without<GunPart>,
@@ -916,7 +923,9 @@ pub(super) fn base_fire(
         }
         let class = &lib.classes[armed.class];
         let volcano = class.name.starts_with("Island_Volcano");
-        // The nearest visible hostile ship in sight, with its side.
+        // Volcanoes belong to nobody and fire on every visible ship; other bases on the ships hostile to their side.
+        let own = if volcano { Some(crate::scenario::HOSTILE_TO_ALL) } else { table.base_side(Some(base), skirmish_side) };
+        // The nearest visible hostile ship in sight.
         let target = ships
             .iter()
             .filter(|(_, ship, h, m, _, pilot)| {
@@ -924,20 +933,15 @@ pub(super) fn base_fire(
                     && !island.is_some_and(|i| i.silent)
                     // PROVISIONAL: a Neutral island fires only at ships whose captain targets it.
                     && !island.is_some_and(|i| i.neutral && !pilot.is_some_and(|p| p.target == Some(me)))
-                    && match (&campaign, skirmish_side) {
-                        // Volcanoes belong to nobody and fire on every visible ship.
-                        (Some(_), _) if volcano => m.is_some_and(|m| m.visible),
-                        (Some(mission), _) => m.is_some_and(|m| m.visible && mission.script.hostile(&base.owner, &m.owner)),
-                        (None, Some(side)) => ship.side != side.0,
-                        (None, None) => false,
-                    }
+                    && m.is_none_or(|m| m.visible)
+                    && own.is_some_and(|o| table.hostile(o, ship.side))
             })
             .map(|(transform, ship, _, _, entity, _)| {
                 let position = transform.transform_point(lib.classes[ship.class].centre);
-                (AimTarget { entity, position, velocity: transform.rotation * Vec3::NEG_Z * ship.speed }, ship.side)
+                AimTarget { entity, position, velocity: transform.rotation * Vec3::NEG_Z * ship.speed }
             })
-            .filter(|(t, _)| sensors.in_sight(me, t.entity, campaign.as_deref()))
-            .nearest_to(tf.translation, |a| a.0.position);
+            .filter(|t| sensors.in_sight(me, t.entity, campaign.as_deref()))
+            .nearest_to(tf.translation, |a| a.position);
         // PROVISIONAL: a volcano fires one shell at a time, its mounts taking turns.
         let mut volcano_cycle = None;
         for (mount, state) in class.mounts.iter().zip(states.0.iter_mut()) {
@@ -948,9 +952,9 @@ pub(super) fn base_fire(
             let dead = mount.parent.is_some_and(|p| health.sections[p] <= 0.0);
             // Mortar towers lob at the ship (PROVISIONAL: mines/grav charges on bases are not seen in the data and stay idle).
             let usable = !is_indirect(&lib, &mount.gun) || gun.lob.is_some();
-            let aim_at = target.map(|t| t.0).filter(|_| !dead && !gun.point_defense && usable);
+            let aim_at = target.filter(|_| !dead && !gun.point_defense && usable);
             let engaged = aim_turret(state, gun, mount, mount_rot, origin, aim_at, dt, &mut parts);
-            let (Some((aim_dir, distance)), Some((aim_at, target_side))) = (engaged, target) else {
+            let (Some((aim_dir, distance)), Some(aim_at)) = (engaged, target) else {
                 state.burst_left = 0;
                 continue;
             };
@@ -973,13 +977,14 @@ pub(super) fn base_fire(
                 for i in 0..state.muzzles.len() {
                     let muzzle = state.muzzles[i];
                     let turn = burst_turn(aim_dir, state.dev, &mut rng);
-                    // The shell must hit ships of the target's side; the shooter's own side is the other one.
-                    let side = skirmish_side.map_or(if target_side == Side::Player { Side::Enemy } else { Side::Player }, |b| b.0);
+                    // The shell fights for the base's side.
+                    let side = own.unwrap_or(crate::scenario::HOSTILE_TO_ALL);
                     let shot = Launch {
                         vel: gun.lob.and_then(|a| lob_velocity(aim_at.position - origin, a, gun.shell_gravity())).map(|v| turn * v),
                         aim: (is_indirect(&lib, &mount.gun) || gun.lob.is_some()).then_some(aim_at.position),
                         base: true,
                         ricochet: band(gun, distance, gun.ricochet),
+                        ours: table.with_human(side),
                         ..default()
                     };
                     let muzzle_transform = globals.get(muzzle).ok().copied();

@@ -15,7 +15,8 @@ pub struct MissionShip {
     pub invuln: f32,
     pub visible: bool,
     pub stance: rules::Stance,
-    pub target: Option<Entity>,
+    /// The unit the script's attack order (`attack`) names now, for the captain (`ship::ai`).
+    pub ordered: Option<Entity>,
     pub attack: Vec<String>,
     pub flag: String,
     pub banner: String,
@@ -495,8 +496,10 @@ pub fn spawn(commands: &mut Commands, assets: &AssetServer, lib: &Library, fxl: 
         let setup = islands.iter().find(|(i, ..)| Some(*i) == o["id"].as_i64()).map(|(_, o, c, g)| (o.clone(), *c, *g));
         // A base no rule sets up (mission 5's Grant and pirate base, 7's Regina, 8's Mining Camp) is still a rules unit with its class's guns
         // and hit points: the rules address it by its TWT group for docking, owner and dockable changes, and mission 5's pirate base must be
-        // destroyed. With no owner until a rule gives one it shoots nobody. PROVISIONAL: default gunnery (no skill level).
-        let unset_base = || (String::new(), 0, crate::combat::IslandGunnery { accuracy: 1.0, silent: false, neutral: false });
+        // destroyed. It belongs to the map object's player (none: NO PLAYER, and it shoots nobody) until a rule gives it another.
+        // PROVISIONAL: default gunnery (no skill level).
+        let placed = o["player"].as_u64().and_then(|i| mission.data["players"].get(i as usize)).and_then(Value::as_str).unwrap_or_default().to_string();
+        let unset_base = || (placed.clone(), 0, crate::combat::IslandGunnery { accuracy: 1.0, silent: false, neutral: false });
         let Some((owner, combat, gunnery)) = setup.or_else(|| o["type"].as_str().is_some_and(|t| t.starts_with("Base_")).then(unset_base)) else {
             // Most volcanoes have no setup rule; they still fire (docs/re/volcanoes.md).
             if let Some(class) = o["type"].as_str().filter(|t| t.starts_with("Island_Volcano")).and_then(|t| lib.classes.iter().position(|c| c.name == t)) {
@@ -512,7 +515,7 @@ pub fn spawn(commands: &mut Commands, assets: &AssetServer, lib: &Library, fxl: 
             }
             continue;
         };
-        commands.entity(*e).insert(MissionBase { id: o["id"].as_i64().unwrap_or(-1), owner });
+        commands.entity(*e).insert(MissionBase { id: o["id"].as_i64().unwrap_or(-1), owner: owner.clone() });
         // Bases are boarded only once a rule sets them Boardable (their 'Combat Strength' is what the boarders must wear down).
         commands.entity(*e).insert(crate::boarding::Boardable::base(o["type"].as_str().unwrap_or_default(), combat, false));
         // Island gun towers: a `Base_*` class with mounts makes the base a shooter and a target (combat::base_fire).
@@ -524,6 +527,7 @@ pub fn spawn(commands: &mut Commands, assets: &AssetServer, lib: &Library, fxl: 
                 states,
                 crate::combat::DamageFx::new(&lib.classes[class]),
                 gunnery,
+                crate::combat::BaseFlag::new(&owner),
             ));
         }
     }
@@ -565,11 +569,14 @@ pub fn spawn(commands: &mut Commands, assets: &AssetServer, lib: &Library, fxl: 
         let forward = crate::scenario::game_rotation(&s["rot"]) * Vec3::NEG_Z;
         let heading = crate::geom::heading_of(forward);
         let owner: crate::names::Owner = s["group"].as_str().unwrap_or("").into();
-        let e = crate::spawn_ship(commands, assets, lib, fxl, s["type"].as_str().unwrap(), Side::Player, pos, heading, None);
+        // Each ship fights for its owner's side in the alliance table (a lifeboat for the human's; mission_ai follows owner changes).
+        let boat = lib.classes.iter().any(|c| c.is_lifeboat && Some(c.name.as_str()) == s["type"].as_str());
+        let side = if boat { Side::Player } else { mission.script.alliances.side_or_neutral(&owner) };
+        let e = crate::spawn_ship(commands, assets, lib, fxl, s["type"].as_str().unwrap(), side, pos, heading, None);
         commands.entity(e).insert(crate::ship::FleetMember(owner.clone(), slot));
         commands.entity(e).insert(MissionShip::placed(id, s["name"].as_str().unwrap_or_default().into(), owner));
         // A pre-placed lifeboat (mission 4) is a real one, found by the class flag; it is not part of any fleet roster.
-        if lib.classes.iter().any(|c| c.is_lifeboat && Some(c.name.as_str()) == s["type"].as_str()) {
+        if boat {
             commands.entity(e).insert(crate::lifeboats::Lifeboat { owner: s["group"].as_str().unwrap_or("").into() }).remove::<crate::ship::FleetMember>();
         }
         // Setup Ship: 'Crew Skill Level' and 'Boardable' (ships without one cannot be boarded).
@@ -587,6 +594,9 @@ pub fn spawn(commands: &mut Commands, assets: &AssetServer, lib: &Library, fxl: 
     crate::environment::spawn(commands, assets, &mission.data, false);
     // Not retail: the campaign counters the mission before this one in the mod's campaign handed on.
     let id = mission.id.clone();
+    // The battle's alliance table starts as the mission's (its allied player pairs); the rule update lends it back to the script.
+    let mut mission = mission;
+    commands.insert_resource(std::mem::take(&mut mission.script.alliances));
     commands.insert_resource(mission);
     commands.queue(move |w: &mut World| {
         let values = w.get_resource::<CampaignValues>().map(|c| c.incoming(&id)).unwrap_or_default();

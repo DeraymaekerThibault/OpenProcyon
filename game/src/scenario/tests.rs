@@ -138,22 +138,7 @@ mod rotation_tests {
             .init_resource::<ship::Fleets>()
             .init_resource::<Target>()
             .insert_resource(Orbit { yaw: 0.0, pitch: 0.0, dist: 60.0, focus: None })
-            .insert_resource(Config {
-                groups: vec![],
-                player: "Ship_Navy_Tender".into(),
-                allies: vec![],
-                enemies: vec!["Ship_Navy_Cutter".into()],
-                map: Some("red_rover".into()),
-                shot: None,
-                frame: 0,
-                speed: 1.0,
-                ended: None,
-                script: None,
-                autolaunch: false,
-                shot_frame: 0,
-                shot_frames: vec![],
-                late_frame: 0,
-            });
+            .insert_resource(Config { player: "Ship_Navy_Tender".into(), enemies: vec!["Ship_Navy_Cutter".into()], map: Some("red_rover".into()), speed: 1.0, ..default() });
         app.world_mut()
             .run_system_once(|mut c: Commands, a: Res<AssetServer>, l: Res<Library>, f: Res<fx::FxLib>, s: Res<collision::Shapes>, r: Res<data::AsteroidDefs>, cfg: Res<Config>| {
                 spawn_scenario(&mut c, &a, &l, &f, &s, &r, &cfg)
@@ -164,6 +149,47 @@ mod rotation_tests {
         let scenery = w.query_filtered::<&crate::docking::Dockable, Without<Ship>>().iter(w).filter(|d| d.enabled).count();
         assert_eq!(ships, 1, "the player's tender");
         assert_eq!(scenery, 2, "red_rover's Montgomery and pirate bases");
+    }
+
+    /// A skirmish fleet starts with its map slot's formation type but holds none: no ship follows a slot, so the captain drives them.
+    #[test]
+    #[ignore = "needs imported assets"]
+    fn a_fleet_starts_with_its_formation_selected_and_no_ship_holding_it() {
+        use bevy::ecs::system::RunSystemOnce;
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, AssetPlugin::default()))
+            .init_asset::<bevy::world_serialization::WorldAsset>()
+            .init_asset::<Mesh>()
+            .init_asset::<Image>()
+            .init_asset::<StandardMaterial>()
+            .init_asset::<AudioSource>()
+            .init_asset::<crate::fx::EffectMaterial>()
+            .insert_resource(crate::testutil::lib())
+            .init_resource::<fx::FxLib>()
+            .init_resource::<collision::Shapes>()
+            .init_resource::<data::AsteroidDefs>()
+            .init_resource::<ship::Fleets>()
+            .init_resource::<Target>()
+            .insert_resource(Orbit { yaw: 0.0, pitch: 0.0, dist: 60.0, focus: None })
+            .insert_resource(Config {
+                player: "Ship_Navy_Cutter".into(),
+                allies: vec!["Ship_Navy_Cutter".into(), "Ship_Navy_Cutter".into()],
+                enemies: vec!["Ship_Navy_Cutter".into()],
+                map: Some("red_rover".into()),
+                speed: 1.0,
+                ..default()
+            });
+        app.world_mut()
+            .run_system_once(|mut c: Commands, a: Res<AssetServer>, l: Res<Library>, f: Res<fx::FxLib>, s: Res<collision::Shapes>, r: Res<data::AsteroidDefs>, cfg: Res<Config>| {
+                spawn_scenario(&mut c, &a, &l, &f, &s, &r, &cfg)
+            })
+            .unwrap();
+        let w = app.world_mut();
+        let formed = w.resource::<ship::Fleets>().groups.values().filter(|f| f.formation != ship::Formation::None).count();
+        assert!(formed > 0, "red_rover gives its fleets Line Abreast");
+        let pilots = w.query::<&ship::FleetPilot>().iter(w).count();
+        assert!(pilots >= 3, "the fleets have followers: {pilots}");
+        assert!(w.query::<&ship::FleetPilot>().iter(w).all(|p| !p.hold), "no ship holds formation at the start");
     }
 
     #[test]
@@ -188,23 +214,35 @@ mod rotation_tests {
         use bevy::ecs::system::RunSystemOnce;
         let mut app = App::new();
         app.init_resource::<Time>().insert_resource(Outcome::Victory).init_resource::<EndMessage>().init_resource::<EndLine>().insert_resource(Config {
-            groups: vec![],
             player: "Ship_Navy_Cutter".into(),
-            allies: vec![],
-            enemies: vec![],
             map: Some("red_rover".into()),
-            shot: None,
-            frame: 0,
             speed: 1.0,
-            ended: None,
-            script: None,
-            autolaunch: false,
-            shot_frame: 0,
-            shot_frames: vec![],
-            late_frame: 0,
+            ..default()
         });
         app.world_mut().run_system_once(outcome).unwrap(); // no PlayerShip left
         assert!(*app.world().resource::<Outcome>() == Outcome::Victory);
+    }
+    /// A mission's rules end it through the same decision as a skirmish: the outcome is set at once (the Game Summary countdown starts),
+    /// and the battlefield shows no end line (the mission keeps its own end text). Asset-free.
+    #[test]
+    fn a_mission_end_sets_the_outcome_without_an_end_line() {
+        use bevy::ecs::system::RunSystemOnce;
+        for won in [true, false] {
+            let mut app = App::new();
+            let data = serde_json::json!({"rules": []});
+            let mut script = crate::rules::Script::new(&data, serde_json::Value::Null);
+            script.ended = Some(("Mission complete.".into(), won));
+            app.init_resource::<Time>().insert_resource(Outcome::Playing).init_resource::<EndMessage>().init_resource::<EndLine>().insert_resource(Config {
+                frame: 5,
+                speed: 1.0,
+                ..default()
+            });
+            app.insert_resource(campaign::Mission { id: "synthetic".into(), script, data, opening: None });
+            app.world_mut().run_system_once(outcome).unwrap();
+            assert_eq!(*app.world().resource::<Outcome>(), if won { Outcome::Victory } else { Outcome::Defeat });
+            assert_eq!(app.world().resource::<EndLine>().0, None, "no end line");
+            assert_eq!(app.world().resource::<Config>().ended, Some(5));
+        }
     }
 }
 
@@ -222,13 +260,30 @@ mod lighting_tests {
     }
 
     #[test]
-    fn setup_island_strengths_come_from_the_script() {
+    fn a_tower_belongs_to_its_map_player_unless_its_setup_names_another() {
+        let players = [serde_json::json!({"name": "navy"}), serde_json::json!({"name": "pirate base"})];
+        let tower = serde_json::json!({"id": 4, "player": 1});
+        assert_eq!(base_owner(&tower, &players, None), "pirate base", "the map object's player, played or not");
+        assert_eq!(base_owner(&tower, &players, Some(&(Some("navy".into()), None))), "navy", "a Setup Island's Player wins");
+        assert_eq!(base_owner(&serde_json::json!({"id": 5, "player": -1}), &players, None), "", "no player: NO PLAYER");
+        // Border Dispute's base players are slots nobody plays: with the map's pairs each fights for its own side, hostile to the
+        // other team, so the fleets go for it; a tower of NO PLAYER is everyone's ally and never fires.
+        let group = |player, side, team| crate::Group { player, side: Side(side), team, ..default() };
+        let players = [serde_json::json!({"name": "navy", "team": 0}), serde_json::json!({"name": "pirates", "team": 1}), serde_json::json!({"name": "pirate base", "team": 1})];
+        let t = battle_alliances(&[group(0, 0, 0), group(1, 1, 1)], &players, Some(&serde_json::json!([["pirates", "pirate base"]])));
+        let base = t.side_or_neutral(&base_owner(&tower, &players, None));
+        assert!(t.hostile(base, Side(0)) && t.allied(base, Side(1)), "the camp of an unplayed slot: the navy's foe, the pirates' ally");
+        assert!(t.allied(t.side_or_neutral(""), Side(0)) && t.allied(t.side_or_neutral(""), Side(1)));
+    }
+
+    #[test]
+    fn setup_island_owners_and_strengths_come_from_the_script() {
         let script = serde_json::json!({"rules": [{"actions": [
-            {"Type": "*State Init* Setup Island", "World Object ID": 1, "Combat Strength": 60},
+            {"Type": "*State Init* Setup Island", "World Object ID": 1, "Combat Strength": 60, "Player/Owner": "pirate base"},
             {"Type": "*State Init* Setup Island", "World Object ID": 133, "Combat Strength": 80},
             {"Type": "Play Music Track"}]}]});
-        let s = setup_strengths(&script);
-        assert_eq!((s[&1], s[&133], s.len()), (60, 80, 2));
+        let s = setup_islands(&script);
+        assert_eq!((s[&1].clone(), s[&133].clone(), s.len()), ((Some("pirate base".into()), Some(60)), (None, Some(80)), 2));
     }
 }
 

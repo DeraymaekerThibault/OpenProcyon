@@ -4,11 +4,9 @@
 use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 use serde_json::Value;
-use std::collections::HashMap;
 
 use super::Script;
 use super::skirmish::SkirmishScript;
-use crate::Side;
 use crate::campaign::Mission;
 
 /// What a script's effects need besides the script itself (`systems::apply::FxParam::env`).
@@ -16,8 +14,6 @@ pub struct ScriptParts<'a> {
     pub script: &'a mut Script,
     /// The mission's or the map's `paths`.
     pub paths: &'a Value,
-    /// A skirmish map's player -> side table; none in the campaign.
-    pub sides: Option<&'a HashMap<String, Side>>,
     /// The mission's id; none in a skirmish.
     pub mission_id: Option<&'a str>,
 }
@@ -70,10 +66,10 @@ impl ActiveScriptMut<'_> {
     pub fn parts(&mut self) -> Option<ScriptParts<'_>> {
         if let Some(m) = self.mission.as_deref_mut() {
             let Mission { script, data, id, .. } = m;
-            Some(ScriptParts { script, paths: &data["paths"], sides: None, mission_id: Some(id.as_str()) })
+            Some(ScriptParts { script, paths: &data["paths"], mission_id: Some(id.as_str()) })
         } else if let Some(sk) = self.skirmish.as_deref_mut() {
-            let SkirmishScript { script, paths, sides, .. } = sk;
-            Some(ScriptParts { script, paths: &*paths, sides: Some(&*sides), mission_id: None })
+            let SkirmishScript { script, paths, .. } = sk;
+            Some(ScriptParts { script, paths: &*paths, mission_id: None })
         } else {
             None
         }

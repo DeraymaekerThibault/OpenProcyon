@@ -52,13 +52,23 @@ pub struct IslandGunnery {
 pub struct ArmedBase {
     pub class: usize,
 }
-/// The side a skirmish base fights for (a mission's bases take their allegiance from the rules instead). A base fires on ships of
-/// any other side and is a target for them. PROVISIONAL: which side a map's base belongs to (`scenario::faction`).
+/// A fixed side for a base that has no owner to follow: a volcano, nobody's (and test worlds). Every other base fights for its owner's
+/// side in the alliance table, so a capture or a rule's owner change moves it at once, guns included.
 #[derive(Component, Clone, Copy)]
 pub struct BaseSide(pub crate::ship::Side);
-/// The side a skirmish base started on; a base whose `BaseSide` differs was captured by boarding (the rules read it).
-#[derive(Component, Clone, Copy)]
-pub struct BaseOrigin(pub crate::ship::Side);
+/// The owner whose flag a base shows (`shows`) and the one it started with (`start`). A capture repaints the flag; a rule's owner
+/// change does not, so after one the base still shows its old owner's flag (PROVISIONAL, the least certain part). A base whose flag
+/// changed was captured (the skirmish end rules read it).
+#[derive(Component, Clone, Debug, PartialEq)]
+pub struct BaseFlag {
+    pub shows: String,
+    pub start: String,
+}
+impl BaseFlag {
+    pub fn new(owner: &str) -> Self {
+        BaseFlag { shows: owner.into(), start: owner.into() }
+    }
+}
 /// docs/re/campaign.md: per section kind (survival, max velocity, manoeuvrability, mission), 1 - the current over the maximum hit
 /// points summed over the sections of that kind; the core is left out. None for a kind the class has no section of.
 pub fn vital_damage(sections: &[crate::data::Section], hp: &[f32]) -> [Option<f32>; 4] {
@@ -187,6 +197,8 @@ pub struct SimRng {
     pub nebula: Rng,
     /// A cloaked ship being spotted when it fires a torpedo (`cloak::spotted`).
     pub cloak: Rng,
+    /// A computer captain's choice of the quarter of the map it explores (`ship::Explore`).
+    pub explore: Rng,
 }
 
 impl SimRng {
@@ -200,7 +212,7 @@ impl SimRng {
             z = (z ^ (z >> 27)).wrapping_mul(0x94D049BB133111EB);
             (z ^ (z >> 31)) | 1
         };
-        Self { seed, battle: Rng(if seed == 0 { stream(0) } else { seed }), nebula: Rng(stream(1)), cloak: Rng(stream(2)) }
+        Self { seed, battle: Rng(if seed == 0 { stream(0) } else { seed }), nebula: Rng(stream(1)), cloak: Rng(stream(2)), explore: Rng(stream(3)) }
     }
     /// The generator states, to compare two `SimRng`s.
     #[cfg(test)]

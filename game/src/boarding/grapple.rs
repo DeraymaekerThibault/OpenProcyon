@@ -205,8 +205,8 @@ pub(super) fn winch_upkeep(
     mut hooks: Query<(Entity, &mut Grapple)>,
     fighters: Query<(Entity, &Boarding)>,
     ships: Query<(&Transform, &Health), With<Ship>>,
-    mission: Option<Res<Mission>>,
-    sides: Query<(&Ship, Option<&MissionShip>)>,
+    table: crate::alliance::Hostility,
+    sides: Query<&Ship>,
 ) {
     let dt = time.delta_secs();
     for (hook, mut g) in &mut hooks {
@@ -222,9 +222,9 @@ pub(super) fn winch_upkeep(
             commands.entity(hook).despawn();
             continue;
         }
-        let who = |x: Entity| sides.get(x).ok().map(|(sh, ms)| (ms.map(|m| m.owner.as_str()), Some(sh.side)));
+        let who = |x: Entity| sides.get(x).ok().map(|sh| sh.side);
         if let (Some(a), Some(b)) = (who(e), who(g.target))
-            && !hostile_pair(mission.as_deref(), a, b)
+            && !hostile_pair(&table, Some(a), Some(b))
         {
             info!("grapple: {e} lets go of {} (the players became allied)", g.target);
             commands.entity(hook).despawn();

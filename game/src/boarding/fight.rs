@@ -13,14 +13,17 @@ pub struct Boarders<'w, 's> {
     player: Query<'w, 's, Entity, With<crate::commands::Commander>>,
     abandoned: Query<'w, 's, (), With<crate::lifeboats::Abandoned>>,
     lib: Res<'w, Library>,
-    mission: Option<Res<'w, Mission>>,
+    table: crate::alliance::Hostility<'w>,
 }
 impl Boarders<'_, '_> {
-    fn who(&self, e: Entity) -> (Option<&str>, Option<Side>) {
-        (self.owners.get(e).ok().and_then(|(ms, mb)| owner_of(ms, mb)), self.ships.get(e).ok().map(|s| s.0.side).or_else(|| self.base_sides.get(e).ok().map(|b| b.0)))
+    fn who(&self, e: Entity) -> Option<Side> {
+        thing_side(&self.table, self.ships.get(e).ok().map(|s| s.0), self.owners.get(e).ok().and_then(|o| o.1), self.base_sides.get(e).ok())
     }
     pub fn hostile(&self, a: Entity, b: Entity) -> bool {
-        hostile_pair(self.mission.as_deref(), self.who(a), self.who(b))
+        hostile_pair(&self.table, self.who(a), self.who(b))
+    }
+    pub fn table(&self) -> &crate::alliance::Alliances {
+        &self.table
     }
     /// Whether `a`'s line of fire to `end` is held for a friendly ship or scenery (line_of_fire.rs); `target` is exempt from the scenery test.
     pub fn line_blocked(
@@ -35,7 +38,7 @@ impl Boarders<'_, '_> {
         let class = &self.lib.classes[ship.class];
         let friends = ships.iter().filter(|o| o.0 != a).filter_map(|(e, otf, os)| {
             let oc = &self.lib.classes[os.class];
-            let friendly = class.is_lifeboat || oc.is_lifeboat || allied_pair(self.mission.as_deref(), self.who(a), self.who(e));
+            let friendly = class.is_lifeboat || oc.is_lifeboat || !hostile_pair(&self.table, self.who(a), self.who(e));
             friendly.then(|| (otf.transform_point(oc.sphere.0), oc.sphere.1))
         });
         crate::line_of_fire::friend_in_line(tf.translation, end, friends)
@@ -191,7 +194,7 @@ pub(super) fn fights(
     assets: Option<Res<AssetServer>>,
     fxl: Option<Res<FxLib>>,
     mut sfx: MessageWriter<Sfx>,
-    mission: Option<Res<Mission>>,
+    table: crate::alliance::Hostility,
     mut settled: MessageWriter<Settled>,
     mut fighters: Query<(Entity, &mut Boarding)>,
     grapples: Query<(Entity, &Grapple)>,
@@ -212,11 +215,7 @@ pub(super) fn fights(
             continue;
         };
         let alive = |h: Option<&Health>| h.is_none_or(|h| !h.destroyed);
-        let hostile = hostile_pair(
-            mission.as_deref(),
-            (owner_of(bi.5, bi.6), bi.1.map(|s| s.side).or(bi.7.map(|b| b.0))),
-            (owner_of(ti.5, ti.6), ti.1.map(|s| s.side).or(ti.7.map(|b| b.0))),
-        );
+        let hostile = hostile_pair(&table, thing_side(&table, bi.1, bi.6, bi.7), thing_side(&table, ti.1, ti.6, ti.7));
         let joined = ti.1.is_none() || grapples.iter().any(|(_, g)| g.flight <= 0.0 && ((g.grappler == b && g.target == t) || (g.grappler == t && g.target == b)));
         let near = in_range(&lib, &(bi.0, bi.1, bi.2), &(ti.0, ti.1, ti.2), &ti.3.points);
         if !alive(bi.4) || !alive(ti.4) || !hostile || !joined || (f.live && !near) {
@@ -250,7 +249,7 @@ pub(super) fn fights(
                 Some(if ti.1.is_some() { "boarding_party" } else { "landing_party" })
             } else if Some(t) == me {
                 Some("repell_boarders")
-            } else if ti.1.is_some_and(|s| s.side == Side::Player) {
+            } else if ti.1.is_some_and(|s| table.with_human(s.side)) {
                 Some("own_ship_boarded")
             } else {
                 None
@@ -282,16 +281,19 @@ pub(super) fn settled(
     mut rng: ResMut<SimRng>,
     mut sfx: MessageWriter<Sfx>,
     mut captured: MessageWriter<Captured>,
-    mut things: Query<(Option<&mut Ship>, Option<&mut MissionShip>, Option<&mut MissionBase>, &mut Boardable, Option<&mut crate::combat::BaseSide>)>,
+    mut things: Query<(Option<&mut Ship>, Option<&mut MissionShip>, Option<&mut MissionBase>, &mut Boardable, Option<&mut crate::combat::BaseFlag>)>,
     (members, spawn_order): (Query<&crate::ship::FleetMember>, Query<&crate::scenario::SpawnIndex>),
     grapples: Query<(Entity, &Grapple)>,
     mut mission: Option<ResMut<Mission>>,
 ) {
     for s in msgs.read() {
-        let Ok([(bship, bms, _, bflag, _), (tship, tms, tbase, mut tflag, tside)]) = things.get_many_mut([s.boarder, s.target]) else { continue };
+        let Ok([(bship, bms, _, bflag, _), (tship, tms, tbase, mut tflag, tbanner)]) = things.get_many_mut([s.boarder, s.target]) else { continue };
         let side_of = |ship: &Option<Mut<Ship>>| ship.as_ref().map(|x| x.side);
-        let (ours, theirs, is_ship) =
-            (side_of(&bship) == Some(Side::Player), side_of(&tship) == Some(Side::Player) || (tship.is_none() && side_of(&bship) == Some(Side::Enemy)), tship.is_some());
+        let (ours, theirs, is_ship) = (
+            side_of(&bship) == Some(Side::Player),
+            side_of(&tship) == Some(Side::Player) || (tship.is_none() && side_of(&bship).is_some_and(|s| s != Side::Player)),
+            tship.is_some(),
+        );
         let r = rng.f();
         match s.outcome {
             Outcome::Won => {
@@ -301,20 +303,22 @@ pub(super) fn settled(
                         .or_else(|| mb.as_ref().map(|m| m.owner.as_str().into()))
                         .unwrap_or_else(|| if side_of(ship) == Some(Side::Player) { "Player".into() } else { "Enemy".into() })
                 };
-                let (by, victim) = (owner(&bms, &None, &bship), owner(&tms, &tbase, &tship));
+                // A captor without a rules name (a skirmish fleet without a map script) captures under its fleet's owner.
+                let by = members.get(s.boarder).ok().filter(|_| bms.is_none()).map_or_else(|| owner(&bms, &None, &bship), |m| m.0.clone());
+                let victim = owner(&tms, &tbase, &tship);
                 info!("boarding: {} captured {}", by, victim);
                 captured.write(Captured { by: by.clone(), victim: victim.to_string(), unit: s.target });
                 if let Some(mut m) = tms {
                     m.owner = by.clone();
-                    m.target = None;
+                    m.ordered = None;
                     m.attack.clear();
                 }
+                // A base changes owner, and so sides, guns included; a capture also repaints its flag.
                 if let Some(mut b) = tbase {
                     b.owner = by.to_string();
                 }
-                // A skirmish base changes sides with its guns and its place in the end rules.
-                if let (Some(mut bs), Some(side)) = (tside, side_of(&bship)) {
-                    bs.0 = side;
+                if let Some(mut banner) = tbanner {
+                    banner.shows = by.to_string();
                 }
                 if let (Ok(member), true) = (members.get(s.boarder), is_ship) {
                     let mut member = member.clone();

@@ -151,15 +151,12 @@ def parse_mission(text):
         for a in r["actions"]
         if a.get("Type") == "*State Init* Setup Nebula"
     ]
-    players = parse_twt(text)["players"]
+    twt = parse_twt(text)
+    players = twt["players"]
     names = [p["name"] for p in players]
-    # PlayerAllianceInfoVector: allied player-index pairs; every other pair of players starts hostile.
-    alliances = [
-        [names[f["Player0"]], names[f["Player1"]]]
-        for b in blocks(nodes, "PlayerAllianceInfoVector - Element")
-        for f in [fields(b["children"])]
-        if max(f["Player0"], f["Player1"]) < len(names)  # mods leave dangling players
-    ]
+    alliances = twt[
+        "alliances"
+    ]  # allied player pairs; every other pair of players starts hostile
     # The journal screen's entry: one page per picture, each with a spoken line and its text.
     journal = None
     for entry in blocks(nodes, "Journal Entry"):

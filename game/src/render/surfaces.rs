@@ -204,9 +204,14 @@ pub(super) fn surfaces(
 
 /// While the local player sees a ship's hull faded by a cloak, its restyled meshes wear their retail material (which
 /// cloak.rs fades), and their own again once it is solid.
-pub(super) fn cloaked<M: Material>(mut commands: Commands, cloaks: Query<&crate::cloak::Cloak>, meshes: Query<(Entity, &Restyled<M>, Has<MeshMaterial3d<M>>)>) {
+pub(super) fn cloaked<M: Material>(
+    mut commands: Commands,
+    cloaks: Query<&crate::cloak::Cloak>,
+    meshes: Query<(Entity, &Restyled<M>, Has<MeshMaterial3d<M>>)>,
+    table: crate::alliance::Hostility,
+) {
     for (e, r, styled) in &meshes {
-        let faded = r.ship.and_then(|s| cloaks.get(s).ok()).is_some_and(|c| c.alpha_for(crate::Side::Player) < 1.0);
+        let faded = r.ship.and_then(|s| cloaks.get(s).ok()).is_some_and(|c| c.alpha_for(crate::Side::Player, &table) < 1.0);
         if faded && styled {
             super::kit::swap::<M, _>(&mut commands, e, r.original.clone());
         } else if !faded && !styled {

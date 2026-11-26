@@ -87,23 +87,7 @@ fn promotion_checks_membership_reorders_and_preserves_speed_not_camera() {
 #[ignore = "needs imported assets"]
 fn scripted_cross_group_primary_retires_standin_and_updates_mission_identity() {
     let (mut w, ids) = fleet_world();
-    let ms = |id, owner: &str, name: &str| campaign::MissionShip {
-        id,
-        owner: owner.into(),
-        name: name.into(),
-        hold_fire: false,
-        invuln: 0.0,
-        visible: true,
-        stance: rules::Stance::Neutral,
-        target: None,
-        attack: vec![],
-        flag: String::new(),
-        banner: String::new(),
-        looping: None,
-        stop_at_end: false,
-        create_lifeboats: false,
-        ..Default::default()
-    };
+    let ms = |id, owner: &str, name: &str| campaign::MissionShip { id, owner: owner.into(), name: name.into(), visible: true, ..Default::default() };
     w.entity_mut(ids[0]).insert(ms(-1, "Player", "RLS Stand-in"));
     w.entity_mut(ids[4]).insert(ms(99, "Players Ships", "RLS St Roch"));
     w.insert_resource(campaign::load_id("mission09"));
@@ -388,12 +372,106 @@ fn exploring_heads_for_quadrant_centres() {
 fn captain_keeps_its_target_six_seconds_then_takes_the_nearest() {
     let (a, b) = (Entity::from_raw_u32(1).unwrap(), Entity::from_raw_u32(2).unwrap());
     let alive = |_: Entity| true;
-    assert_eq!(choose_target(None, &[(a, 90.0), (b, 40.0)], alive), Some((b, false)), "no target: the nearest");
-    assert_eq!(choose_target(Some((a, 5.9)), &[(a, 90.0), (b, 40.0)], alive), Some((a, true)), "kept inside 6 s though farther");
-    assert_eq!(choose_target(Some((a, 5.9)), &[(b, 40.0)], alive), Some((a, true)), "a held target is followed out of sight");
-    assert_eq!(choose_target(Some((a, 6.0)), &[(a, 90.0), (b, 40.0)], alive), Some((b, false)), "re-chosen after 6 s");
-    assert_eq!(choose_target(Some((a, 1.0)), &[(b, 40.0)], |t| t != a), Some((b, false)), "a sunk target is replaced at once");
-    assert_eq!(choose_target(Some((a, 1.0)), &[], |t| t != a), None);
+    let pick = |held, valid: &dyn Fn(Entity) -> bool| choose_target(held, None, Some(b), valid);
+    assert_eq!(pick(None, &alive), Some((b, false, true)), "no target: its own pick, which can be overridden");
+    assert_eq!(pick(Some((a, 5.9, true)), &alive), Some((a, true, true)), "kept inside 6 s though farther");
+    assert_eq!(choose_target(Some((a, 5.9, true)), None, Some(b), alive), Some((a, true, true)), "a held target is followed out of sight");
+    assert_eq!(pick(Some((a, 6.0, true)), &alive), Some((b, false, true)), "re-chosen after 6 s");
+    assert_eq!(pick(Some((a, 1.0, true)), &|t| t != a), Some((b, false, true)), "a sunk target is replaced at once");
+    assert_eq!(choose_target(Some((a, 1.0, true)), None, None, |t| t != a), None);
+}
+
+/// "Cannot override" targets: every explicit target is taken at once and kept past 6 s until it is lost (friendly, sunk) or replaced.
+#[test]
+fn an_ordered_target_cannot_be_overridden_and_is_kept_until_lost() {
+    let (a, b, c) = (Entity::from_raw_u32(1).unwrap(), Entity::from_raw_u32(2).unwrap(), Entity::from_raw_u32(3).unwrap());
+    let near = Some(b);
+    assert_eq!(choose_target(Some((b, 1.0, true)), Some(a), near, |_| true), Some((a, false, false)), "an order replaces the captain's pick");
+    assert_eq!(choose_target(Some((a, 60.0, false)), None, near, |_| true), Some((a, true, false)), "kept past 6 s once the order is spent");
+    assert_eq!(choose_target(Some((a, 60.0, false)), None, near, |t| t != a), Some((b, false, true)), "lost: the captain picks again");
+    assert_eq!(choose_target(Some((a, 1.0, false)), Some(c), near, |_| true), Some((c, false, false)), "a new order replaces it");
+    assert_eq!(choose_target(None, Some(c), near, |t| t != c), Some((b, false, true)), "an order on a friend is dropped");
+}
+
+#[test]
+fn a_campaign_limits_targets_and_docks_to_scan_range_a_skirmish_does_not() {
+    assert!(in_reach(false, || false), "skirmish: any range");
+    assert!(!in_reach(true, || false) && in_reach(true, || true), "campaign: within scan range only");
+}
+
+/// An asset-free world for the captain (`ai`): one synthetic class (sight 100), sensors refreshed before each think. With `campaign`
+/// a mission is loaded.
+pub(crate) fn captain_world(campaign: bool) -> World {
+    let mut w = World::new();
+    w.insert_resource(Library { classes: vec![crate::fixed_tests::synthetic_class()], guns: default(), bullets: default(), names: default(), clips: default() });
+    w.insert_resource(crate::Config { speed: 1.0, ..default() });
+    w.init_resource::<crate::environment::Sensors>();
+    w.init_resource::<CaptainTargets>();
+    w.init_resource::<Fleets>();
+    w.init_resource::<Time>();
+    w.init_resource::<combat::SimRng>();
+    if campaign {
+        let data = serde_json::json!({"rules": []});
+        w.insert_resource(campaign::Mission { id: "synthetic".into(), script: crate::rules::Script::new(&data, serde_json::Value::Null), data, opening: None });
+    }
+    w
+}
+/// A ship of `side` at `at`, afloat.
+pub(crate) fn captain_ship(w: &mut World, side: Side, at: Vec3) -> Entity {
+    w.spawn((Ship { heading: 0.0, ..Ship::new(0, side) }, Health { sections: vec![], core: 100.0, destroyed: false }, Transform::from_translation(at))).id()
+}
+#[derive(Resource)]
+struct Captains(bevy::ecs::system::SystemId, bevy::ecs::system::SystemId);
+/// Runs the sensors and the captains three times a second apart (each captain thinks at least once, every captain after the others'
+/// first picks); the systems keep their state between calls.
+pub(crate) fn think(w: &mut World) {
+    if !w.contains_resource::<Captains>() {
+        let ids = Captains(w.register_system(crate::environment::refresh_sensors), w.register_system(ai));
+        w.insert_resource(ids);
+    }
+    let (sense, captains) = (w.resource::<Captains>().0, w.resource::<Captains>().1);
+    for _ in 0..3 {
+        w.run_system(sense).unwrap();
+        w.run_system(captains).unwrap();
+        w.resource_mut::<Time>().advance_by(std::time::Duration::from_secs(1));
+    }
+}
+
+/// The one captain in a mission: a computer mission ship picks a hostile base only inside its scan range (here none is in sight), the
+/// same ship in a skirmish at any range. Asset-free.
+#[test]
+fn a_mission_captain_takes_a_base_only_in_scan_range_a_skirmish_one_at_any() {
+    let target_of = |campaign: bool| {
+        let mut w = captain_world(campaign);
+        let ship = captain_ship(&mut w, Side::Enemy, Vec3::ZERO);
+        let base = w
+            .spawn((
+                Transform::from_xyz(0.0, 0.0, -5000.0),
+                combat::BaseSide(Side::Player),
+                Health { sections: vec![], core: 100.0, destroyed: false },
+                combat::ArmedBase { class: 0 },
+            ))
+            .id();
+        think(&mut w);
+        (w.resource::<CaptainTargets>().of(ship), base)
+    };
+    let (skirmish, base) = target_of(false);
+    assert_eq!(skirmish, Some(base), "skirmish: the base at any range");
+    assert_eq!(target_of(true).0, None, "campaign: out of scan range");
+}
+
+/// Every order source sets "cannot override"; the captain's own pick sets "can" (here a repair dock the captain chose, and a hostile in
+/// sight).
+#[test]
+fn a_repair_dock_and_an_order_are_cannot_targets_an_own_pick_can() {
+    let mut w = captain_world(false);
+    let (ship, foe, dock) = (captain_ship(&mut w, Side::Enemy, Vec3::ZERO), captain_ship(&mut w, Side::Player, Vec3::X * 50.0), captain_ship(&mut w, Side::Enemy, Vec3::Z * 50.0));
+    let docker = captain_ship(&mut w, Side::Enemy, Vec3::NEG_X * 50.0);
+    w.entity_mut(docker).insert(crate::docking::Docker::repair(dock));
+    think(&mut w);
+    let t = |e: Entity| w.resource::<CaptainTargets>().0.get(&e).map(|t| (t.0, t.3));
+    assert_eq!(t(ship), Some((foe, true)), "its own pick: can override");
+    assert_eq!(t(docker), Some((dock, false)), "a chosen repair dock: cannot");
 }
 
 #[test]
@@ -577,43 +655,30 @@ fn ships_lean_into_turns_except_at_emergency_speed() {
     assert!(roll(EngineOrder::Stop) < 1e-4, "a stopped ship stays level though its rudder is over: {}", roll(EngineOrder::Stop));
 }
 
-/// Border Dispute with every slot filled: allied computer fleets share the human's side but must still go for the enemy base,
-/// while the human's own ships wait for orders.
+/// Border Dispute with every slot filled: allied computer fleets go for the enemy base, and so does every ship of the human's fleet
+/// but the one the human steers, which waits for orders (the captain drives the rest).
 #[test]
 #[ignore = "needs imported assets"]
-fn allied_computer_ships_hunt_the_enemy_base_the_humans_fleet_waits() {
+fn allied_ships_and_the_humans_other_ships_hunt_the_enemy_base_the_ship_the_human_steers_waits() {
     let (mut w, ids) = fleet_world();
     w.despawn(ids[5]);
     let class = w.resource::<Library>().index("Base_SmugglersCamp");
     let health = Health::new(&w.resource::<Library>().classes[class]);
     w.spawn((Transform::from_xyz(0.0, 0.0, -2000.0), combat::BaseSide(Side::Enemy), health, combat::ArmedBase { class }));
-    w.insert_resource(crate::Config {
-        groups: vec![],
-        player: String::new(),
-        allies: vec![],
-        enemies: vec![],
-        map: None,
-        shot: None,
-        frame: 0,
-        speed: 1.0,
-        ended: None,
-        script: None,
-        autolaunch: false,
-        shot_frame: 0,
-        shot_frames: vec![],
-        late_frame: 0,
-    });
+    w.insert_resource(crate::Config { speed: 1.0, ..default() });
     w.init_resource::<crate::environment::Sensors>();
     w.init_resource::<CaptainTargets>();
     w.init_resource::<Time>();
     // A captain first thinks one period (plus its start delay) after it appears, so run the system at 0 s and again at 1 s.
+    w.init_resource::<combat::SimRng>();
     let captains = w.register_system(ai);
     w.run_system(captains).unwrap();
     assert_eq!(w.get::<Ship>(ids[4]).unwrap().order, EngineOrder::Stop, "no captain has thought yet");
     w.resource_mut::<Time>().advance_by(std::time::Duration::from_secs(1));
     w.run_system(captains).unwrap();
     assert!(w.get::<Ship>(ids[4]).unwrap().order > EngineOrder::Stop, "the ally sets off for the enemy base");
-    assert_eq!(w.get::<Ship>(ids[1]).unwrap().order, EngineOrder::Stop, "the human's own ship waits for orders");
+    assert!(w.get::<Ship>(ids[1]).unwrap().order > EngineOrder::Stop, "the captain drives the human's other ships to the base");
+    assert_eq!(w.get::<Ship>(ids[0]).unwrap().order, EngineOrder::Stop, "the ship the human steers waits for orders");
 }
 
 #[test]
@@ -825,4 +890,343 @@ fn fleet_orders_as_commands_do_what_the_buttons_did() {
     assert!(pilots(&sent, &ids) == pilots(&direct, &ids));
     assert_eq!(sent.resource::<Fleets>().primary(), Some(ids[2]));
     assert!(sent.get::<PlayerShip>(ids[2]).is_some() && sent.get::<PlayerShip>(ids[0]).is_none());
+}
+
+/// Each stance's own pick (PROVISIONAL): Aggressive the nearest ship or dragon in scan range, else a base (any range in a skirmish,
+/// scan range in a campaign); Persistent, Defensive and Neutral only a hostile in scan range whose target is this ship; Dummy nothing.
+#[test]
+fn each_stance_picks_its_own_kind_of_target() {
+    use crate::rules::Stance::*;
+    let e = |i| Entity::from_raw_u32(i).unwrap();
+    let seen = |i, dist, base, in_scan, targets_me| Seen { e: e(i), dist, base, in_scan, targets_me };
+    let world = [seen(1, 50.0, false, true, false), seen(2, 80.0, false, true, true), seen(3, 20.0, false, false, true), seen(4, 10.0, true, false, false)];
+    assert_eq!(stance_pick(Aggressive, false, &world), Some(e(1)), "the nearest ship in scan range, before a nearer base");
+    for st in [Persistent, Defensive, Neutral] {
+        assert_eq!(stance_pick(st, false, &world), Some(e(2)), "{st:?}: only one that targets it, in scan range");
+    }
+    assert_eq!(stance_pick(Dummy, false, &world), None);
+    let bases = [seen(4, 10.0, true, false, false)];
+    assert_eq!(stance_pick(Aggressive, false, &bases), Some(e(4)), "skirmish: a base at any range");
+    assert_eq!(stance_pick(Aggressive, true, &bases), None, "campaign: only in scan range");
+    assert_eq!(stance_pick(Neutral, false, &bases), None, "a base never retaliates here (it keeps no target)");
+}
+
+/// With no target an Aggressive ship explores, a Defensive or Neutral one stops dead unless it has waypoints (a formation is the
+/// fleet's own, and the captain leaves it alone).
+#[test]
+fn without_a_target_aggressive_explores_and_the_others_stop_unless_on_a_course_or_in_formation() {
+    use crate::rules::Stance::*;
+    let mut w = captain_world(false);
+    let ship = |w: &mut World, stance, waypoints: Vec<Vec3>| {
+        let e = captain_ship(w, Side::Enemy, Vec3::ZERO);
+        w.entity_mut(e).insert(campaign::MissionShip { stance, ..campaign::MissionShip::placed(1, "s".into(), "o".into()) });
+        let mut s = w.get_mut::<Ship>(e).unwrap();
+        (s.waypoints, s.order) = (waypoints, EngineOrder::Full);
+        e
+    };
+    let hunter = ship(&mut w, Aggressive, vec![]);
+    let (still, sailing) = (ship(&mut w, Defensive, vec![]), ship(&mut w, Neutral, vec![Vec3::X * 300.0]));
+    let held = ship(&mut w, Neutral, vec![]);
+    w.entity_mut(held).insert(FleetPilot { hold: true, ..default() });
+    think(&mut w);
+    let at = |e| (w.get::<Ship>(e).unwrap().order, w.get::<Ship>(e).unwrap().waypoints.len());
+    assert_eq!(at(hunter), (EngineOrder::Emergency, 1), "explores");
+    assert_eq!(at(still), (EngineOrder::Stop, 0), "stops dead");
+    assert_eq!(at(sailing), (EngineOrder::Full, 1), "keeps its course");
+    assert_eq!(at(held), (EngineOrder::Full, 0), "in formation: the fleet's");
+}
+
+/// An Aggressive ship with no working gun and nothing to attack in reach rams the nearest hostile ship at any range; a friend's target
+/// comes before that.
+#[test]
+fn a_gunless_aggressive_ship_rams_after_taking_a_friends_target() {
+    let mut w = captain_world(false);
+    let ship = captain_ship(&mut w, Side::Enemy, Vec3::ZERO);
+    let far = captain_ship(&mut w, Side::Player, Vec3::X * 5000.0);
+    think(&mut w);
+    assert_eq!(w.resource::<CaptainTargets>().of(ship), Some(far), "rams the nearest hostile, out of sight");
+    let mut w = captain_world(false);
+    let (ship, mate) = (captain_ship(&mut w, Side::Enemy, Vec3::ZERO), captain_ship(&mut w, Side::Enemy, Vec3::X * 10.0));
+    let (_far, other) = (captain_ship(&mut w, Side::Player, Vec3::X * 5000.0), captain_ship(&mut w, Side::Player, Vec3::Z * 7000.0));
+    for e in [ship, mate] {
+        w.entity_mut(e).insert(FleetMember("computer".into(), 0));
+    }
+    w.resource_mut::<CaptainTargets>().0.insert(mate, (other, 0.0, Vec3::ZERO, false));
+    w.entity_mut(mate).insert(crate::docking::Docker::repair(other)); // keeps the mate's target as it is
+    think(&mut w);
+    assert_eq!(w.resource::<CaptainTargets>().of(ship), Some(other), "a fleet mate's target first");
+}
+
+/// Persistent ships never dock for repair; the other stances may.
+#[test]
+fn a_persistent_or_dummy_ship_never_docks_for_repair() {
+    use crate::rules::Stance::*;
+    assert!([None, Some(Aggressive), Some(Defensive), Some(Neutral)].into_iter().all(crate::docking::seeks_repair));
+    assert!(!crate::docking::seeks_repair(Some(Persistent)) && !crate::docking::seeks_repair(Some(Dummy)));
+}
+
+/// A Persistent ship on a path keeps to it while it fires at the ship that targets it; once latched it holds position when the path
+/// ends, as long as the target lasts. Without a path it attacks like any ship; a formation comes first.
+#[test]
+fn a_persistent_ship_fires_from_its_path_then_holds_and_attacks_without_one() {
+    // The foe is a computer ship (the human's own ships are not captained), so its target is its captain's.
+    let mut w = captain_world(false);
+    let foe = captain_ship(&mut w, Side(2), Vec3::ZERO);
+    let persistent = |w: &mut World, at: Vec3, path: Vec<Vec3>| {
+        let e = captain_ship(w, Side::Enemy, at);
+        w.entity_mut(e).insert(campaign::MissionShip { stance: crate::rules::Stance::Persistent, ..campaign::MissionShip::placed(1, "p".into(), "o".into()) });
+        let mut s = w.get_mut::<Ship>(e).unwrap();
+        (s.waypoints, s.order) = (path, EngineOrder::Full);
+        e
+    };
+    let route = vec![Vec3::X * 900.0];
+    let walker = persistent(&mut w, Vec3::X * 30.0, route.clone());
+    think(&mut w);
+    assert_eq!(w.resource::<CaptainTargets>().of(walker), Some(foe), "it answers the ship that targets it");
+    assert_eq!((w.get::<Ship>(walker).unwrap().waypoints.clone(), w.get::<Ship>(walker).unwrap().order), (route, EngineOrder::Full), "on its path");
+    w.get_mut::<Ship>(walker).unwrap().waypoints.clear(); // the path ends
+    think(&mut w);
+    assert_eq!(w.get::<Ship>(walker).unwrap().order, EngineOrder::Stop, "latched: holds position, target kept");
+    assert_eq!(w.resource::<CaptainTargets>().of(walker), Some(foe));
+
+    let mut w = captain_world(false);
+    let _foe = captain_ship(&mut w, Side(2), Vec3::ZERO);
+    let free = persistent(&mut w, Vec3::X * 30.0, vec![]);
+    let formed = persistent(&mut w, Vec3::Z * 60.0, vec![]);
+    w.entity_mut(formed).insert(FleetPilot { hold: true, ..default() });
+    think(&mut w);
+    assert_eq!(w.get::<Ship>(free).unwrap().order, EngineOrder::Emergency, "no path: it attacks");
+    assert_eq!(w.get::<Ship>(formed).unwrap().order, EngineOrder::Full, "a formation comes first");
+}
+
+/// The captain judges a dragon by its own owner's alliances, not the human's: a dragon allied with the human but hostile to the
+/// computer's side is its target; one allied with that side is not.
+#[test]
+fn a_computer_captain_takes_a_dragon_hostile_to_its_own_side() {
+    let target_of = |allied_with_reds: bool| {
+        let mut w = captain_world(false);
+        let mut table = crate::alliance::Alliances::default();
+        table.add_player("Dragons", Side(2));
+        table.set(Side::Player, Side(2), true);
+        table.set(Side(1), Side(2), allied_with_reds);
+        w.insert_resource(table);
+        let ship = captain_ship(&mut w, Side(1), Vec3::ZERO);
+        let dragon =
+            w.spawn((Transform::from_xyz(30.0, 0.0, 0.0), crate::environment::SpaceAnimal::new("Dragons", 9.0, Vec3::ZERO, 1, true), crate::dragons::Dragon::test(100.0))).id();
+        think(&mut w);
+        (w.resource::<CaptainTargets>().of(ship), dragon)
+    };
+    let (t, dragon) = target_of(false);
+    assert_eq!(t, Some(dragon), "hostile to its side, though the human's ally");
+    assert_eq!(target_of(true).0, None, "allied with its side");
+}
+
+/// A ship nothing gave a stance is Aggressive, in a mission (placed at the start or spawned later) as in a skirmish: it hunts the
+/// hostile in sight.
+#[test]
+fn a_ship_without_a_stance_is_aggressive_in_a_mission_and_a_skirmish() {
+    for (campaign, ms) in
+        [(true, Some(campaign::MissionShip::placed(1, "a".into(), "o".into()))), (true, Some(campaign::MissionShip { visible: true, ..default() })), (false, None)]
+    {
+        let mut w = captain_world(campaign);
+        let foe = captain_ship(&mut w, Side::Player, Vec3::X * 50.0);
+        let ship = captain_ship(&mut w, Side::Enemy, Vec3::ZERO);
+        if let Some(ms) = ms {
+            assert_eq!(ms.stance, crate::rules::Stance::Aggressive);
+            w.entity_mut(ship).insert(ms);
+        }
+        think(&mut w);
+        assert_eq!(w.resource::<CaptainTargets>().of(ship), Some(foe), "campaign {campaign}: it attacks unprovoked");
+    }
+}
+
+/// The human's fleet: every ship but the one the human steers is captained with its own stance: it hunts a hostile in sight, takes a
+/// fleet mate's target when it has none, and with nothing stops dead (it never explores); the steered ship is left alone.
+#[test]
+fn the_humans_other_ships_are_captained_and_stop_rather_than_explore() {
+    let mut w = captain_world(false);
+    let local = w.resource::<Fleets>().local.clone();
+    let mine = |w: &mut World, at: Vec3, me: bool| {
+        let e = captain_ship(w, Side::Player, at);
+        w.entity_mut(e).insert(FleetMember(local.clone(), 1));
+        if me {
+            w.entity_mut(e).insert(crate::commands::Commander(crate::commands::PlayerId(0)));
+        }
+        w.get_mut::<Ship>(e).unwrap().order = EngineOrder::Slow;
+        e
+    };
+    let foe = captain_ship(&mut w, Side::Enemy, Vec3::X * 60.0);
+    let (steered, hunter, idle) = (mine(&mut w, Vec3::X * 50.0, true), mine(&mut w, Vec3::X * 30.0, false), mine(&mut w, Vec3::Z * 4000.0, false));
+    w.entity_mut(idle).insert(campaign::MissionShip { stance: crate::rules::Stance::Defensive, ..campaign::MissionShip::placed(1, "i".into(), "o".into()) });
+    think(&mut w);
+    let t = |e| w.resource::<CaptainTargets>().of(e);
+    assert_eq!((t(hunter), w.get::<Ship>(hunter).unwrap().order), (Some(foe), EngineOrder::Emergency), "it hunts what it sees");
+    assert_eq!((t(steered), w.get::<Ship>(steered).unwrap().order), (None, EngineOrder::Slow), "the steered ship is the human's");
+    let s = w.get::<Ship>(idle).unwrap();
+    assert_eq!((s.order, s.waypoints.len()), (EngineOrder::Stop, 0), "nothing for its stance: it stops, no search");
+    assert_eq!(w.get::<campaign::MissionShip>(idle).unwrap().stance, crate::rules::Stance::Defensive, "it keeps its stance");
+    let far = mine(&mut w, Vec3::NEG_Z * 4000.0, false);
+    think(&mut w);
+    assert_eq!(w.resource::<CaptainTargets>().of(far), Some(foe), "out of sight, an Aggressive one takes a fleet mate's target");
+    let mut w = captain_world(false);
+    let lone = captain_ship(&mut w, Side::Player, Vec3::ZERO);
+    w.entity_mut(lone).insert(FleetMember(local.clone(), 1));
+    w.get_mut::<Ship>(lone).unwrap().order = EngineOrder::Full;
+    think(&mut w);
+    let s = w.get::<Ship>(lone).unwrap();
+    assert_eq!((s.order, s.waypoints.len()), (EngineOrder::Stop, 0), "nothing at all: it stops, it never explores");
+}
+
+/// A base whose owner is no player of the battle is hostile to everyone: a computer captain goes for it (and for a base of the
+/// no-owner owner never).
+#[test]
+fn a_base_of_an_owner_outside_the_battle_is_a_target_one_of_no_owner_is_not() {
+    let target_of = |owner: &str| {
+        let mut w = captain_world(false);
+        let ship = captain_ship(&mut w, Side::Enemy, Vec3::ZERO);
+        let base = w
+            .spawn((
+                Transform::from_xyz(0.0, 0.0, -3000.0),
+                campaign::MissionBase { id: 1, owner: owner.into() },
+                Health { sections: vec![], core: 100.0, destroyed: false },
+                combat::ArmedBase { class: 0 },
+            ))
+            .id();
+        think(&mut w);
+        (w.resource::<CaptainTargets>().of(ship), base)
+    };
+    let (t, base) = target_of("player 8");
+    assert_eq!(t, Some(base), "outside the battle: hostile, attacked");
+    assert_eq!(target_of("NO PLAYER").0, None, "no owner: everyone's ally");
+}
+
+/// Mission 3's hold-still case: Aggressive mission ships with nothing in scan range search instead of holding, whether their order
+/// names a ship that is not hostile, their script path has ended, or a stopped ship keeps stale points of one.
+#[test]
+fn an_aggressive_mission_ship_with_nothing_in_reach_explores_instead_of_holding() {
+    let mut w = captain_world(true);
+    let friend = captain_ship(&mut w, Side::Enemy, Vec3::X * 4000.0);
+    let ship = |w: &mut World, ordered: Option<Entity>, waypoints: Vec<Vec3>, order| {
+        let e = captain_ship(w, Side::Enemy, Vec3::ZERO);
+        w.entity_mut(e).insert(campaign::MissionShip { ordered, ..campaign::MissionShip::placed(1, "p".into(), "Pirates".into()) });
+        let mut s = w.get_mut::<Ship>(e).unwrap();
+        (s.waypoints, s.order) = (waypoints, order);
+        e
+    };
+    let ordered_on_friend = ship(&mut w, Some(friend), vec![], EngineOrder::Stop);
+    let path_ended = ship(&mut w, None, vec![], EngineOrder::Full);
+    let stale = ship(&mut w, None, vec![Vec3::X * 50.0], EngineOrder::Stop);
+    think(&mut w);
+    for e in [ordered_on_friend, path_ended, stale] {
+        let s = w.get::<Ship>(e).unwrap();
+        assert_eq!((s.order, s.waypoints.len()), (EngineOrder::Emergency, 1), "{e}: it searches");
+        assert_eq!(w.resource::<CaptainTargets>().of(e), None);
+    }
+}
+
+/// hunt-m3: in a screenshot run of a mission the human's command ship is not the demo autopilot, so nothing steers it while a cutscene
+/// plays (it keeps the order the rules gave it).
+#[test]
+fn the_captain_never_steers_the_humans_ship_in_a_mission_cutscene() {
+    let mut w = captain_world(true);
+    w.resource_mut::<crate::Config>().shot = Some("local/x.png".into());
+    w.resource_mut::<campaign::Mission>().script.nis = true;
+    let me = captain_ship(&mut w, Side::Player, Vec3::ZERO);
+    w.entity_mut(me).insert(crate::commands::Commander(crate::commands::PlayerId(0)));
+    let _foe = captain_ship(&mut w, Side::Enemy, Vec3::X * 50.0);
+    think(&mut w);
+    let s = w.get::<Ship>(me).unwrap();
+    assert_eq!((s.order, s.waypoints.len(), s.goal), (EngineOrder::Stop, 0, None), "no helm change during the cutscene");
+    assert_eq!(w.resource::<CaptainTargets>().of(me), None);
+}
+
+/// A cutscene redirects only the human's input: the computer captains keep picking targets and steering while it plays.
+#[test]
+fn computer_captains_keep_steering_in_a_cutscene() {
+    let mut w = captain_world(true);
+    w.resource_mut::<campaign::Mission>().script.nis = true;
+    let foe = captain_ship(&mut w, Side::Player, Vec3::X * 50.0);
+    let computer = captain_ship(&mut w, Side::Enemy, Vec3::ZERO);
+    think(&mut w);
+    assert_eq!(w.resource::<CaptainTargets>().of(computer), Some(foe));
+    assert_eq!(w.get::<Ship>(computer).unwrap().order, EngineOrder::Emergency, "under way after its target");
+}
+
+/// Retaliation: a Defensive ship answers an attacker that holds it as its target (before any shot), when it is visible, hostile and
+/// within scan range; not one out of scan range, nor a fully cloaked one.
+#[test]
+fn a_defensive_ship_answers_a_visible_attacker_in_scan_range_that_targets_it() {
+    let answer = |attacker_at: Vec3, cloaked: bool| {
+        let mut w = captain_world(false);
+        let attacker = captain_ship(&mut w, Side::Player, attacker_at);
+        let me = captain_ship(&mut w, Side::Enemy, Vec3::ZERO);
+        w.entity_mut(me).insert(campaign::MissionShip { stance: crate::rules::Stance::Defensive, ..campaign::MissionShip::placed(1, "d".into(), "o".into()) });
+        w.entity_mut(attacker).insert((FleetPilot { target: Some(me), ..default() }, crate::commands::Commander(crate::commands::PlayerId(0))));
+        if cloaked {
+            w.entity_mut(attacker).insert(crate::cloak::Cloak::new(true));
+        }
+        think(&mut w);
+        (w.resource::<CaptainTargets>().of(me), attacker)
+    };
+    let (t, attacker) = answer(Vec3::X * 50.0, false);
+    assert_eq!(t, Some(attacker), "it targets me: answered, no shot needed");
+    assert_eq!(answer(Vec3::X * 3000.0, false).0, None, "out of scan range");
+    assert_eq!(answer(Vec3::X * 50.0, true).0, None, "fully cloaked: not visible");
+}
+
+/// The re-scan: a target that can be overridden is scanned for again after 6 s, and when the scan finds nothing the old one stays.
+#[test]
+fn a_rescan_that_finds_nothing_keeps_the_old_target() {
+    let a = Entity::from_raw_u32(1).unwrap();
+    assert_eq!(choose_target(Some((a, 6.5, true)), None, None, |_| true), Some((a, false, true)), "kept, its age starting again");
+    assert_eq!(choose_target(Some((a, 6.5, true)), None, None, |t| t != a), None, "unless it is lost");
+}
+
+/// An unknown stance name is a state of its own: it takes no target (not even an attacker), does not search and stops with no
+/// orders, yet follows an order and a path, and a computer's ship still docks for repair.
+#[test]
+fn an_unknown_stance_obeys_orders_and_paths_but_picks_nothing_itself() {
+    let mut w = captain_world(false);
+    let foe = captain_ship(&mut w, Side::Player, Vec3::X * 40.0);
+    let ship = |w: &mut World, at: Vec3, waypoints: Vec<Vec3>| {
+        let e = captain_ship(w, Side::Enemy, at);
+        w.entity_mut(e).insert(campaign::MissionShip { stance: crate::rules::Stance::Unknown, ..campaign::MissionShip::placed(1, "u".into(), "o".into()) });
+        let mut s = w.get_mut::<Ship>(e).unwrap();
+        (s.waypoints, s.order) = (waypoints, EngineOrder::Full);
+        e
+    };
+    let (idle, sailing, ordered) = (ship(&mut w, Vec3::ZERO, vec![]), ship(&mut w, Vec3::Z * 10.0, vec![Vec3::Z * 900.0]), ship(&mut w, Vec3::NEG_Z * 10.0, vec![]));
+    w.entity_mut(foe).insert(FleetPilot { target: Some(idle), ..default() }); // it even attacks `idle`
+    w.entity_mut(ordered).insert(FleetPilot { target: Some(foe), ..default() });
+    think(&mut w);
+    let t = |e| w.resource::<CaptainTargets>().of(e);
+    assert_eq!((t(idle), w.get::<Ship>(idle).unwrap().order), (None, EngineOrder::Stop), "no pick, no answer: it stops");
+    assert_eq!((t(sailing), w.get::<Ship>(sailing).unwrap().waypoints.len()), (None, 1), "it keeps to its path");
+    assert_eq!(t(ordered), Some(foe), "an order stands");
+    assert!(crate::docking::seeks_repair(Some(crate::rules::Stance::Unknown)), "a computer's ship still docks for repair");
+}
+
+/// Exploring: one of the four quarter points, drawn from the battle's seeded stream (the same seed, the same course on every
+/// machine); within half its scan range of the point the ship draws again, possibly the same one.
+#[test]
+fn exploring_draws_its_quarter_point_from_the_battles_seeded_stream() {
+    let cfg = crate::Config::default();
+    let e = Entity::from_raw_u32(1).unwrap();
+    let course = |seed: u64| {
+        let (mut explore, mut rng) = (Explore::default(), combat::SimRng::new(seed));
+        let mut at = Vec3::ZERO;
+        (0..12)
+            .map(|_| {
+                let goal = explore.goal(&cfg, e, at, 100.0, &mut rng.explore);
+                at = goal; // arrived: within half the scan range, so the next call draws again
+                goal
+            })
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(course(7), course(7), "one seed, one course");
+    assert!((0..4).all(|q| course(7).contains(&Explore::centre(q, 1000.0)) || course(8).contains(&Explore::centre(q, 1000.0))), "every quarter can come up");
+    assert!(course(7).iter().all(|g| (0..4).any(|q| *g == Explore::centre(q, 1000.0))), "only the four fixed points");
+    let (mut explore, mut rng) = (Explore::default(), combat::SimRng::new(7));
+    let first = explore.goal(&cfg, e, Vec3::ZERO, 100.0, &mut rng.explore);
+    assert_eq!(explore.goal(&cfg, e, Vec3::new(300.0, 0.0, 0.0), 100.0, &mut rng.explore), first, "far from it: the same point");
 }

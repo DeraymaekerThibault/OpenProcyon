@@ -154,14 +154,16 @@ fn spawn(app: &mut App, class: &str, side: Side, at: Vec3, skill: Skill) -> Enti
 #[test]
 #[ignore = "needs imported assets"]
 fn boarding_a_hostile_skirmish_base_changes_its_side() {
-    use crate::combat::{BaseOrigin, BaseSide};
+    use crate::combat::BaseFlag;
     let mut app = app();
+    let mut table = crate::alliance::Alliances::default();
+    table.add_player("Player", Side::Player);
+    table.add_player("Enemy", Side::Enemy);
+    app.insert_resource(table);
     let pts = points("Base_Procyon1");
     assert!(!pts.is_empty(), "the Procyon base exports boarding points");
-    let base = app
-        .world_mut()
-        .spawn((Transform::default(), MissionBase { id: 225, owner: "base225".into() }, BaseSide(Side::Enemy), BaseOrigin(Side::Enemy), Boardable::base("Base_Procyon1", 2, true)))
-        .id();
+    let base =
+        app.world_mut().spawn((Transform::default(), MissionBase { id: 225, owner: "Enemy".into() }, BaseFlag::new("Enemy"), Boardable::base("Base_Procyon1", 2, true))).id();
     let me = spawn(&mut app, "Ship_Navy_Cutter", Side::Player, pts[0], Skill::Elite);
     app.world_mut().entity_mut(me).insert((PlayerShip, crate::ship::FleetMember("Player".into(), 0)));
     tick(&mut app, 0.1);
@@ -169,8 +171,8 @@ fn boarding_a_hostile_skirmish_base_changes_its_side() {
     for _ in 0..600 {
         tick(&mut app, 0.1);
     }
-    assert_eq!(app.world().get::<BaseSide>(base).unwrap().0, Side::Player, "captured: the base fights for the captor now");
-    assert_eq!(app.world().get::<BaseOrigin>(base).unwrap().0, Side::Enemy);
+    assert_eq!(app.world().get::<MissionBase>(base).unwrap().owner, "Player", "captured: the base fights for the captor now");
+    assert_eq!(app.world().get::<BaseFlag>(base).unwrap(), &BaseFlag { shows: "Player".into(), start: "Enemy".into() });
     assert!(app.world().get::<crate::ship::FleetMember>(base).is_none(), "a base does not join the captor's fleet roster");
 }
 
@@ -540,4 +542,18 @@ fn two_fights_at_once_draw_in_spawn_order_not_query_order() {
     let (one, other) = (run(true), run(false));
     assert_eq!(one, other);
     assert!(one[0] != one[2] || one[1] != one[3], "the two fights drew different coins, so their order shows: {one:?}");
+}
+
+/// A won fight for a base hands it to the captor (its side and guns follow the owner) and repaints its flag. Asset-free.
+#[test]
+fn a_captured_base_changes_owner_and_shows_the_captors_flag() {
+    use crate::combat::BaseFlag;
+    let mut app = App::new();
+    app.add_message::<Settled>().add_message::<Captured>().add_message::<Sfx>().insert_resource(SimRng::new(7)).add_systems(Update, fight::settled);
+    let boarder = app.world_mut().spawn((Ship::new(0, Side::Player), Boardable::base("x", 2, true), crate::ship::FleetMember("player0".into(), 0))).id();
+    let base = app.world_mut().spawn((MissionBase { id: 4, owner: "player1".into() }, BaseFlag::new("player1"), Boardable::base("x", 2, true))).id();
+    app.world_mut().write_message(Settled { boarder, target: base, outcome: Outcome::Won });
+    app.update();
+    assert_eq!(app.world().get::<MissionBase>(base).unwrap().owner, "player0", "the captor's fleet owner: its side now");
+    assert_eq!(app.world().get::<BaseFlag>(base).unwrap().shows, "player0", "a capture repaints the flag");
 }

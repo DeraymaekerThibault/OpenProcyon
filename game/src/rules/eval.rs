@@ -42,17 +42,17 @@ impl Script {
             .collect();
         let n = rules.len();
         let diag = Diag::new(rules.iter().map(|r| r.name.trim().to_string()).collect(), crate::rules::check::known_names(data));
-        // The TWT's PlayerAllianceInfoVector lists the allied player pairs; every other pair of players starts hostile. Owners that are
-        // not players ('NO PLAYER', unset) are never hostile. The rules' alliance actions then change it.
+        // The TWT's PlayerAllianceInfoVector lists the allied player pairs; every other pair of players starts hostile. Each player
+        // has its own side, the human's first; owners that are not players ('NO PLAYER', unset) are neutral (`alliance::Alliances`).
         let players: Vec<&str> = data["players"].as_array().into_iter().flatten().filter_map(Value::as_str).collect();
-        let allied: HashSet<(&str, &str)> =
-            data["alliances"].as_array().into_iter().flatten().filter_map(|p| Some((p[0].as_str()?, p[1].as_str()?))).flat_map(|(a, b)| [(a, b), (b, a)]).collect();
-        let mut hostile = HashSet::new();
-        for (i, a) in players.iter().enumerate() {
-            for bb in &players[i + 1..] {
-                if a != bb && !allied.contains(&(*a, *bb)) {
-                    hostile.insert((Owner::from(*a), Owner::from(*bb)));
-                }
+        let mut alliances = crate::alliance::Alliances::default();
+        alliances.add_player(&player, crate::Side::Player);
+        for (i, p) in players.iter().filter(|p| **p != player).enumerate() {
+            alliances.add_player(p, crate::Side(1 + i as u8));
+        }
+        for (a, b) in data["alliances"].as_array().into_iter().flatten().filter_map(|p| Some((p[0].as_str()?, p[1].as_str()?))) {
+            if let (Some(x), Some(y)) = (alliances.side_of(a), alliances.side_of(b)) {
+                alliances.set(x, y, true);
             }
         }
         let mut groups: HashMap<i64, Vec<GroupName>> = HashMap::new();
@@ -92,7 +92,7 @@ impl Script {
             point_on_map: true,
             map_text: HashMap::new(),
             hold_fire: HashSet::new(),
-            hostile,
+            alliances,
             player,
             tows: vec![],
             tow_specs: vec![],

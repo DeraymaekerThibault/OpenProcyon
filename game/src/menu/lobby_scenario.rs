@@ -240,8 +240,9 @@ mod tests {
         let plan = sk.plan(&lib);
         assert_eq!(plan.len(), 8, "every row plays");
         assert_eq!(plan.iter().filter(|g| g.human).count(), 1);
-        let allies = plan.iter().filter(|g| !g.human && g.side == crate::Side::Player).count();
-        let foes = plan.iter().filter(|g| g.side != crate::Side::Player).count();
+        let table = crate::scenario::battle_alliances(&plan, &[], None);
+        let allies = plan.iter().filter(|g| !g.human && table.with_human(g.side)).count();
+        let foes = plan.iter().filter(|g| !table.with_human(g.side)).count();
         assert!(allies >= 1 && foes >= 1, "Border Dispute is teams: {allies} allied computers, {foes} hostile");
         for g in plan.iter().filter(|g| !g.human) {
             assert!(!g.ships.is_empty(), "computer row {} has a fleet", g.player);

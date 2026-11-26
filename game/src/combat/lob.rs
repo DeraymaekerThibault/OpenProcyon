@@ -166,7 +166,7 @@ pub fn blasts(
     lib: Res<Library>,
     fxl: Res<FxLib>,
     mut rng: ResMut<SimRng>,
-    difficulty: Res<crate::scenario::Difficulty>,
+    (difficulty, table): (Res<crate::scenario::Difficulty>, crate::alliance::Hostility),
     (mut hits, mut destroyed, mut splashes): (MessageWriter<Hit>, MessageWriter<Destroyed>, MessageWriter<super::Splashed>),
     q: Query<(Entity, &mut Blast, &Transform), (Without<Ship>, Without<Shell>, Without<crate::Joining>)>,
     mut ships: Query<(Entity, &Transform, &Ship, &mut Health, Option<&crate::campaign::MissionShip>), Without<crate::lifeboats::Lifeboat>>,
@@ -195,7 +195,7 @@ pub fn blasts(
                 continue;
             }
             let class = &lib.classes[ship.class];
-            let scale = b.owner.map_or(1.0, |(side, base)| side_damage_scale(side, ship.side, difficulty.0, base));
+            let scale = b.owner.map_or(1.0, |(side, base)| side_damage_scale(table.with_human(side), table.with_human(ship.side), difficulty.0, base));
             let mut struck = false;
             for k in 0..class.sections.len() {
                 let sec = &class.sections[k];
@@ -276,7 +276,7 @@ pub struct Strike {
 pub fn strikes(
     lib: Res<Library>,
     mut rng: ResMut<SimRng>,
-    difficulty: Res<crate::scenario::Difficulty>,
+    (difficulty, table): (Res<crate::scenario::Difficulty>, crate::alliance::Hostility),
     mut msgs: MessageReader<Strike>,
     mut ships: Query<(&Ship, &mut Health, Option<&crate::campaign::MissionShip>)>,
 ) {
@@ -291,7 +291,7 @@ pub fn strikes(
         let key = material_key(&section.material);
         let Some(damage) = m.damage.get(key) else { continue };
         // The hit carries no attacker, so only the human's own ships take the difficulty factor (as fires do).
-        let f = super::shells::side_damage_scale(Side::Enemy, ship.side, difficulty.0, false);
+        let f = super::shells::side_damage_scale(false, table.with_human(ship.side), difficulty.0, false);
         let damage = [damage[0] * f, damage[1] * f, damage[2], damage[3], damage[4]];
         apply_ship_hit(class, &mut hp, k, damage, ms.map_or(0.0, |m| m.invuln), false, &mut rng);
     }
@@ -299,8 +299,7 @@ pub fn strikes(
 
 /// Difficulty factor of a ram by ownership: the struck ship's owner is the human (incoming factor), else the rammer's is (outgoing).
 fn ram_scale(victim_human: bool, rammer_human: bool, difficulty: u8) -> f32 {
-    let as_side = |h: bool| if h { Side::Player } else { Side::Enemy };
-    super::shells::side_damage_scale(as_side(rammer_human), as_side(victim_human), difficulty, false)
+    super::shells::side_damage_scale(rammer_human, victim_human, difficulty, false)
 }
 
 /// Contact damage (collision.rs `Ram`): one hit on the victim's section nearest the contact,

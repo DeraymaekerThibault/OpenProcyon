@@ -251,8 +251,7 @@ pub fn damage_fx(
 /// through dead vital sections, the human's ships taking the difficulty factor: the hit carries no attacker, so computer ships take
 /// none). The core is never scaled directly: a fraction below 1 leaves it whole unless vital sections die.
 pub fn fraction_hit(class: &Class, hp: &mut Health, fraction: f32, humans_own_ship: bool, invuln: f32, difficulty: u8) {
-    let victim = if humans_own_ship { Side::Player } else { Side::Enemy };
-    let scale = super::shells::side_damage_scale(Side::Enemy, victim, difficulty, false);
+    let scale = super::shells::side_damage_scale(false, humans_own_ship, difficulty, false);
     let mut rng = Rng::default();
     for k in 0..hp.sections.len() {
         let d = (hp.sections[k].round_ties_even() * fraction * scale).round_ties_even();
@@ -296,7 +295,7 @@ pub fn fires(
         Option<&crate::boarding::Boardable>,
     )>,
     mut fxq: Query<&mut fx::Fx>,
-    fleets: Option<Res<crate::ship::Fleets>>,
+    (fleets, table): (Option<Res<crate::ship::Fleets>>, crate::alliance::Hostility),
 ) {
     let dt = time.delta_secs();
     for (me, _, ship, mut hp, mut fires, posts, mission, member, boarding) in &mut ships {
@@ -317,7 +316,7 @@ pub fn fires(
         if tick {
             fires.tick = 0.0;
             let class = &lib.classes[ship.class];
-            let generic = posts.is_none().then(|| crate::crew_arms::fallback_posts(ship, boarding, &class.name)).flatten();
+            let generic = posts.is_none().then(|| crate::crew_arms::fallback_posts(table.with_human(ship.side), boarding, &class.name)).flatten();
             let posts = posts.or(generic.as_ref());
             let mut crew = fire_fighting(&std::array::from_fn(|role| crew_slots(crate::scenario::SpawnIndex::of(&spawn_order, me), class, posts, role, "leadership")));
             while crew > 0.0 {
@@ -541,7 +540,7 @@ pub fn crew_repair(
     lib: Res<Library>,
     mut rng: ResMut<SimRng>,
     mut ships: Query<(Entity, &Ship, &mut Health, Option<&crate::crew_arms::CrewPosts>, Option<&crate::boarding::Boardable>)>,
-    mut acc: Local<f32>,
+    (mut acc, table): (Local<f32>, crate::alliance::Hostility),
 ) {
     *acc += time.delta_secs();
     if *acc < CREW_REPAIR_TICK {
@@ -553,7 +552,7 @@ pub fn crew_repair(
             continue;
         }
         let class = &lib.classes[ship.class];
-        let generic = posts.is_none().then(|| crate::crew_arms::fallback_posts(ship, boarding, &class.name)).flatten();
+        let generic = posts.is_none().then(|| crate::crew_arms::fallback_posts(table.with_human(ship.side), boarding, &class.name)).flatten();
         let posts = posts.or(generic.as_ref());
         let (engineers, riggers) = (
             crew_slots(crate::scenario::SpawnIndex::of(&spawn_order, e), class, posts, 4, "engineering"),

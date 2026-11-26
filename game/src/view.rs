@@ -4,7 +4,7 @@ use crate::Nearest;
 use crate::bindings::Act;
 use crate::commands::{Engine, Kind, Orders};
 use crate::{
-    GunStates, Health, Library, Outcome, PlayerShip, Ship, Side, Target, audio, bindings, briefing, campaign, combat, course, docking, environment, menu, panels, rules, ship,
+    GunStates, Health, Library, Outcome, PlayerShip, Ship, Target, audio, bindings, briefing, campaign, combat, course, docking, environment, menu, panels, rules, ship,
     toggle_pause,
 };
 use bevy::input::mouse::AccumulatedMouseMotion;
@@ -225,8 +225,10 @@ fn left_click(c: &Controlled, ray: Ray3d, scene: &ClickScene, pointer: &mut Poin
         }
         return;
     }
-    let hit = nearest_ship(scene.others, scene.lib, ray, |(e, _, s, h, m)| s.side != Side::Player && !*h && *m && scene.sensors.player_sees(*e, scene.mission));
-    let object = object_hit(scene.objects.iter(), ray, scene.sensors, scene.mission);
+    let hit = nearest_ship(scene.others, scene.lib, ray, |(e, _, s, h, m)| {
+        docks.table().targetable(crate::Side::Player, s.side, true) && !*h && *m && scene.sensors.player_sees(*e, scene.mission)
+    });
+    let object = object_hit(scene.objects.iter(), ray, scene.sensors, scene.mission, docks.table());
     let base = docks.hostile_base_hit(ray, scene.player_pos);
     let pick = [hit, object, base.map(|(e, t, _)| (e, t))].into_iter().flatten().min_by(|a, b| a.1.total_cmp(&b.1));
     if let Some((e, t)) = pick {
@@ -613,6 +615,7 @@ pub fn object_hit<'a>(
     ray: Ray3d,
     sensors: &environment::Sensors,
     mission: Option<&campaign::Mission>,
+    table: &crate::alliance::Alliances,
 ) -> Option<(Entity, f32)> {
     objects
         .filter_map(|(e, tf, rock, animal)| {
@@ -620,7 +623,7 @@ pub fn object_hit<'a>(
                 return None;
             }
             let radius = if let Some(a) = animal {
-                if !a.visible || !mission.is_some_and(|m| m.script.hostile(m.script.player(), &a.owner)) {
+                if !a.visible || !table.targetable(crate::Side::Player, table.side_or_neutral(&a.owner), true) {
                     return None;
                 }
                 a.radius
