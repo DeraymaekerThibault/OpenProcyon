@@ -151,6 +151,47 @@ mod rotation_tests {
         assert_eq!(scenery, 2, "red_rover's Montgomery and pirate bases");
     }
 
+    /// A skirmish fleet starts with its map slot's formation type but holds none: no ship follows a slot, so the captain drives them.
+    #[test]
+    #[ignore = "needs imported assets"]
+    fn a_fleet_starts_with_its_formation_selected_and_no_ship_holding_it() {
+        use bevy::ecs::system::RunSystemOnce;
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, AssetPlugin::default()))
+            .init_asset::<bevy::world_serialization::WorldAsset>()
+            .init_asset::<Mesh>()
+            .init_asset::<Image>()
+            .init_asset::<StandardMaterial>()
+            .init_asset::<AudioSource>()
+            .init_asset::<crate::fx::EffectMaterial>()
+            .insert_resource(crate::testutil::lib())
+            .init_resource::<fx::FxLib>()
+            .init_resource::<collision::Shapes>()
+            .init_resource::<data::AsteroidDefs>()
+            .init_resource::<ship::Fleets>()
+            .init_resource::<Target>()
+            .insert_resource(Orbit { yaw: 0.0, pitch: 0.0, dist: 60.0, focus: None })
+            .insert_resource(Config {
+                player: "Ship_Navy_Cutter".into(),
+                allies: vec!["Ship_Navy_Cutter".into(), "Ship_Navy_Cutter".into()],
+                enemies: vec!["Ship_Navy_Cutter".into()],
+                map: Some("red_rover".into()),
+                speed: 1.0,
+                ..default()
+            });
+        app.world_mut()
+            .run_system_once(|mut c: Commands, a: Res<AssetServer>, l: Res<Library>, f: Res<fx::FxLib>, s: Res<collision::Shapes>, r: Res<data::AsteroidDefs>, cfg: Res<Config>| {
+                spawn_scenario(&mut c, &a, &l, &f, &s, &r, &cfg)
+            })
+            .unwrap();
+        let w = app.world_mut();
+        let formed = w.resource::<ship::Fleets>().groups.values().filter(|f| f.formation != ship::Formation::None).count();
+        assert!(formed > 0, "red_rover gives its fleets Line Abreast");
+        let pilots = w.query::<&ship::FleetPilot>().iter(w).count();
+        assert!(pilots >= 3, "the fleets have followers: {pilots}");
+        assert!(w.query::<&ship::FleetPilot>().iter(w).all(|p| !p.hold), "no ship holds formation at the start");
+    }
+
     #[test]
     #[ignore = "needs imported assets"]
     fn native_column_matrix_preserves_every_authored_scenery_axis() {

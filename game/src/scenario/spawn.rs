@@ -395,7 +395,9 @@ fn spawn_skirmish(
             }
         }
         let owner = owner.clone();
-        commands.queue(move |w: &mut World| ship::set_formation(w, &owner, Some(kind), kind != ship::Formation::None));
+        // The fleet gets its map slot's formation type and its ships stand in their spots, but no ship holds formation: the original
+        // starts with hold off (docs/re/fleet-controls.md), so every ship picks its own target from the first think.
+        commands.queue(move |w: &mut World| ship::set_formation(w, &owner, Some(kind), false));
     }
     if roster.rows.is_empty() {
         commands.remove_resource::<alliance::Roster>();
