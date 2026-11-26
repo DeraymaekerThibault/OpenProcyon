@@ -373,7 +373,9 @@ Static analysis of the original's captain AI, written as rules. Nothing in it de
 - **Target:** kept for 6 s, then chosen again (at once when it sinks or turns friendly); a held target is followed anywhere. An Aggressive
   captain takes the nearer of the nearest hostile ship in its scan range and the nearest hostile base (at any range in skirmish, within
   scan range in a campaign). Failing both it takes the target of a ship of its own fleet, else of an allied ship. Other stances only
-  answer ships that target them.
+  answer ships that target them. The 6 s re-choice applies only while the ship's "AI can override" flag is set (nearly all ships in
+  the retail saved games have it). Remake: one captain (`ship::ai`) runs skirmish and mission ships; the flag counts as set unless the ship
+  has an explicit order (a fleet order or a script's attack order), and stances other than Dummy and Persistent are not read (PROVISIONAL).
 - **Which attack:** the primary gun bank is the one whose live guns cost the most victory points. Its guns' directions and arc edges
   (counted counter-clockwise from the bow in quadrants; an arc over 180° covers all four) decide: only forward quadrants → **frontal**;
   both rear quadrants → **rear**; otherwise **broadside** on the side it covers (port if only port quadrants). No live gun → **ram**
@@ -410,8 +412,8 @@ Static analysis of the original's captain AI, written as rules. Nothing in it de
   charge course already held stands: the submarine presses in to 0.2 R and keeps its course and its fire there. Only if the hulls touch
   (gap 0 or less) does it sail the break-off, 0 x R from its own position, i.e. stop. An ordinary ship, or a submarine not fully
   submerged, uses R for both. Remake: `attack::course_to` in `ship/attack.rs` takes the two ranges (`frontal_ranges`) and returns no course when none is
-  set (the ship keeps the one it held); the skirmish captain in `ship.rs` passes them when its cloak level is exactly 1. Campaign
-  mission ships' own captain still uses R for both (PROVISIONAL: no cloak read there).
+  set (the ship keeps the one it held); the captain in `ship.rs` passes them when its cloak level is exactly 1, for mission
+  ships too.
 - **Throttle:** full while the next course point is within 11.25° of the bow, else the ship's own minimum, 0.65-0.75 of full (drawn
   per ship). That minimum is a floor under every slow-down but the collision avoider's, so nothing else slows an attacker near its
   course points.
