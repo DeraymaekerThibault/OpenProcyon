@@ -346,11 +346,9 @@ fn spawn_skirmish(
                 let k = |i: usize| c[i].as_f64().unwrap_or(0.0) as f32;
                 commands.entity(e).insert(PlayerColor(Color::srgb(k(0), k(1), k(2))));
             }
-            // Every skirmish computer ship is Aggressive (docs/re/movement.md) until its map's script sets a stance.
             if let Some(names) = &script_names {
-                let placed =
-                    campaign::MissionShip::placed(id.unwrap_or(-1), id.and_then(|id| names.get(&id).cloned()).unwrap_or_default(), p["name"].as_str().unwrap_or_default().into());
-                commands.entity(e).insert(campaign::MissionShip { stance: crate::rules::Stance::Aggressive, ..placed });
+                let name = id.and_then(|id| names.get(&id).cloned()).unwrap_or_default();
+                commands.entity(e).insert(campaign::MissionShip::placed(id.unwrap_or(-1), name, p["name"].as_str().unwrap_or_default().into()));
             }
             // A computer fleet built in the lobby carries its crew (`SkirmishCrew` below); its ships left without crew have empty posts
             // like ours (retail saves: factor 1.125, scan x1.125). Pre-placed computer ships keep the measured crewed factor.

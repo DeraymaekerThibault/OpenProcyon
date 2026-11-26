@@ -384,9 +384,7 @@ pub fn ai(
         (*explore, *breakoffs, *clocks, *courses, *latched) = Default::default();
     }
     let campaign = mission.is_some();
-    // Scripted ships: hidden ones and dummies wait for the script; a persistent ship on its route, a human-captained one
-    // (Captain_Human) and one following a group take a target but no course from the captain (Convoy Raid's convoys and mission 3's
-    // swoop keep to their routes). PROVISIONAL: the stance is all the captain looks at.
+    // Scripted ships: hidden ones and dummies wait for the script; one following a group takes a target but no course from the captain.
     let left_to_script = |m: &campaign::MissionShip| !m.visible || m.stance == crate::rules::Stance::Dummy;
     let holes = hole_list(&holes, storms.0.as_deref(), storms.1.as_deref());
     let now = time.elapsed_secs();
@@ -407,11 +405,13 @@ pub fn ai(
         // Between thinks the ship keeps the course, speed order and target of its last think.
         let clock = clocks.entry(e).or_insert_with(|| ThinkClock::new(now, key.0 as usize));
         let Some(dt) = clock.due(now) else { continue };
-        // The human's own fleet waits for orders; allied computer fleets share the human's side but hunt like any computer.
-        // A ship that was just sunk has left its fleet and is computer-run, whoever steered it (docs/re/effects.md "Death drive").
+        // A ship the human controls (its own fleet, a Captain_Human ship) keeps its stance but the computer captain does not drive it
+        // (PROVISIONAL); the command ship only in demo (--shot) runs, as an autopilot. A ship that was just sunk has left its fleet and is
+        // computer-run, whoever steered it (docs/re/effects.md "Death drive").
         let sinking = dying.contains(e);
-        let human = !sinking && is_human_ship(s.side, member, Some(&fleets));
-        let script = scripted.get(e).ok().map(|m| (m.ordered, m.ram, m.human || m.follow.is_some()));
+        let demo = me && cfg.shot.is_some() && cfg.script.as_deref() != Some("fleet");
+        let human = !sinking && !demo && (is_human_ship(s.side, member, Some(&fleets)) || scripted.get(e).is_ok_and(|m| m.human));
+        let script = scripted.get(e).ok().map(|m| (m.ordered, m.ram, m.follow.is_some()));
         if busy.contains(e) || scripted.get(e).is_ok_and(left_to_script) {
             // A dock, tow, grapple or board order (the player's, the script's, or a chosen repair dock) names the ship's target.
             let order = orders.get(e).ok().and_then(|(d, t, g, b)| d.map(|d| d.dockee()).or(t.map(|t| t.towee())).or(g.map(|g| g.0)).or(b.map(|b| b.target())));
@@ -428,10 +428,7 @@ pub fn ai(
             s.goal = None;
             continue;
         }
-        if (h.destroyed && !sinking)
-            || (me && !sinking && (cfg.shot.is_none() || cfg.script.as_deref() == Some("fleet")))
-            || matches!(cfg.script.as_deref(), Some("fxtest") | Some("damage") | Some("course") | Some("speedtest"))
-        {
+        if (h.destroyed && !sinking) || human || matches!(cfg.script.as_deref(), Some("fxtest") | Some("damage") | Some("course") | Some("speedtest")) {
             continue;
         }
         let explicit = pilot.and_then(|p| p.target).or(script.and_then(|m| m.0));
@@ -439,7 +436,7 @@ pub fn ai(
         if steers {
             s.throttle = None;
         }
-        // What it could pick: hostile ships and dragons, and hostile bases (none for the human's own ships). Armed volcano islands fire
+        // What it could pick: hostile ships and dragons, and hostile bases. Armed volcano islands fire
         // on everyone but are no base to go for (retail Diablo Strait: the computer came for our ships).
         let island = |b: &combat::ArmedBase| lib.classes[b.class].name.starts_with("Island_");
         let hostile_base = |b: &(Entity, &Transform, &combat::BaseSide, &Health, &combat::ArmedBase)| table.hostile(b.2.0, s.side) && !b.3.destroyed && !island(b.4);
@@ -449,18 +446,13 @@ pub fn ai(
         let mut options: Vec<Seen> =
             snap.iter().filter(|f| f.0 != e && table.hostile(f.2, s.side) && f.3).map(|f| seen(f.1, f.0, false, targets.of(f.0) == Some(e) || f.7 == Some(e))).collect();
         options.extend(dragons.iter().filter(|d| dragon(d.0).is_some()).map(|d| seen(d.1.translation, d.0, false, d.3.target() == Some(e))));
-        options.extend(bases.iter().filter(|b| !human && hostile_base(b)).map(|b| seen(b.1.translation, b.0, true, false)));
+        options.extend(bases.iter().filter(|b| hostile_base(b)).map(|b| seen(b.1.translation, b.0, true, false)));
         let valid = |t: Entity| {
             snap.iter().any(|f| f.0 == t && table.hostile(f.2, s.side) && f.3) || bases.get(t).is_ok_and(|b| hostile_base(&b)) || dragon(t).is_some() || rock(t).is_some()
         };
         let stance = scripted.get(e).map_or(crate::rules::Stance::Aggressive, |m| m.stance);
-        let aggressive = stance == crate::rules::Stance::Aggressive && !human;
-        let mut chosen = choose_target(
-            targets.0.get(&e).map(|t| (t.0, t.1, t.3)),
-            explicit,
-            stance_pick(if human { crate::rules::Stance::Aggressive } else { stance }, campaign, &options),
-            valid,
-        );
+        let aggressive = stance == crate::rules::Stance::Aggressive;
+        let mut chosen = choose_target(targets.0.get(&e).map(|t| (t.0, t.1, t.3)), explicit, stance_pick(stance, campaign, &options), valid);
         // Nothing found: an Aggressive ship takes a fleet mate's target, else an allied ship's (same side, another fleet).
         if chosen.is_none() && aggressive && explicit.is_none() {
             let fleet = member.map(|m| m.0.as_str());

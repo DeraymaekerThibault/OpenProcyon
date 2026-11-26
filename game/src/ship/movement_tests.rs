@@ -966,8 +966,9 @@ fn a_persistent_or_dummy_ship_never_docks_for_repair() {
 /// ends, as long as the target lasts. Without a path it attacks like any ship; a formation comes first.
 #[test]
 fn a_persistent_ship_fires_from_its_path_then_holds_and_attacks_without_one() {
+    // The foe is a computer ship (the human's own ships are not captained), so its target is its captain's.
     let mut w = captain_world(false);
-    let foe = captain_ship(&mut w, Side::Player, Vec3::ZERO);
+    let foe = captain_ship(&mut w, Side(2), Vec3::ZERO);
     let persistent = |w: &mut World, at: Vec3, path: Vec<Vec3>| {
         let e = captain_ship(w, Side::Enemy, at);
         w.entity_mut(e).insert(campaign::MissionShip { stance: crate::rules::Stance::Persistent, ..campaign::MissionShip::placed(1, "p".into(), "o".into()) });
@@ -986,7 +987,7 @@ fn a_persistent_ship_fires_from_its_path_then_holds_and_attacks_without_one() {
     assert_eq!(w.resource::<CaptainTargets>().of(walker), Some(foe));
 
     let mut w = captain_world(false);
-    let _foe = captain_ship(&mut w, Side::Player, Vec3::ZERO);
+    let _foe = captain_ship(&mut w, Side(2), Vec3::ZERO);
     let free = persistent(&mut w, Vec3::X * 30.0, vec![]);
     let formed = persistent(&mut w, Vec3::Z * 60.0, vec![]);
     w.entity_mut(formed).insert(FleetPilot { hold: true, ..default() });
@@ -1015,4 +1016,44 @@ fn a_computer_captain_takes_a_dragon_hostile_to_its_own_side() {
     let (t, dragon) = target_of(false);
     assert_eq!(t, Some(dragon), "hostile to its side, though the human's ally");
     assert_eq!(target_of(true).0, None, "allied with its side");
+}
+
+/// A ship nothing gave a stance is Aggressive, in a mission (placed at the start or spawned later) as in a skirmish: it hunts the
+/// hostile in sight.
+#[test]
+fn a_ship_without_a_stance_is_aggressive_in_a_mission_and_a_skirmish() {
+    for (campaign, ms) in
+        [(true, Some(campaign::MissionShip::placed(1, "a".into(), "o".into()))), (true, Some(campaign::MissionShip { visible: true, ..default() })), (false, None)]
+    {
+        let mut w = captain_world(campaign);
+        let foe = captain_ship(&mut w, Side::Player, Vec3::X * 50.0);
+        let ship = captain_ship(&mut w, Side::Enemy, Vec3::ZERO);
+        if let Some(ms) = ms {
+            assert_eq!(ms.stance, crate::rules::Stance::Aggressive);
+            w.entity_mut(ship).insert(ms);
+        }
+        think(&mut w);
+        assert_eq!(w.resource::<CaptainTargets>().of(ship), Some(foe), "campaign {campaign}: it attacks unprovoked");
+    }
+}
+
+/// A ship the human controls (its own fleet, a Captain_Human ship) keeps its stance and is not driven by the computer captain.
+#[test]
+fn a_ship_the_human_controls_keeps_its_stance_and_is_not_captained() {
+    let mut w = captain_world(true);
+    let _foe = captain_ship(&mut w, Side::Enemy, Vec3::X * 30.0);
+    let own = captain_ship(&mut w, Side::Player, Vec3::ZERO);
+    let local = w.resource::<Fleets>().local.clone();
+    w.entity_mut(own).insert((FleetMember(local, 1), campaign::MissionShip { stance: crate::rules::Stance::Defensive, ..default() }));
+    let handed = captain_ship(&mut w, Side::Player, Vec3::Z * 10.0);
+    w.entity_mut(handed).insert(campaign::MissionShip { human: true, ..default() });
+    for e in [own, handed] {
+        w.get_mut::<Ship>(e).unwrap().order = EngineOrder::Slow;
+    }
+    think(&mut w);
+    for e in [own, handed] {
+        assert_eq!(w.resource::<CaptainTargets>().of(e), None, "no captain's target");
+        assert_eq!(w.get::<Ship>(e).unwrap().order, EngineOrder::Slow, "nor a captain's course");
+    }
+    assert_eq!(w.get::<campaign::MissionShip>(own).unwrap().stance, crate::rules::Stance::Defensive, "its stance stays");
 }

@@ -5,12 +5,14 @@ use serde_json::Value;
 use super::*;
 use crate::names::name_newtype;
 
+/// A ship's (or dragon's) AI stance. One that nothing sets, for any owner and whether placed at the start or spawned later, is
+/// Aggressive, and so is a stance name that is none of the five (PROVISIONAL).
 #[derive(Clone, Copy, PartialEq, Debug, Default)]
 pub enum Stance {
     Dummy,
-    #[default]
     Neutral,
     Defensive,
+    #[default]
     Aggressive,
     Persistent,
 }
@@ -25,8 +27,10 @@ impl Stance {
             Stance::Persistent
         } else if s.contains("defens") {
             Stance::Defensive
-        } else {
+        } else if s.contains("neutral") {
             Stance::Neutral
+        } else {
+            Stance::default()
         }
     }
 }
