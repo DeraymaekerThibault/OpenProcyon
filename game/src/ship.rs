@@ -374,10 +374,14 @@ pub fn ai(
         crate::alliance::Hostility,
         Query<(&Transform, &combat::Asteroid), Without<Ship>>,
     ),
-    (dragons, aim): (Query<(Entity, &Transform, &crate::environment::SpaceAnimal, &crate::dragons::Dragon), Without<Ship>>, Option<Res<Target>>),
+    (dragons, aim, mut latched): (
+        Query<(Entity, &Transform, &crate::environment::SpaceAnimal, &crate::dragons::Dragon), Without<Ship>>,
+        Option<Res<Target>>,
+        Local<std::collections::HashSet<Entity>>,
+    ),
 ) {
     if start.is_new() {
-        (*explore, *breakoffs, *clocks, *courses) = Default::default();
+        (*explore, *breakoffs, *clocks, *courses, *latched) = Default::default();
     }
     let campaign = mission.is_some();
     // Scripted ships: hidden ones and dummies wait for the script; a persistent ship on its route, a human-captained one
@@ -407,7 +411,7 @@ pub fn ai(
         // A ship that was just sunk has left its fleet and is computer-run, whoever steered it (docs/re/effects.md "Death drive").
         let sinking = dying.contains(e);
         let human = !sinking && is_human_ship(s.side, member, Some(&fleets));
-        let script = scripted.get(e).ok().map(|m| (m.ordered, m.ram, m.human || m.follow.is_some() || (m.stance == crate::rules::Stance::Persistent && !s.waypoints.is_empty())));
+        let script = scripted.get(e).ok().map(|m| (m.ordered, m.ram, m.human || m.follow.is_some()));
         if busy.contains(e) || scripted.get(e).is_ok_and(left_to_script) {
             // A dock, tow, grapple or board order (the player's, the script's, or a chosen repair dock) names the ship's target.
             let order = orders.get(e).ok().and_then(|(d, t, g, b)| d.map(|d| d.dockee()).or(t.map(|t| t.towee())).or(g.map(|g| g.0)).or(b.map(|b| b.target())));
@@ -500,11 +504,23 @@ pub fn ai(
         let explore_now = |s: &mut Ship, explore: &mut Explore| {
             (s.waypoints, s.goal, s.order) = (vec![explore.goal(&cfg, e, key, tf.translation, class.sight)], None, EngineOrder::Emergency);
         };
+        // A course the captain did not set itself: a script's path or one the player drew.
+        let path = s.waypoints.last().is_some_and(|p| courses.get(&e) != Some(p));
+        // A Persistent ship on a path keeps to it and fires at its target without turning to it; once it has done so with a target
+        // held it keeps doing so until the target is gone, and holds its position when the path ends. Without a path it attacks
+        // like the others. A formation comes first (the fleet's, above). PROVISIONAL.
+        if chosen.is_none() {
+            latched.remove(&e);
+        } else if stance == crate::rules::Stance::Persistent && (path || latched.contains(&e)) {
+            latched.insert(e);
+            if !path {
+                (s.goal, s.order) = (None, EngineOrder::Stop);
+            }
+            continue;
+        }
         if !steers {
             continue;
         }
-        // A course the captain did not set itself: a script's path or one the player drew.
-        let path = s.waypoints.last().is_some_and(|p| courses.get(&e) != Some(p));
         let Some((foe_pos, foe_radius, foe_base, foe_aim)) = foe else {
             // With no target an Aggressive ship explores (a mission ship on a path keeps to it: PROVISIONAL); the others keep a path or
             // stop dead (a formation is the fleet's, above).

@@ -419,10 +419,17 @@ pub(crate) fn captain_world(campaign: bool) -> World {
 pub(crate) fn captain_ship(w: &mut World, side: Side, at: Vec3) -> Entity {
     w.spawn((Ship { heading: 0.0, ..Ship::new(0, side) }, Health { sections: vec![], core: 100.0, destroyed: false }, Transform::from_translation(at))).id()
 }
-/// Runs the captains twice a second apart, so each has thought once.
+#[derive(Resource)]
+struct Captains(bevy::ecs::system::SystemId, bevy::ecs::system::SystemId);
+/// Runs the sensors and the captains three times a second apart (each captain thinks at least once, every captain after the others'
+/// first picks); the systems keep their state between calls.
 pub(crate) fn think(w: &mut World) {
-    let (sense, captains) = (w.register_system(crate::environment::refresh_sensors), w.register_system(ai));
-    for _ in 0..2 {
+    if !w.contains_resource::<Captains>() {
+        let ids = Captains(w.register_system(crate::environment::refresh_sensors), w.register_system(ai));
+        w.insert_resource(ids);
+    }
+    let (sense, captains) = (w.resource::<Captains>().0, w.resource::<Captains>().1);
+    for _ in 0..3 {
         w.run_system(sense).unwrap();
         w.run_system(captains).unwrap();
         w.resource_mut::<Time>().advance_by(std::time::Duration::from_secs(1));
@@ -953,4 +960,37 @@ fn a_persistent_or_dummy_ship_never_docks_for_repair() {
     use crate::rules::Stance::*;
     assert!([None, Some(Aggressive), Some(Defensive), Some(Neutral)].into_iter().all(crate::docking::seeks_repair));
     assert!(!crate::docking::seeks_repair(Some(Persistent)) && !crate::docking::seeks_repair(Some(Dummy)));
+}
+
+/// A Persistent ship on a path keeps to it while it fires at the ship that targets it; once latched it holds position when the path
+/// ends, as long as the target lasts. Without a path it attacks like any ship; a formation comes first.
+#[test]
+fn a_persistent_ship_fires_from_its_path_then_holds_and_attacks_without_one() {
+    let mut w = captain_world(false);
+    let foe = captain_ship(&mut w, Side::Player, Vec3::ZERO);
+    let persistent = |w: &mut World, at: Vec3, path: Vec<Vec3>| {
+        let e = captain_ship(w, Side::Enemy, at);
+        w.entity_mut(e).insert(campaign::MissionShip { stance: crate::rules::Stance::Persistent, ..campaign::MissionShip::placed(1, "p".into(), "o".into()) });
+        let mut s = w.get_mut::<Ship>(e).unwrap();
+        (s.waypoints, s.order) = (path, EngineOrder::Full);
+        e
+    };
+    let route = vec![Vec3::X * 900.0];
+    let walker = persistent(&mut w, Vec3::X * 30.0, route.clone());
+    think(&mut w);
+    assert_eq!(w.resource::<CaptainTargets>().of(walker), Some(foe), "it answers the ship that targets it");
+    assert_eq!((w.get::<Ship>(walker).unwrap().waypoints.clone(), w.get::<Ship>(walker).unwrap().order), (route, EngineOrder::Full), "on its path");
+    w.get_mut::<Ship>(walker).unwrap().waypoints.clear(); // the path ends
+    think(&mut w);
+    assert_eq!(w.get::<Ship>(walker).unwrap().order, EngineOrder::Stop, "latched: holds position, target kept");
+    assert_eq!(w.resource::<CaptainTargets>().of(walker), Some(foe));
+
+    let mut w = captain_world(false);
+    let _foe = captain_ship(&mut w, Side::Player, Vec3::ZERO);
+    let free = persistent(&mut w, Vec3::X * 30.0, vec![]);
+    let formed = persistent(&mut w, Vec3::Z * 60.0, vec![]);
+    w.entity_mut(formed).insert(FleetPilot { hold: true, ..default() });
+    think(&mut w);
+    assert_eq!(w.get::<Ship>(free).unwrap().order, EngineOrder::Emergency, "no path: it attacks");
+    assert_eq!(w.get::<Ship>(formed).unwrap().order, EngineOrder::Full, "a formation comes first");
 }
