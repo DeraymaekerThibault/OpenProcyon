@@ -198,9 +198,11 @@ pub const COMPUTER_CREW: f32 = 1.267;
 const AI_BOOST_FROM: f32 = 11.25 * PI / 180.0;
 /// Computer captains keep this far outside a black hole's radius (retail: a Carrack rode 157-165 units from a 145-radius hole).
 pub const HOLE_MARGIN: f32 = 15.0;
-/// Map exploration of skirmish captains with no target: each ship sails for the centre of a
-/// quadrant (a quarter of the map's extent out on each axis) and, within half its sight range of it, picks a quadrant at random
-/// (possibly the same one). PROVISIONAL: the map's border margin is ignored; the random draw is a fixed hash, not the original's.
+/// Map exploration of an Aggressive computer ship with no target: it sails straight (the collision avoider keeps it clear) for one of
+/// four fixed points, the centre of a quarter of the map (a quarter of the map's extent out on each axis), chosen at random, and
+/// within half its scan range of it picks again (possibly the same one); known enemies do not draw it. The draws come from the
+/// battle's seeded generator (`SimRng::explore`), so every machine of a lockstep battle explores alike. PROVISIONAL: the map's border
+/// margin is ignored.
 #[derive(Default)]
 pub struct Explore {
     map: Option<Option<String>>,
@@ -213,7 +215,7 @@ impl Explore {
         let (x, y) = (if q & 1 == 1 { half / 2.0 } else { -half / 2.0 }, if q & 2 == 2 { half / 2.0 } else { -half / 2.0 });
         Vec3::new(x, 0.0, -y)
     }
-    fn goal(&mut self, cfg: &Config, e: Entity, key: crate::scenario::SpawnIndex, here: Vec3, sight: f32) -> Vec3 {
+    fn goal(&mut self, cfg: &Config, e: Entity, here: Vec3, scan: f32, rng: &mut combat::Rng) -> Vec3 {
         if self.map.as_ref() != Some(&cfg.map) {
             let map = cfg.map.as_ref().and_then(|id| crate::data::map_json(id)).unwrap_or_default();
             self.half = map["world_half"].as_f64().unwrap_or(1000.0) as f32;
@@ -221,12 +223,11 @@ impl Explore {
             self.quadrant.clear();
         }
         let half = self.half;
-        let q = self.quadrant.entry(e).or_insert(key.0 as usize % 4);
-        if Vec2::new(here.x, here.z).distance(Explore::centre(*q, half).xz()) < 0.5 * sight {
-            let draw = (u64::from(key.0) ^ (here.x.to_bits() as u64) << 7 ^ here.z.to_bits() as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15);
-            *q = (draw >> 62) as usize;
-        }
-        Explore::centre(*q, half)
+        let mut draw = || ((rng.f() * 4.0) as usize).min(3);
+        let q = *self.quadrant.entry(e).or_insert_with(&mut draw);
+        let q = if Vec2::new(here.x, here.z).distance(Explore::centre(q, half).xz()) < 0.5 * scan { draw() } else { q };
+        self.quadrant.insert(e, q);
+        Explore::centre(q, half)
     }
 }
 
@@ -368,7 +369,7 @@ pub fn ai(
         ResMut<CaptainTargets>,
         Query<(Option<&docking::Docker>, Option<&docking::Tower>, Option<&boarding::GrappleOrder>, Option<&boarding::Boarding>)>,
     ),
-    (lib, fleets): (Res<combat::Library>, Res<Fleets>),
+    (lib, fleets, mut rng, scans): (Res<combat::Library>, Res<Fleets>, ResMut<combat::SimRng>, Query<&crate::environment::ScanFactor>),
     bases: Query<(Entity, &Transform, Option<&combat::BaseSide>, &Health, &combat::ArmedBase, Option<&campaign::MissionBase>)>,
     mut scripted: Query<&mut campaign::MissionShip>,
     (dying, cloaks, table, rocks): (
@@ -502,8 +503,9 @@ pub fn ai(
                 .or_else(|| dragon(t).map(|d| (d.1.translation, d.2.radius, false, d.1.translation)))
         });
         let class = &lib.classes[s.class];
-        let explore_now = |s: &mut Ship, explore: &mut Explore| {
-            (s.waypoints, s.goal, s.order) = (vec![explore.goal(&cfg, e, key, tf.translation, class.sight)], None, EngineOrder::Emergency);
+        let scan = class.sight * scans.get(e).map_or(1.0, |f| f.0);
+        let explore_now = |s: &mut Ship, explore: &mut Explore, rng: &mut combat::SimRng| {
+            (s.waypoints, s.goal, s.order) = (vec![explore.goal(&cfg, e, tf.translation, scan, &mut rng.explore)], None, EngineOrder::Emergency);
         };
         // A course the captain did not set itself and the ship is still under way on: a script's path or one the player drew. An
         // ended path (no waypoints left) or leftover points of a stopped ship are none.
@@ -527,7 +529,7 @@ pub fn ai(
             // With no target an Aggressive ship explores (a mission ship on a path keeps to it: PROVISIONAL); the others keep a path or
             // stop dead (a formation is the fleet's, above).
             if aggressive && !human && explicit.is_none() && !(campaign && path) {
-                explore_now(&mut s, &mut explore);
+                explore_now(&mut s, &mut explore, &mut rng);
                 courses.insert(e, s.waypoints[0]);
             } else if !path {
                 (s.goal, s.order) = (None, EngineOrder::Stop);
@@ -547,7 +549,7 @@ pub fn ai(
             continue;
         };
         if routine == attack::Routine::Ram && foe_base {
-            explore_now(&mut s, &mut explore); // the original: no gun left and a base to attack, so explore instead
+            explore_now(&mut s, &mut explore, &mut rng); // the original: no gun left and a base to attack, so explore instead
             continue;
         }
         let r = if foe_base { range[1] } else { range[0] };

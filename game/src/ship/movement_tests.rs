@@ -409,6 +409,7 @@ pub(crate) fn captain_world(campaign: bool) -> World {
     w.init_resource::<CaptainTargets>();
     w.init_resource::<Fleets>();
     w.init_resource::<Time>();
+    w.init_resource::<combat::SimRng>();
     if campaign {
         let data = serde_json::json!({"rules": []});
         w.insert_resource(campaign::Mission { id: "synthetic".into(), script: crate::rules::Script::new(&data, serde_json::Value::Null), data, opening: None });
@@ -669,6 +670,7 @@ fn allied_computer_ships_hunt_the_enemy_base_the_humans_fleet_waits() {
     w.init_resource::<CaptainTargets>();
     w.init_resource::<Time>();
     // A captain first thinks one period (plus its start delay) after it appears, so run the system at 0 s and again at 1 s.
+    w.init_resource::<combat::SimRng>();
     let captains = w.register_system(ai);
     w.run_system(captains).unwrap();
     assert_eq!(w.get::<Ship>(ids[4]).unwrap().order, EngineOrder::Stop, "no captain has thought yet");
@@ -1189,4 +1191,29 @@ fn an_unknown_stance_obeys_orders_and_paths_but_picks_nothing_itself() {
     assert_eq!((t(sailing), w.get::<Ship>(sailing).unwrap().waypoints.len()), (None, 1), "it keeps to its path");
     assert_eq!(t(ordered), Some(foe), "an order stands");
     assert!(crate::docking::seeks_repair(Some(crate::rules::Stance::Unknown)), "a computer's ship still docks for repair");
+}
+
+/// Exploring: one of the four quarter points, drawn from the battle's seeded stream (the same seed, the same course on every
+/// machine); within half its scan range of the point the ship draws again, possibly the same one.
+#[test]
+fn exploring_draws_its_quarter_point_from_the_battles_seeded_stream() {
+    let cfg = crate::Config::default();
+    let e = Entity::from_raw_u32(1).unwrap();
+    let course = |seed: u64| {
+        let (mut explore, mut rng) = (Explore::default(), combat::SimRng::new(seed));
+        let mut at = Vec3::ZERO;
+        (0..12)
+            .map(|_| {
+                let goal = explore.goal(&cfg, e, at, 100.0, &mut rng.explore);
+                at = goal; // arrived: within half the scan range, so the next call draws again
+                goal
+            })
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(course(7), course(7), "one seed, one course");
+    assert!((0..4).all(|q| course(7).contains(&Explore::centre(q, 1000.0)) || course(8).contains(&Explore::centre(q, 1000.0))), "every quarter can come up");
+    assert!(course(7).iter().all(|g| (0..4).any(|q| *g == Explore::centre(q, 1000.0))), "only the four fixed points");
+    let (mut explore, mut rng) = (Explore::default(), combat::SimRng::new(7));
+    let first = explore.goal(&cfg, e, Vec3::ZERO, 100.0, &mut rng.explore);
+    assert_eq!(explore.goal(&cfg, e, Vec3::new(300.0, 0.0, 0.0), 100.0, &mut rng.explore), first, "far from it: the same point");
 }

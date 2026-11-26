@@ -187,6 +187,8 @@ pub struct SimRng {
     pub nebula: Rng,
     /// A cloaked ship being spotted when it fires a torpedo (`cloak::spotted`).
     pub cloak: Rng,
+    /// A computer captain's choice of the quarter of the map it explores (`ship::Explore`).
+    pub explore: Rng,
 }
 
 impl SimRng {
@@ -200,7 +202,7 @@ impl SimRng {
             z = (z ^ (z >> 27)).wrapping_mul(0x94D049BB133111EB);
             (z ^ (z >> 31)) | 1
         };
-        Self { seed, battle: Rng(if seed == 0 { stream(0) } else { seed }), nebula: Rng(stream(1)), cloak: Rng(stream(2)) }
+        Self { seed, battle: Rng(if seed == 0 { stream(0) } else { seed }), nebula: Rng(stream(1)), cloak: Rng(stream(2)), explore: Rng(stream(3)) }
     }
     /// The generator states, to compare two `SimRng`s.
     #[cfg(test)]
