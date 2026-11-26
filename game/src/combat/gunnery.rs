@@ -733,6 +733,7 @@ pub(super) fn fire(
                         harmless: mission.is_some_and(|ms| ms.warning_shots),
                         base: false,
                         ricochet: band(gun, distance, gun.ricochet),
+                        ours: table.with_human(ship.side),
                     };
                     launch_shell(
                         &mut commands,
@@ -795,6 +796,8 @@ pub(super) struct Launch {
     pub(super) harmless: bool,
     pub(super) base: bool,
     pub(super) ricochet: f32,
+    /// Fired from the human's side of the alliance table: drawn as the player's shells.
+    pub(super) ours: bool,
 }
 
 /// Spawns one shell of gun `g` from muzzle `mz` (its fire sound, muzzle flash and bullet effect included).
@@ -821,7 +824,7 @@ pub(super) fn launch_shell(
     if let Some((n, vol, max)) = &g.sound {
         sfx.write(Sfx { name: n.clone(), at: Some(from), vol: *vol, max: *max });
     }
-    let mat = if side == Side::Player { look.shell.clone() } else { look.enemy_shell.clone() };
+    let mat = if shot.ours { look.shell.clone() } else { look.enemy_shell.clone() };
     let vel = shot.vel.unwrap_or_else(|| launch_velocity(dir, g.muzzle, g.bullet_torpedo));
     let stf = Transform::from_translation(from).looking_to(vel, Vec3::Y);
     let shell = commands
@@ -973,6 +976,7 @@ pub(super) fn base_fire(
                         aim: (is_indirect(&lib, &mount.gun) || gun.lob.is_some()).then_some(aim_at.position),
                         base: true,
                         ricochet: band(gun, distance, gun.ricochet),
+                        ours: table.with_human(side),
                         ..default()
                     };
                     let muzzle_transform = globals.get(muzzle).ok().copied();
