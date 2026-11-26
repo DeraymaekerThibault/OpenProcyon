@@ -785,7 +785,8 @@ fn torpedo_guidance_launch_coast_and_moving_target_intercept() {
 fn model_hardpoints_are_loaded_in_bevy_axes() {
     let lib = crate::testutil::lib();
     let class = &lib.classes[lib.index("Ship_Navy_Torpedo")];
-    assert!((class.homing_point.y - 0.2275).abs() < 0.001);
+    // The homing point hangs under the scene root, so it keeps its own height (0.86) in the model frame (docs/re/scenery-placement.md "Ship models").
+    assert!((class.homing_point.y - 0.86).abs() < 0.001);
     assert!(class.tow_points[0].z > 0.0 && class.tow_points[1].z < 0.0);
 }
 

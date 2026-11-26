@@ -83,6 +83,8 @@ files to `content/`, or anything that publishes (pushing tags, releases).
   original" (one row per rule of the original's battle simulation, with its stage: unknown, read, confirmed, specced, built, tested,
   and whether it differs here). Fidelity work starts from the board. Do not create another overview: no new tracking issue,
   scorecard, roadmap or status file. Open an issue when work on a row is picked up, not for every finding.
+- An issue's body is its current plan: read the body first, and when work changes the plan, edit the body (GitHub keeps its
+  history). Comments are discussion and progress notes, not the plan; fold a decision made in a comment into the body.
 - Know a system's rules before fixing in it: a fix built on a rule or an order that later turns out wrong is redone. A difference
   that is confirmed, small and independent of unknown rules may be fixed at once. Never tune a number to make a battle come out alike.
 - Whole-battle comparison (the parity rows listed in #377, label `parity`) is a smoke test that finds rules nobody knew to look for;

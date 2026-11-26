@@ -528,7 +528,7 @@ pub fn camera(
     mission: Option<Res<campaign::Mission>>,
     (free, time, mut shown): (Option<Res<FreeCamera>>, Option<Res<Time<Real>>>, Local<Option<f32>>),
 ) {
-    if briefing::active(mission.as_deref()) || rules::nis(mission.as_deref()) || rules::console::free_cam() {
+    if briefing::active(mission.as_deref()) || (rules::nis(mission.as_deref()) && !rules::nis_camera_idle(mission.as_deref())) || rules::console::free_cam() {
         return;
     }
     // `--look x,y[,z]` (game axes) aims screenshots at a world point instead of the player's ship.

@@ -77,11 +77,39 @@ These layers have position equal to pivot (offset 0), so their vertices themselv
 ### Why not simply apply all MSB translations?
 
 - `tools/mdb_to_glb.py::convert` places each scenery layer by its offset only (position minus pivot); parent node rotations and deeper hierarchy are not applied.
-- `hardpoints` accumulates parent translations, subtracts the first DamageSection's accumulated offset, and ignores parent rotations. Meshes and attachment points do not come from a fully decoded retail scene transform.
+- `hardpoints` places each node at its parent's place plus its own position minus its pivot (see "Ship models" below) and ignores rotations. Bases and islands still take their guns, docks and boarding points from the layer offset of the immediate parent only.
 - Retail Layer1 pivots are Z=-17.2 for AbandonedCamp and Z=27 for SmugglersCamp, matching their docks. Safetytown's Layer1 Z=39 does **not** match its docks' Z=9. Its WindMill child also has yaw approximately -0.568977 and a nonzero position.
 - Node assembly links parents and applies pose data: a node's pose subtracts a **rotated pivot** from the pose translation, and the hierarchy applies parent orientation and translation. This is not simply “add every MSB position”. The parser's node fields still need to be mapped to retail pivot versus pose data.
 
 Applying raw MSB translations to already-baked MDB positions risks double-counting pivots. Replacing the current height rule without that evidence would exchange a known workaround for another guess.
+
+## Ship models
+
+When the original builds a model, it places every scene node, mesh layers included, at its position minus its pivot (turned by its
+rest rotation) in its parent's frame, and everything under a layer moves with it. This is the rule animated layers use, applied to every
+node at rest. Read in the original's code (scene construction), checked against one retail frame: a Navy Tug sits wholly above its
+selection compass.
+
+Ships use it like scenery: the model (`mdb_to_glb --offsets`), its hardpoints, its section hit meshes and its debris pieces are all in
+the model frame, which is the frame of the ship's own data (physics box, bounding sphere, tow and flag points under the root). A
+destroyed section's `...Damage_LayerN` mesh takes the place of the layer it replaces.
+
+| Ship | Layer offset (x, y, z) |
+|---|---|
+| Navy Tug | (0.06, -0.11, 4.61) |
+| Navy Cutter | (0, -0.48, -1.78) |
+| Navy Fast Frigate | (0, -0.94, -1.30) |
+| Navy Tender | (0, 2.09, -0.34) |
+| Procyon Barge | (0, 7.65, 0) |
+| Civilian Merchant | (0, 0, -2.87) |
+
+Before, ship models kept each layer in its mesh's own frame and moved the points by the first section's position instead: the Tug's hull
+sat 4.61 below its tow, flag and boarding points and its physics box, so the selection compass cut through it, and the Cutter's whole
+model sat 1.78 above its data. No ship layer has a rest rotation except the Procyon Refueling Station's, whose layers also differ in offset;
+rotations are not applied (PROVISIONAL for that station).
+
+PROVISIONAL: several ships also give the scene's root node a pivot (Weapon Barge z -0.99, Procyon Destroyer z -1.92, Procyon Tender
+z 1.2, Assault Cutters). Whether that moves the drawn ship is not read; it is not applied.
 
 ## Validation and remaining acceptance
 
