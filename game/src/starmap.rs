@@ -63,8 +63,7 @@ pub struct StarmapContents {
 pub struct StarmapSet;
 
 pub fn plugin(app: &mut App) {
-    app.init_resource::<StarmapContents>()
-        .add_systems(Update, (toggle, describe).chain().in_set(StarmapSet).run_if(in_state(crate::menu::Screen::Battle)).run_if(crate::menu::overlay_closed));
+    app.init_resource::<StarmapContents>().add_systems(Update, (toggle, describe).chain().in_set(StarmapSet).in_set(crate::battle::BattleActive));
 }
 
 /// Run after `panels::hud_input`: while the map is open every click belongs to it.
@@ -94,7 +93,7 @@ fn toggle(
     }
     *over = hovered;
     // `--starmap` opens the map on the first frame (screenshots).
-    let first = auto.is_none_or(|a| !a) && std::env::args().any(|a| a == "--starmap");
+    let first = auto.is_none_or(|a| !a) && crate::cli::has("--starmap");
     *auto = Some(true);
     let click = mouse.just_pressed(MouseButton::Left);
     if let Ok(root) = open.single() {
@@ -139,7 +138,7 @@ fn describe(
     ships: Query<(Entity, &Ship, &Health, &Transform, Option<&crate::campaign::MissionShip>, Has<PlayerShip>)>,
     animals: Query<(Entity, &Transform), (With<crate::environment::SpaceAnimal>, Without<Ship>)>,
     sensors: Res<crate::environment::Sensors>,
-    skirmish: Option<Res<crate::rules::skirmish::SkirmishScript>>,
+    active: crate::rules::active::ActiveScript,
     fleets: Res<crate::ship::Fleets>,
 ) {
     contents.icons.clear();
@@ -162,11 +161,13 @@ fn describe(
             icon(MapIconKind::Whale, transform);
         }
     }
-    if let Some(sk) = skirmish.as_deref().filter(|_| mission.is_none()) {
+    if mission.is_none()
+        && let Some(script) = active.script()
+    {
         // Skirmish (retail, Border Dispute): the map's place names, the human team's objective point and an "Objectives:" panel.
-        push_labels(&mut contents.labels, &sk.map_text, &sk.script.map_text);
-        if let Some(team) = sk.script.team_of(&fleets.local)
-            && let Some((point, task)) = sk.script.team_objective(team)
+        push_labels(&mut contents.labels, active.map_text(), &script.map_text);
+        if let Some(team) = script.team_of(&fleets.local)
+            && let Some((point, task)) = script.team_objective(team)
         {
             if let Some(p) = point {
                 contents.icons.push(MapIcon { kind: MapIconKind::Objective, position: crate::game_to_bevy(&p), yaw: 0.0 });

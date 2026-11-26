@@ -39,22 +39,10 @@ use crate::{Config, Orbit, Scenario, Ship, Side, game_to_bevy};
 /// Parameters of `update` beyond Bevy's 16-argument limit.
 #[derive(bevy::ecs::system::SystemParam)]
 struct Extra<'w, 's> {
-    bases: Query<
-        'w,
-        's,
-        (Entity, &'static mut MissionBase, &'static Transform, Option<(&'static crate::combat::ArmedBase, &'static Health)>),
-        (Without<Ship>, Without<crate::environment::SpaceAnimal>),
-    >,
-    /// Not retail: the mines a custom mission's map places (`mines`), which its rules hand to players and address by group.
-    mines: apply::Mines<'w, 's>,
-    dock: MessageWriter<'w, DockMsg>,
-    difficulty: Option<Res<'w, crate::scenario::Difficulty>>,
+    fx: apply::FxParam<'w, 's>,
     /// Where the frame's units are left for the dev autopilot.
     snapshot: ResMut<'w, RuleWorld>,
-    board: MessageWriter<'w, crate::boarding::BoardMsg>,
     captured: MessageReader<'w, 's, crate::boarding::Captured>,
-    asteroids: MessageWriter<'w, crate::combat::AsteroidSetup>,
-    meteors: MessageWriter<'w, crate::nebula::MeteorRoute>,
     storm_shift: Res<'w, crate::nebula::StormShift>,
     in_nebula: Option<Res<'w, crate::nebula::InNebula>>,
     campaign_points: ResMut<'w, crate::campaign::CampaignPoints>,
@@ -62,12 +50,6 @@ struct Extra<'w, 's> {
     campaign_values: Option<ResMut<'w, crate::campaign::CampaignValues>>,
     sensors: Res<'w, crate::environment::Sensors>,
     voices: Query<'w, 's, Entity, With<crate::briefing::Voice>>,
-    fxlib: Option<Res<'w, crate::fx::FxLib>>,
-    event_fx: Query<'w, 's, (Entity, &'static EventFx)>,
-    sfx: Option<ResMut<'w, Messages<crate::audio::Sfx>>>,
-    toggles: Option<ResMut<'w, crate::panels::Toggles>>,
-    detonate: MessageWriter<'w, crate::combat::Detonate>,
-    dragons: Query<'w, 's, &'static mut crate::dragons::Dragon>,
     /// Cheats used in this battle: its victory points are not recorded (`console::Cheats`).
     cheats: Option<Res<'w, console::Cheats>>,
     /// `--script dock` skipped the briefing already.
@@ -151,28 +133,74 @@ pub(crate) fn base_unit(b: &crate::campaign::MissionBase, e: Entity, tf: &Transf
     u
 }
 
-fn units(ships: &Query<RuleShip>, lib: &Library) -> Vec<Unit> {
+/// Which battle a rule world is built for. The three builders were once three copies; what each leaves out is kept as it was.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum WorldKind {
+    /// A campaign mission: every ship with its damage and vital sections, the bases, belts, animals and its custom mines.
+    Mission,
+    /// A skirmish map's script: ships without damage/vital sections, no bases (PROVISIONAL: a thinner unit list than the mission's,
+    /// kept as is), the mines under their own owner.
+    Skirmish,
+    /// The dev console's one-off list: a mission's without sunk-ship memory and without mines.
+    Console,
+}
+
+/// The unit list a script sees: ships, remembered sunk ships, animals, bases, rocks, mines, then the script's group tags.
+pub(super) fn build_world(
+    script: &mut Script,
+    kind: WorldKind,
+    ships: &Query<RuleShip>,
+    animals: &Query<(Entity, &mut crate::environment::SpaceAnimal, &mut Transform, &mut Visibility), Without<Ship>>,
+    rocks: &Query<(Entity, &Transform, &Asteroid), (Without<Ship>, Without<crate::environment::SpaceAnimal>)>,
+    fx: &apply::FxParam,
+    lib: &Library,
+) -> Vec<Unit> {
+    let mut world = units(ships, lib, kind != WorldKind::Skirmish);
+    if kind != WorldKind::Console {
+        script.keep_sunk(&mut world);
+    }
+    world.extend(animals.iter().map(|(e, a, tf, _)| a.unit(e, tf)));
+    if kind != WorldKind::Skirmish {
+        world.extend(fx.bases.iter().map(|(e, b, tf, armed)| base_unit(b, e, tf, armed, lib)));
+    }
+    world.extend(rocks.iter().map(|(e, tf, a)| a.unit(e, tf)));
+    match kind {
+        // Not retail: a mission's mines answer to an explicit group (their world-object ids) only, never to their owner's name: a faction
+        // whose ships are all gone is destroyed although its mines rest, and owner-wide orders do not reach them.
+        WorldKind::Mission => world.extend(fx.mines.iter().map(|(e, tf, m, _)| Unit { owner: GroupName::default(), ..m.unit(e, tf) })),
+        WorldKind::Skirmish => world.extend(fx.mines.iter().map(|(e, tf, m, _)| m.unit(e, tf))),
+        WorldKind::Console => {}
+    }
+    script.tag(&mut world);
+    world
+}
+
+/// The ships as rule units; `rich`: with their damage and vital sections (a skirmish script's units carry neither).
+fn units(ships: &Query<RuleShip>, lib: &Library, rich: bool) -> Vec<Unit> {
     ships
         .iter()
         .map(|RuleShipReadOnlyItem { entity: e, ship, transform: tf, health: h, mission: m, primary, interp, cloak, .. }| {
-            let class = &lib.classes[ship.class];
-            let secs =
-                if h.sections.is_empty() { 0.0 } else { h.sections.iter().zip(&class.sections).map(|(x, c)| 1.0 - x / c.hp.max(1.0)).sum::<f32>() / h.sections.len() as f32 };
-            Unit {
+            let mut u = Unit {
                 name: m.name.as_str().into(),
                 owner: m.owner.as_str().into(),
                 alive: !h.destroyed,
                 visible: m.visible,
                 primary,
-                damage: (1.0 - h.core / class.core_hp).max(secs).clamp(0.0, 1.0),
                 flag: m.flag.clone(),
                 attack: m.attack.clone(),
                 heading: ship.heading,
                 speed: Some(ship.speed.abs()),
                 cloaked: cloak.is_some_and(|c| c.state == crate::cloak::State::Full),
-                vital: Some(crate::combat::vital_damage(&class.sections, &h.sections)),
                 ..Unit::new(e, m.id, sim_pos(tf, interp))
+            };
+            if rich {
+                let class = &lib.classes[ship.class];
+                let secs =
+                    if h.sections.is_empty() { 0.0 } else { h.sections.iter().zip(&class.sections).map(|(x, c)| 1.0 - x / c.hp.max(1.0)).sum::<f32>() / h.sections.len() as f32 };
+                u.damage = (1.0 - h.core / class.core_hp).max(secs).clamp(0.0, 1.0);
+                u.vital = Some(crate::combat::vital_damage(&class.sections, &h.sections));
             }
+            u
         })
         .collect()
 }
@@ -204,15 +232,7 @@ fn update(
     let opening = mission.opening.is_some();
     let dt = time.delta_secs();
     crate::smoke::dock(&cfg, mission, &mut extra.dock_smoke_skipped, &mut ships);
-    let mut world = units(&ships, &lib);
-    mission.script.keep_sunk(&mut world);
-    world.extend(animals.iter().map(|(e, a, tf, _)| a.unit(e, tf)));
-    world.extend(extra.bases.iter_mut().map(|(e, b, tf, armed)| base_unit(&b, e, tf, armed, &lib)));
-    world.extend(rocks.iter().map(|(e, tf, a)| a.unit(e, tf)));
-    // Not retail: a mission's mines answer to an explicit group (their world-object ids) only, never to their owner's name: a faction
-    // whose ships are all gone is destroyed although its mines rest, and owner-wide orders do not reach them.
-    world.extend(extra.mines.iter().map(|(e, tf, m, _)| Unit { owner: GroupName::default(), ..m.unit(e, tf) }));
-    mission.script.tag(&mut world);
+    let world = build_world(&mut mission.script, WorldKind::Mission, &ships, &animals, &rocks, &extra.fx, &lib);
     let owner_of = |e: Entity| world.iter().find(|u| u.e == e).map(|u| u.owner.to_string());
     for h in hits.read() {
         mission.script.record_hit(owner_of(h.shooter).as_deref(), h.victim);
@@ -221,7 +241,7 @@ fn update(
         mission.script.record_fire(fr.shooter, fr.target);
     }
     for c in extra.captured.read() {
-        mission.script.record_capture(&c.by, &c.victim, c.unit, extra.bases.contains(c.unit));
+        mission.script.record_capture(&c.by, &c.victim, c.unit, extra.fx.bases.contains(c.unit));
     }
     let script = &mut mission.script;
     for u in world.iter().filter(|u| rocks.contains(u.e)) {
@@ -250,14 +270,10 @@ fn update(
     script.in_nebula = extra.in_nebula.as_ref().map(|n| n.0.clone()).unwrap_or_default();
     let (fxs, voice) = script.step(&world, dt, opening);
     if let Some(file) = voice {
-        commands.spawn((
-            Scenario,
-            crate::briefing::Voice,
-            AudioPlayer::new(assets.load(crate::audio::sound(&file))),
-            PlaybackSettings::DESPAWN.with_volume(bevy::audio::Volume::Linear(crate::menu::volume(crate::menu::Setting::Dialogue))),
-        ));
+        apply::spawn_voice(&mut commands, &assets, &file);
     }
-    apply_fx(fxs, &mut mission.script, &mission.data["paths"], None, &mut commands, &mut ships, &mut animals, &mut extra, &mut orbit, &lib);
+    let mut env = extra.fx.env(&mut mission.script, &mission.data["paths"], &lib, Some(&mut orbit), None);
+    apply::apply(fxs, &mut env, &mut commands, &mut ships, &mut animals);
     if let Some(values) = mission.script.campaign_commit()
         && let Some(handed_on) = extra.campaign_values.as_mut()
     {
@@ -270,49 +286,11 @@ fn update(
         let wants = mission.script.task_active("Dock With Tender");
         let near = extra.sensors.in_sight(p.e, t.e, Some(mission)) && !mission.script.docked.contains(&(p.e, t.e));
         if near && wants && matches!(cfg.script.as_deref(), Some("mission" | "dock")) {
-            extra.dock.write(DockMsg::Dock { docker: None, dockee: t.e });
+            extra.fx.dock.write(DockMsg::Dock { docker: None, dockee: t.e });
         }
     }
     // The frame's snapshot, for the dev autopilot (smoke/autopilot.rs), which runs right after this system.
     extra.snapshot.0 = world;
-}
-
-/// Applies the effects a `Script::step` returned to the world: ship orders, flags, docking and tow messages, effects, the orbit camera.
-/// The application itself is `apply::apply`, shared with the skirmish maps' scripts.
-#[allow(clippy::too_many_arguments)]
-fn apply_fx(
-    fxs: Vec<Fx>,
-    script: &mut Script,
-    paths: &serde_json::Value,
-    sides: Option<&std::collections::HashMap<String, Side>>,
-    commands: &mut Commands,
-    ships: &mut Query<RuleShip>,
-    animals: &mut Query<(Entity, &mut crate::environment::SpaceAnimal, &mut Transform, &mut Visibility), Without<Ship>>,
-    extra: &mut Extra,
-    orbit: &mut Orbit,
-    lib: &Library,
-) {
-    let mut env = apply::FxEnv {
-        script,
-        paths,
-        lib,
-        bases: &mut extra.bases,
-        dragons: &mut extra.dragons,
-        dock: &mut extra.dock,
-        board: &mut extra.board,
-        asteroids: &mut extra.asteroids,
-        meteors: &mut extra.meteors,
-        detonate: &mut extra.detonate,
-        event_fx: &extra.event_fx,
-        fxlib: extra.fxlib.as_deref(),
-        sfx: extra.sfx.as_deref_mut(),
-        toggles: extra.toggles.as_deref_mut(),
-        difficulty: extra.difficulty.as_deref().copied().unwrap_or_default().0,
-        orbit: Some(orbit),
-        sides,
-        mines: Some(&mut extra.mines),
-    };
-    apply::apply(fxs, &mut env, commands, ships, animals);
 }
 
 #[cfg(test)]

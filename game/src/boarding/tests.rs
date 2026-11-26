@@ -133,7 +133,7 @@ fn app() -> App {
         .init_resource::<ButtonInput<KeyCode>>()
         .init_resource::<BoardStatus>()
         .init_resource::<Got>()
-        .insert_resource(Library::load(assets_dir()))
+        .insert_resource(crate::testutil::lib())
         .insert_resource(SimRng::new(7))
         .init_resource::<crate::scenario::Difficulty>()
         .add_systems(Update, (handle_messages, set_flags, grapple_orders, hook_flight, winch_upkeep, winch_pull, drive, fights, settled, status, collect).chain());
@@ -342,7 +342,7 @@ fn becoming_allied_releases_the_grapple() {
 #[test]
 #[ignore = "needs imported assets"]
 fn ai_harpoons_bear_by_arc_and_long_range() {
-    let lib = Library::load(assets_dir());
+    let lib = crate::testutil::lib();
     let bears = |class: &str, at: Vec3| {
         let ci = lib.index(class);
         let ship = Ship { heading: 0.0, ..Ship::new(ci, Side::Enemy) };
@@ -357,7 +357,7 @@ fn ai_harpoons_bear_by_arc_and_long_range() {
 #[test]
 #[ignore = "needs imported assets"]
 fn base_boarding_needs_a_boarding_point_in_reach_and_a_slow_boarder() {
-    let lib = Library::load(assets_dir());
+    let lib = crate::testutil::lib();
     let ci = lib.index("Ship_Navy_Cutter");
     let ship = Ship { heading: 0.0, ..Ship::new(ci, Side::Enemy) };
     let base_tf = Transform::from_xyz(100.0, 0.0, 0.0);

@@ -477,7 +477,17 @@ impl Defs {
             Kind::Message => !self.media || self.messages.contains(name),
             Kind::ShipName => !self.media || self.ship_names.contains(name),
             Kind::Rule => self.rules.contains(name.trim()),
-            _ => true,
+            Kind::Timer
+            | Kind::Flag
+            | Kind::Counter
+            | Kind::CampaignCounter
+            | Kind::ConditionList
+            | Kind::Condition
+            | Kind::Team
+            | Kind::Bool
+            | Kind::Number
+            | Kind::Enum(_)
+            | Kind::Text => true,
         }
     }
 

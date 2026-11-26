@@ -9,7 +9,6 @@ use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
 use serde_json::Value;
 
-use crate::assets_dir;
 use crate::bindings::Bindings;
 use crate::combat::Library;
 use crate::menu::{
@@ -19,8 +18,8 @@ use crate::menu::{
 use crate::sprites::{BODY_FONT, Fonts, HudData};
 
 use super::widgets::{
-    Ctx, GOLD, Rest, arrow, canvas, cell, check_box, disabled, dropdown, fleet_bar, full_screen, heading, info_panel, list_row_cost, pad, picked, piece, piece_flipped,
-    pulldown_cell, radio, scrollbar, selected_tab, size_of, slider, stretched_window, victory_points, wrapped,
+    Ctx, GOLD, Rest, arrow, canvas, cell, check_box, disabled, dropdown, fleet_bar, full_screen, heading, info_panel, list_row_cost, modal_blocker, pad, picked, piece,
+    piece_flipped, pulldown_cell, radio, scrollbar, selected_tab, size_of, slider, stretched_window, victory_points, wrapped,
 };
 
 pub fn plugin(app: &mut App) {
@@ -85,7 +84,7 @@ fn build(
         Screen::Fleet => "ship_selection_screen",
         Screen::Battle => return,
     };
-    let els: Vec<Value> = crate::data::try_json(&assets_dir().join(format!("menu/{file}.json"))).and_then(|v| serde_json::from_value(v).ok()).unwrap_or_default();
+    let els: Vec<Value> = crate::data::try_load(&format!("menu/{file}.json")).unwrap_or_default();
     let (canvas, scale) = canvas(&window);
     let ctx = Ctx { assets: &assets, hud: &hud, fonts: &fonts, scale, theme: crate::theme::Theme::current(), pad: pad(&window, scale) };
     commands
@@ -217,7 +216,7 @@ fn element(ctx: &Ctx, c: &mut ChildSpawnerCommands, m: &MenuModel, e: &Value, st
                 // Measured: framed panel at the element's area; gold 'Map Description:' then Univers10 lines 16 apart.
                 stretched_window(ctx, c, [r[0], r[1] - 3.0, r[2], r[3] + 2.0]);
                 ctx.text(c, "Univers10", &format!("{}:", text_of(strings, "IDGS_TPFRONTENDTEXT02_MAP_DESCRIPTION")), r[0] + 14.0, 200.0, r[1] + 16.0, false, GOLD);
-                wrapped(ctx, c, "Univers10", sk.map_json["description"].as_str().unwrap_or_default(), [r[0] + 14.0, r[1] + 32.0, r[2] - 18.0, r[3] - 8.0]);
+                wrapped(ctx, c, "Univers10", sk.map_doc.description_or_empty(), [r[0] + 14.0, r[1] + 32.0, r[2] - 18.0, r[3] - 8.0]);
                 None
             }
             (Screen::CreateSkirmish, "Radio Historical Map Button") => {
@@ -254,7 +253,7 @@ fn element(ctx: &Ctx, c: &mut ChildSpawnerCommands, m: &MenuModel, e: &Value, st
             (Screen::Lobby, "Lobby Information Button") => {
                 // Measured: a gold Univers10 'Map' label and the map name in Univers12 under the title.
                 ctx.text(c, "Univers10", &text_of(strings, "IDGS_TPFRONTENDTEXT01_SERVER_MAPNAME"), r[0], r[2] - r[0], 84.0, true, GOLD);
-                ctx.text(c, BODY_FONT, sk.map_json["name"].as_str().unwrap_or_default(), r[0], r[2] - r[0], 101.0, true, Color::WHITE);
+                ctx.text(c, BODY_FONT, sk.map_doc.name_or_empty(), r[0], r[2] - r[0], 101.0, true, Color::WHITE);
                 None
             }
             (Screen::Lobby, "Lobby Player List Button") => {
@@ -709,7 +708,7 @@ fn players_list(ctx: &Ctx, c: &mut ChildSpawnerCommands, _rect: [f32; 4], sk: &S
     ] {
         ctx.text(c, "UniversBold14", &s(id), x0, x1 - x0, 138.0, true, Color::WHITE);
     }
-    let teams = sk.map_json["teams"].as_array().cloned().unwrap_or_default();
+    let teams = &sk.map_doc.teams;
     for (i, slot) in sk.slots.iter().enumerate() {
         let cy = 184.0 + i as f32 * 32.0;
         let me = slot.kind == Kind::Human;
@@ -731,7 +730,7 @@ fn players_list(ctx: &Ctx, c: &mut ChildSpawnerCommands, _rect: [f32; 4], sk: &S
             _ => String::new(),
         };
         let team = match usize::try_from(slot.team).ok().and_then(|n| teams.get(n)) {
-            Some(tm) => s(tm["name_id"].as_str().unwrap_or("")) + &letter,
+            Some(tm) => s(tm.name_id.as_deref().unwrap_or("")) + &letter,
             None if slot.team >= 0 => team_label(&s, slot.team),
             None => "-".into(),
         };
@@ -757,7 +756,7 @@ fn players_list(ctx: &Ctx, c: &mut ChildSpawnerCommands, _rect: [f32; 4], sk: &S
     if sk.flag_picker {
         // Retail: a modal gold frame over the lobby with the fleet type's ten flags, two rows of five 75 apart; only a pick closes it.
         let base = sk.human().map_or(Race::Navy, |h| h.race).flag_base();
-        c.spawn((Interaction::None, bevy::ui::FocusPolicy::Block, Action::FlagPicker(true), ctx.node(0.0, 0.0, 800.0, 600.0), ZIndex(1)));
+        modal_blocker(ctx, c, Action::FlagPicker(true));
         c.spawn((ctx.node(150.0, 175.0, 475.0, 245.0), ZIndex(2))).with_children(|c| {
             ctx.image(c, "menu/frontenddialogscreen.png", None, 0.0, 0.0, 475.0, 245.0, Color::WHITE);
             for k in 0..10usize {
@@ -809,7 +808,7 @@ fn map_info_dialog(ctx: &Ctx, c: &mut ChildSpawnerCommands, sk: &Skirmish, strin
     c.spawn((ctx.node(0.0, 0.0, 800.0, 600.0), Interaction::None, BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.35))));
     let [x, y, w, h] = dialog_frame([61.0, 165.0, 603.0, 436.0]);
     ctx.image(c, "menu/frontenddialogscreen.png", None, x, y, w, h, Color::WHITE);
-    wrapped(ctx, c, "Univers10", sk.map_json["description"].as_str().unwrap_or_default(), [146.0, 207.0, 641.0, 330.0]);
+    wrapped(ctx, c, "Univers10", sk.map_doc.description_or_empty(), [146.0, 207.0, 641.0, 330.0]);
     ctx.text_button(c, [324.0, 339.0, 457.0, 383.0], &text_of(strings, "IDGS_TPFRONTENDTEXT01_BACK"), "BlackChancery16", Action::MapInfo(false));
 }
 
@@ -822,7 +821,7 @@ pub(super) fn profile_dialog(ctx: &Ctx, c: &mut ChildSpawnerCommands, sk: &Skirm
     use crate::profiles::Kind as K;
     let Some(d) = &sk.profile else { return };
     let s = |id: &str| text_of(strings, id);
-    c.spawn((ctx.node(0.0, 0.0, 800.0, 600.0), Interaction::None, bevy::ui::FocusPolicy::Block, ZIndex(1)));
+    modal_blocker(ctx, c, ());
     c.spawn((ctx.node(0.0, 0.0, 800.0, 600.0), ZIndex(2))).with_children(|c| {
         let [x, y, w, h] = dialog_frame([69.0, 169.0, 603.0, 420.0]);
         ctx.image(c, "menu/frontenddialogscreen.png", None, x, y, w, h, Color::WHITE);

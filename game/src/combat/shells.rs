@@ -88,7 +88,7 @@ pub(super) fn guide_torpedo(
     let h = dt / steps as f32;
     for i in 0..steps {
         let speed = velocity.with_y(0.0).length();
-        let mut heading = (-velocity.x).atan2(-velocity.z);
+        let mut heading = crate::geom::heading_of(*velocity);
         let mut rudder = 0.0;
         if age + i as f32 * h >= 0.5
             && let Some((point, target_velocity)) = target
@@ -96,7 +96,7 @@ pub(super) fn guide_torpedo(
             let distance = point.distance(position);
             let aim = point + if distance < 100.0 { target_velocity * (distance / speed.max(0.01)) } else { Vec3::ZERO };
             let delta = aim - position;
-            let want = (-delta.x).atan2(-delta.z);
+            let want = crate::geom::heading_of(delta);
             rudder = (crate::angdiff(want, heading) / 20.0f32.to_radians()).clamp(-1.0, 1.0);
             // Once per tick, a homing torpedo steps its height 0.025 toward the target's when the two
             // differ by more than 0.05, bounded to +/-3 units.
@@ -149,7 +149,7 @@ pub(super) fn damage_sfx(pool: &str, at: Vec3, rng: &mut Rng) -> Sfx {
 /// factor is the player's ships' only. PROVISIONAL: computer-vs-computer, allied and hostile-base-on-player hits are not measured.
 pub(super) fn side_damage_scale(shooter: Side, victim: Side, difficulty: u8, base: bool) -> f32 {
     let d = difficulty.min(2) as usize;
-    let (out, inc) = ([3.0, 2.0, 1.0][d], [0.25, 0.5, 1.0][d]);
+    let (out, inc) = (super::damage::OUTGOING_BY_DIFFICULTY[d], super::damage::INCOMING_BY_DIFFICULTY[d]);
     match (shooter, victim) {
         (Side::Player, v) if v != Side::Player => {
             if base {
@@ -534,8 +534,8 @@ pub(super) fn shells(
             let [lo, hi, ..] = bd.damage["Stone"];
             hits.write(Hit { shooter: s.shooter, victim: re });
             if let Ok((_, _, mut rk, _)) = rocks.get_mut(re) {
-                if rk.damage(rng.range(lo, hi)) {
-                    destroyed.write(Destroyed { by: s.shooter, victim: re });
+                if let Some(d) = rk.strike(rng.range(lo, hi), s.shooter, re) {
+                    destroyed.write(d);
                 } else {
                     sfx.write(Sfx { name: format!("Damage_Stone0{}", rng.variant(5)), at: Some(at), vol: 1.0, max: 600.0 });
                 }

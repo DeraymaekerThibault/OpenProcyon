@@ -289,13 +289,40 @@ pub enum Fx {
     Abandon(Vec<Entity>),
 }
 
+/// Test-only record of the field names the accessors below (and `given`) read, so a test can compare them with the schema.
+#[cfg(test)]
+pub(in crate::rules) mod read_log {
+    use std::cell::RefCell;
+    use std::collections::BTreeSet;
+    thread_local!(static KEYS: RefCell<Option<BTreeSet<String>>> = const { RefCell::new(None) });
+    pub(in crate::rules) fn note(k: &str) {
+        KEYS.with(|r| {
+            if let Some(set) = r.borrow_mut().as_mut() {
+                set.insert(k.to_string());
+            }
+        });
+    }
+    /// Runs `body` and returns the keys read meanwhile.
+    pub(in crate::rules) fn record(body: impl FnOnce()) -> BTreeSet<String> {
+        KEYS.with(|r| *r.borrow_mut() = Some(BTreeSet::new()));
+        body();
+        KEYS.with(|r| r.borrow_mut().take()).unwrap_or_default()
+    }
+}
+
 pub(in crate::rules) fn s<'a>(v: &'a Value, k: &str) -> &'a str {
+    #[cfg(test)]
+    read_log::note(k);
     v[k].as_str().unwrap_or("")
 }
 pub(in crate::rules) fn f(v: &Value, k: &str) -> f32 {
+    #[cfg(test)]
+    read_log::note(k);
     v[k].as_f64().unwrap_or(0.0) as f32
 }
 pub(in crate::rules) fn b(v: &Value, k: &str) -> bool {
+    #[cfg(test)]
+    read_log::note(k);
     crate::data::wot_flag(&v[k])
 }
 pub(in crate::rules) fn cmp(eq: &str, a: f32, bb: f32) -> bool {
@@ -306,15 +333,27 @@ pub(in crate::rules) fn base(spec: &str) -> &str {
     spec.split(',').next().unwrap_or(spec)
 }
 pub(in crate::rules) const PLAYER: &str = "Player0 Group";
-/// 'Group,Unit' selects a single unit. Bare names select a TWT group, or an owner if no such group exists.
-pub(in crate::rules) fn matches(u: &Unit, spec: &str) -> bool {
+/// The one selector rule. 'Group,Unit' selects a single unit by name (or the human's command ship). A bare name selects a TWT group the
+/// unit is in, or an owner if no such group exists: `owner_counts` says the owner name is usable as a selector for this unit.
+pub(in crate::rules) fn selects(spec: &str, name: &str, primary: bool, owner: &str, owner_counts: bool, in_group: impl FnOnce() -> bool) -> bool {
     match spec.split_once(',') {
-        Some((_, unit)) => u.name == unit || (unit == "HUMAN CONTROLLED COMMAND SHIP" && u.primary),
-        None => (!u.owner_is_named_group && u.owner == spec) || u.groups.iter().any(|g| g == spec),
+        Some((_, unit)) => name == unit || (unit == "HUMAN CONTROLLED COMMAND SHIP" && primary),
+        None => (owner_counts && owner == spec) || in_group(),
     }
+}
+pub(in crate::rules) fn matches(u: &Unit, spec: &str) -> bool {
+    selects(spec, &u.name, u.primary, &u.owner, !u.owner_is_named_group, || u.groups.iter().any(|g| g == spec))
 }
 pub(in crate::rules) fn members<'a>(w: &'a [Unit], spec: &str) -> Vec<&'a Unit> {
     w.iter().filter(|u| matches(u, spec)).collect()
+}
+/// The members of `spec` that are alive.
+pub(in crate::rules) fn alive_members<'a>(w: &'a [Unit], spec: &str) -> Vec<&'a Unit> {
+    w.iter().filter(|u| u.alive && matches(u, spec)).collect()
+}
+/// The members of `spec` that are alive and not hidden: the ones rules can see.
+pub(in crate::rules) fn live_members<'a>(w: &'a [Unit], spec: &str) -> Vec<&'a Unit> {
+    w.iter().filter(|u| u.alive && u.visible && matches(u, spec)).collect()
 }
 pub(in crate::rules) fn ids(w: &[Unit], spec: &str) -> Vec<Entity> {
     members(w, spec).iter().map(|u| u.e).collect()

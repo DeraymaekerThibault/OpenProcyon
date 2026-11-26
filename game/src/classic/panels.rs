@@ -13,8 +13,8 @@ use std::collections::HashMap;
 
 use crate::combat::{self, GunStates, Health};
 use crate::panels::{
-    Contact, DockingStatus, Gauge, GunButton, HeadState, HudRoot, HudSet, MAX_CONTACTS, PanicButton, PauseButton, REF_H, Radar, RadarButton, ShipIconButton, Solid, ToggleButton,
-    WeaponPanel, gauge_value, px,
+    Contact, DockingStatus, Gauge, GunButton, HeadState, HudRoot, HudSet, MAX_CONTACTS, PanicButton, PauseButton, Radar, RadarButton, ShipIconButton, Solid, ToggleButton,
+    WeaponPanel, gauge_value, hud_scale, px,
 };
 use crate::pointer::Pointer;
 use crate::sprites::{HudData, IDLE, Sprite, offset, size_of, sprite, sprite_state};
@@ -282,7 +282,7 @@ fn build(
     speed: Option<Res<crate::panels::SpeedControl>>,
     mut bars: ResMut<BarLayouts>,
 ) {
-    let s = window.height() / REF_H;
+    let s = hud_scale(&window);
     let (player, guns) = *player;
     let key = (player.class, hud.skin, window.height() as u32, guns.names());
     if last.as_ref() == Some(&key) && !old.is_empty() {
@@ -615,7 +615,7 @@ fn update_gauges(
     mut q: Query<(&Fill, &mut Node, &mut ImageNode)>,
     guns: Single<&GunStates, With<PlayerShip>>,
 ) {
-    let s = window.height() / REF_H;
+    let s = hud_scale(&window);
     let (ship, health, crew) = *player;
     for (f, mut node, mut img) in &mut q {
         let v = gauge_value(f.gauge, &lib, ship, health, crew, &guns).clamp(0.0, 1.0);
@@ -803,7 +803,7 @@ fn name_plate(
     mut plate_text: Query<&mut Text, With<PlateText>>,
 ) {
     let Some(root) = roots.iter().next() else { return };
-    let s = window.height() / REF_H;
+    let s = hud_scale(&window);
     let c = Ctx { assets: &assets, hud: &hud, s };
     let plate_live = plate.iter().any(|(_, p)| p.parent() == root);
     if !plate_live {
@@ -889,7 +889,7 @@ fn fleet_art(
 ) {
     use crate::panels::{FleetButton as B, FleetWindow};
     let (Some(root), Some(anchor)) = (roots.iter().next(), anchor) else { return };
-    let s = window.height() / REF_H;
+    let s = hud_scale(&window);
     let c = Ctx { assets: &assets, hud: &hud, s };
     let n = model.rows.len();
     if *built != Some((root, n)) {
@@ -1011,7 +1011,7 @@ fn chat_panel(
         commands.entity(e).despawn();
     }
     let Some(font) = fonts.as_ref().and_then(|f| f.0.get("Univers10")).filter(|_| log.open) else { return };
-    let s = window.height() / REF_H;
+    let s = hud_scale(&window);
     let c = Ctx { assets: &assets, hud: &hud, s };
     let layout = bars.get(hud.skin);
     // Same strip as the fleet-commands bar, which it replaces while open.
@@ -1063,7 +1063,7 @@ fn chat_scroll(
     window: Single<&Window, With<bevy::window::PrimaryWindow>>,
 ) {
     let over = panel.iter().any(crate::pointer::over);
-    let s = window.height() / REF_H;
+    let s = hud_scale(&window);
     for (mut pos, node) in &mut list {
         let (view, content) = (node.size.y * node.inverse_scale_factor, node.content_size.y * node.inverse_scale_factor);
         for ev in wheel.read().filter(|_| over) {
@@ -1080,6 +1080,7 @@ mod tests {
     use super::*;
     use crate::EngineOrder;
     use crate::assets_dir;
+    use crate::panels::REF_H;
     use crate::sprites::meta;
 
     #[test]
@@ -1099,7 +1100,7 @@ mod tests {
             assert_eq!(crate::panels::speed_order_at(centre), order);
             assert_eq!(crate::panels::speed_order_at(centre + Vec2::splat(1.0)), order);
         }
-        let data = HudData { comps: crate::data::read_json(&assets_dir().join("hud/hud.json")).into(), skin: "Navy" };
+        let data = HudData { comps: crate::data::hud_json().expect("hud/hud.json; run tools/build_assets.sh"), skin: "Navy" };
         let frames: Vec<_> = (0..4).map(|i| meta(&data, &format!("SpeedControl_CurrActive{i}_NextActive{i}"), IDLE).unwrap()).collect();
         for frame in &frames {
             assert_eq!(frame.size, Vec2::new(86.0, 101.0));
@@ -1235,7 +1236,7 @@ mod tests {
     #[ignore = "needs imported assets"]
     fn every_class_has_its_hud_icons() {
         // Class names differ from the icon art (Ship_Navy_ManOWar -> Navy_Man_O_War); the WOT icon name resolves them all.
-        let comps: std::sync::Arc<serde_json::Value> = crate::data::read_json(&assets_dir().join("hud/hud.json")).into();
+        let comps: std::sync::Arc<serde_json::Value> = crate::data::hud_json().expect("hud/hud.json; run tools/build_assets.sh");
         let lib = crate::Library::load(assets_dir());
         for class in lib.classes.iter().filter(|c| c.name.starts_with("Ship_")) {
             let data = HudData { comps: comps.clone(), skin: crate::sprites::skin_of(&class.race) };
@@ -1300,7 +1301,7 @@ mod tests {
     #[test]
     #[ignore = "needs imported assets"]
     fn every_faction_has_the_bar_parts_it_needs() {
-        let comps: std::sync::Arc<serde_json::Value> = crate::data::read_json(&assets_dir().join("hud/hud.json")).into();
+        let comps: std::sync::Arc<serde_json::Value> = crate::data::hud_json().expect("hud/hud.json; run tools/build_assets.sh");
         for skin in ["Navy", "Pirate", "Procyon"] {
             let data = HudData { comps: comps.clone(), skin };
             for part in &BarLayout::load(skin).parts {

@@ -30,7 +30,7 @@ fn a_gun_reads_its_own_gunner_slot() {
 #[test]
 #[ignore = "needs imported assets"]
 fn campaign_screen_without_surviving_ships_still_offers_continue() {
-    let lib = Library::load(crate::assets_dir());
+    let lib = crate::testutil::lib();
     let model = campaign_screen_model(&CampaignPoints::default(), &lib, &[], &mut Choice::default());
     assert!(model.open);
     assert_eq!(model.detail, "No surviving own ship.");
@@ -41,7 +41,7 @@ fn campaign_screen_without_surviving_ships_still_offers_continue() {
 #[test]
 #[ignore = "needs imported assets"]
 fn crew_rows_list_the_assigned_member_once_as_a_return() {
-    let lib = Library::load(crate::assets_dir());
+    let lib = crate::testutil::lib();
     let class = &lib.classes[lib.index("Ship_Navy_Torpedo")];
     let roster = roster(&class.race, 0);
     let (first, second) = (roster[0].clone(), roster[1].clone());
@@ -124,7 +124,7 @@ fn recruitment_spends_once_and_assignment_moves_without_duplication() {
 #[test]
 #[ignore = "needs imported assets"]
 fn fixed_banks_are_listed_for_crew_but_cannot_be_swapped() {
-    let lib = Library::load(crate::assets_dir());
+    let lib = crate::testutil::lib();
     let class = &lib.classes[lib.index("Ship_Navy_Torpedo")];
     let all = weapon_banks(&lib, class);
     let swappable = selectable_banks(&lib, class);
@@ -136,7 +136,7 @@ fn fixed_banks_are_listed_for_crew_but_cannot_be_swapped() {
 #[test]
 #[ignore = "needs imported assets"]
 fn bank_purchase_is_atomic_and_matches_mount_types_not_weapon_families() {
-    let lib = Library::load(crate::assets_dir());
+    let lib = crate::testutil::lib();
     let class = &lib.classes[lib.index("Ship_Navy_Cutter")];
     let mount = class.mounts.iter().find(|m| family(&m.gun) == "Gun_CannonBall").unwrap();
     let gun = "Gun_Carronade_Med";
@@ -164,7 +164,7 @@ fn bank_purchase_is_atomic_and_matches_mount_types_not_weapon_families() {
 #[test]
 #[ignore = "needs imported assets"]
 fn a_built_in_mod_gun_fits_no_other_ship() {
-    let mut lib = Library::load(crate::assets_dir());
+    let mut lib = crate::testutil::lib();
     let gun = serde_json::json!({
         "MuzzleSpeed": 5000.0, "TimeBetweenBursts": 9.0, "BulletsPerBurst": 1, "DuringBurstReloadTime": 0.0,
         "MaximumRange_Range": 380.0, "LongRange_Range": 280.0, "EffectiveRange_Range": 150.0, "BulletAffectedByGravity": false,
@@ -195,7 +195,7 @@ fn saved_outfit_changes_live_posts_and_weapon_models_without_resetting_casualtie
         .init_asset::<bevy::world_serialization::WorldAsset>()
         .add_systems(Update, (apply_outfit, apply_skirmish_weapons, apply_skirmish_crew).chain());
     let assets = app.world().resource::<AssetServer>().clone();
-    let lib = Library::load(crate::assets_dir());
+    let lib = crate::testutil::lib();
     let class = lib.index("Ship_Navy_Cutter");
     let mission = crate::campaign::load_id("mission03");
     let ms = crate::campaign::MissionShip { id: 77, name: "test".into(), owner: mission.script.player().into(), ..default() };
@@ -325,7 +325,7 @@ fn class_with_twin_banks(lib: &Library) -> (usize, String) {
 #[test]
 #[ignore = "needs imported assets"]
 fn fitting_every_bank_of_a_mount_type_is_all_or_nothing_against_the_points() {
-    let lib = Library::load(crate::assets_dir());
+    let lib = crate::testutil::lib();
     let (ci, gun) = class_with_twin_banks(&lib);
     let class = &lib.classes[ci];
     let targets = banks_for(&lib, class, &gun);
@@ -343,7 +343,7 @@ fn fitting_every_bank_of_a_mount_type_is_all_or_nothing_against_the_points() {
 #[test]
 #[ignore = "needs imported assets"]
 fn the_price_change_is_the_difference_times_the_guns_in_the_bank() {
-    let lib = Library::load(crate::assets_dir());
+    let lib = crate::testutil::lib();
     let (ci, gun) = class_with_twin_banks(&lib);
     let class = &lib.classes[ci];
     let target = banks_for(&lib, class, &gun)[0];

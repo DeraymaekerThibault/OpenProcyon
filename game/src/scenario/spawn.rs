@@ -187,7 +187,8 @@ pub fn spawn_scenario(commands: &mut Commands, assets: &AssetServer, lib: &Libra
         )),
     };
     let track = map.as_ref().and_then(|m| m["music"].as_str()).unwrap_or("BTL_NavyBig_Full02");
-    if !campaign::is_mission(cfg.map.as_deref()) {
+    let mission = campaign::is_mission(cfg.map.as_deref());
+    if !mission {
         // the mission's rules choose its music
         let m = audio::music(commands, assets, track);
         commands.entity(m).insert(Scenario);
@@ -196,266 +197,275 @@ pub fn spawn_scenario(commands: &mut Commands, assets: &AssetServer, lib: &Libra
     if let Some(map) = &map {
         let bases = spawn_map_objects(commands, assets, fxl, shapes, asteroids, map);
         nebula::spawn(commands, assets, fxl, map);
-        if campaign::is_mission(cfg.map.as_deref()) {
+        if mission {
             campaign::spawn(commands, assets, lib, fxl, cfg.map.as_deref().unwrap(), &bases);
             // Not retail: a custom mission's map places mines like a skirmish map does. Retail missions never read their `mines` key.
             if campaign::is_custom(cfg.map.as_deref().unwrap()) {
                 spawn_mines(commands, map);
             }
-            commands.insert_resource(Target::default());
-            commands.insert_resource(Outcome::Playing);
-            return;
-        }
-        commands.remove_resource::<campaign::Mission>();
-        let players = map["players"].as_array().cloned().unwrap_or_default();
-        assert!(!players.is_empty(), "map {:?} has no players", cfg.map);
-        let mut groups = if cfg.groups.is_empty() {
-            // Command line: our fleet at the first player, the enemy fleet at the first player of another team.
-            let us = &players[0];
-            let them = players.iter().position(|p| p["team"] != us["team"]).unwrap_or(players.len().min(2) - 1);
-            let fleet = |f: &[String]| f.iter().map(|n| (n.clone(), None, None)).collect();
-            vec![
-                Group {
-                    player: 0,
-                    side: Side::Player,
-                    human: true,
-                    race: Race::from_twt(players[0]["race"].as_u64().unwrap_or(4)),
-                    team: players[0]["team"].as_i64().unwrap_or(-1) as i32,
-                    row: None,
-                    ids: vec![],
-                    ships: fleet(&ours),
-                    weapons: vec![],
-                    crew: vec![],
-                },
-                Group {
-                    player: them,
-                    side: Side::Enemy,
-                    human: false,
-                    race: Race::from_twt(players[them]["race"].as_u64().unwrap_or(4)),
-                    team: players[them]["team"].as_i64().unwrap_or(-1) as i32,
-                    row: None,
-                    ids: vec![],
-                    ships: fleet(&cfg.enemies),
-                    weapons: vec![],
-                    crew: vec![],
-                },
-            ]
         } else {
-            cfg.groups
-                .iter()
-                .map(|g| Group {
-                    player: g.player,
-                    side: g.side,
-                    human: g.human,
-                    race: g.race,
-                    team: g.team,
-                    row: g.row.clone(),
-                    ids: g.ids.clone(),
-                    ships: g.ships.clone(),
-                    weapons: g.weapons.clone(),
-                    crew: g.crew.clone(),
-                })
-                .collect()
-        };
-        if cfg.script.as_deref() == Some("fleet")
-            && let Some(player) = (0..players.len()).find(|i| !groups.iter().any(|g| g.player == *i))
-        {
-            groups.push(Group {
-                player,
-                side: Side::Player,
-                human: false,
-                race: Race::Unchosen,
-                team: -1,
-                row: None,
-                ids: vec![],
-                ships: vec![(ship::DEFAULT_SHIP.into(), None, Some("Allied captain".into()))],
-                weapons: vec![],
-                crew: vec![],
-            });
+            spawn_skirmish(commands, assets, lib, fxl, cfg, map, &bases, &ours);
         }
-        // A map with its own script (Convoy Raid's convoys, ...): the ships of its non-playable players join the battle on their
-        // team's side, and every ship carries its map player and rule name for the script (rules::skirmish).
-        let map_id = cfg.map.clone().unwrap_or_default();
-        let script_names = crate::rules::skirmish::SkirmishScript::ship_names(&map_id);
-        if script_names.is_some() {
-            for (p, pl) in players.iter().enumerate() {
-                if pl["playable"] == true || groups.iter().any(|g| g.player == p) {
-                    continue;
-                }
-                let placed: Vec<&serde_json::Value> = map["ships"]
-                    .as_array()
-                    .into_iter()
-                    .flatten()
-                    .filter(|o| o["player"].as_u64() == Some(p as u64) && o["type"].as_str().is_some_and(|t| lib.classes.iter().any(|c| c.name == t)))
-                    .collect();
-                if placed.is_empty() {
-                    continue;
-                }
-                let team = pl["team"].as_i64().unwrap_or(-1) as i32;
-                let side = groups.iter().find(|g| team >= 0 && g.team == team).map_or(Side(groups.iter().map(|g| g.side.0).max().unwrap_or(0) + 1), |g| g.side);
-                groups.push(Group {
-                    player: p,
-                    side,
-                    human: false,
-                    race: Race::Unchosen,
-                    team,
-                    row: None,
-                    ids: placed.iter().map(|o| o["id"].as_i64()).collect(),
-                    ships: placed
-                        .iter()
-                        .map(|o| {
-                            (
-                                o["type"].as_str().unwrap_or_default().into(),
-                                Some([0, 1, 2].map(|i| o["pos"][i].as_f64().unwrap_or(0.0) as f32)),
-                                o["name"].as_str().map(String::from),
-                            )
-                        })
-                        .collect(),
-                    weapons: vec![],
-                    crew: vec![],
-                });
-            }
-        }
-        let mut namer = Namer::new();
-        let mut roster = alliance::Roster { changeable: map["alliance_change"].as_bool().unwrap_or(false), ..default() };
-        for g in &groups {
-            let Some(p) = players.get(g.player) else { continue };
-            let f = game_to_bevy(&p["forward"]);
-            let heading = (-f.x).atan2(-f.z);
-            let radii: Vec<f32> = g.ships.iter().map(|(n, ..)| lib.classes[lib.index(n)].sphere.1).collect();
-            let kind = ship::Formation::from_index(p["formation"].as_u64().unwrap_or(0) as usize);
-            let slots: Vec<_> = ship::formation_slots(kind, &radii).into_iter().map(|v| game_to_bevy(&p["start"]) + Quat::from_rotation_y(heading) * v).collect();
-            // A scripted map's ships answer to their map player's name (`MissionShip::owner`), so the fleet is keyed the same way, or the
-            // fleet bookkeeping drops the human's command ship (no control, no HUD).
-            let owner: crate::names::Owner = if script_names.is_some() { p["name"].as_str().unwrap_or_default().to_string() } else { format!("player{}", g.player) }.into();
-            if let Some((name, flag)) = &g.row {
-                let colour = p["color"]
-                    .as_array()
-                    .filter(|c| c.len() >= 3)
-                    .map_or(Color::WHITE, |c| Color::srgb(c[0].as_f64().unwrap_or(1.0) as f32, c[1].as_f64().unwrap_or(1.0) as f32, c[2].as_f64().unwrap_or(1.0) as f32));
-                roster.rows.push(alliance::Row::new(owner.clone(), name.clone(), *flag, colour, g.side == Side::Player));
-            }
-            if g.human {
-                let owner = owner.clone();
-                commands.queue(move |w: &mut World| {
-                    w.resource_mut::<ship::Fleets>().local = owner;
-                });
-            }
-            for (i, ((name, at, label), slot)) in g.ships.iter().zip(slots).enumerate() {
-                let pos = at.map_or(slot, |a| game_to_bevy(&serde_json::json!(a)));
-                let e = spawn_ship(commands, assets, lib, fxl, name, g.side, pos, heading, label.clone().or_else(|| namer.pick(lib, name)));
-                let id = g.ids.get(i).copied().flatten();
-                commands.entity(e).insert((ship::FleetMember(owner.clone(), i), MapObject { id, start: g.side }));
-                if let Some(c) = p["color"].as_array().filter(|c| c.len() >= 3) {
-                    let k = |i: usize| c[i].as_f64().unwrap_or(0.0) as f32;
-                    commands.entity(e).insert(PlayerColor(Color::srgb(k(0), k(1), k(2))));
-                }
-                if let Some(names) = &script_names {
-                    commands.entity(e).insert(campaign::MissionShip {
-                        id: id.unwrap_or(-1),
-                        name: id.and_then(|id| names.get(&id).cloned()).unwrap_or_default(),
-                        owner: p["name"].as_str().unwrap_or_default().into(),
-                        visible: true,
-                        ..default()
-                    });
-                }
-                // A computer fleet built in the lobby carries its crew (`SkirmishCrew` below); its ships left without crew have empty posts
-                // like ours (retail saves: factor 1.125, scan x1.125). Pre-placed computer ships keep the measured crewed factor.
-                let built = g.crew.iter().any(|c| c.iter().any(|r| !r.is_empty()));
-                if !g.human && !built {
-                    commands.entity(e).entry::<Ship>().and_modify(|mut s| (s.crew_speed, s.crew_turn) = (ship::COMPUTER_CREW, ship::COMPUTER_CREW));
-                    // PROVISIONAL: the crew factor matching the measured speed (Average-to-Elite, retail save scale)
-                    commands.entity(e).insert(crate::environment::ScanFactor(1.35));
-                }
-                if let Some(fit) = g.weapons.get(i).filter(|fit| !fit.is_empty()) {
-                    commands.entity(e).insert(crate::crew_arms::WeaponFit(fit.clone()));
-                }
-                if let Some(crew) = g.crew.get(i).filter(|c| c.iter().any(|r| !r.is_empty())) {
-                    commands.entity(e).insert(crate::crew_arms::SkirmishCrew(crew.clone()));
-                } else if g.human || built {
-                    // No crew assigned: every post holds the rating-1 hand, which still gives the lookout factor 1.125 (retail saves).
-                    let scan = crate::crew_arms::CrewPosts(Default::default()).scan(&crate::boarding::counts(name));
-                    commands.entity(e).insert(crate::environment::ScanFactor(scan));
-                }
-                if g.side == Side::Player && !(g.human && i == 0) {
-                    commands.entity(e).remove::<PlayerShip>();
-                }
-            }
-            let owner = owner.clone();
-            commands.queue(move |w: &mut World| ship::set_formation(w, &owner, Some(kind), kind != ship::Formation::None));
-        }
-        if roster.rows.is_empty() {
-            commands.remove_resource::<alliance::Roster>();
-        } else {
-            commands.insert_resource(roster);
-        }
-        // The map's own end rules, when we model all of them (else the plain "no enemy ships left" outcome stays).
-        let map_teams = map["teams"].as_array().cloned().unwrap_or_default();
-        let teams: Vec<(String, Vec<Side>)> = if map_teams.is_empty() {
-            let mut sides: Vec<Side> = groups.iter().map(|g| g.side).collect();
-            sides.sort_by_key(|s| s.0);
-            sides.dedup();
-            sides.into_iter().map(|s| (format!("side{}", s.0), vec![s])).collect()
-        } else {
-            map_teams
-                .iter()
-                .enumerate()
-                .map(|(i, t)| (t["name_id"].as_str().unwrap_or_default().to_string(), groups.iter().filter(|g| g.team == i as i32).map(|g| g.side).collect()))
-                .collect()
-        };
-        // A condition of the map's end rules may name a group of its script instead of listing object ids. A map that lets its script
-        // decide (`"victory": "script"`) needs the victory rules even without usable map rules of its own.
-        let script_groups = data::try_json(&crate::assets_dir().join(format!("maps/{map_id}/script.json"))).map_or(serde_json::Value::Null, |s| s["groups"].clone());
-        let scripted = crate::rules::skirmish::SkirmishScript::decides(&map_id);
-        match victory::Victory::from_map_in(map, teams.clone(), &script_groups) {
-            Some(v) => commands.insert_resource(v),
-            None if scripted => commands.insert_resource(victory::Victory::scripted(teams)),
-            None => commands.remove_resource::<victory::Victory>(),
-        }
-        // The map player -> side table and team rosters the script needs (a base player such as 'pirate base' fights for the fleet of
-        // its type, as the bases below do).
-        let sides: std::collections::HashMap<String, Side> = players
-            .iter()
-            .enumerate()
-            .filter_map(|(i, p)| {
-                let team = p["team"].as_i64().unwrap_or(-1) as i32;
-                let name = p["name"].as_str()?;
-                let side = groups.iter().find(|g| g.player == i).or_else(|| groups.iter().find(|g| team >= 0 && g.team == team)).map(|g| g.side);
-                let side = side.or_else(|| faction(name).and_then(|f| groups.iter().find(|g| g.race == f)).map(|g| g.side))?;
-                Some((name.to_string(), side))
-            })
-            .collect();
-        let rosters = map_teams
-            .iter()
-            .enumerate()
-            .map(|(i, t)| {
-                let names = players.iter().filter(|p| p["team"].as_i64() == Some(i as i64)).filter_map(|p| p["name"].as_str().map(String::from)).collect();
-                (t["name_id"].as_str().unwrap_or_default().to_string(), names)
-            })
-            .collect();
-        match crate::rules::skirmish::SkirmishScript::load(&map_id, rosters, sides) {
-            Some(s) => commands.insert_resource(s),
-            None => {
-                if campaign::start_requested() {
-                    warn!("--fire-rule / --start-at: map '{map_id}' has no script.json, so there are no rules to fire and nothing runs them; they are ignored");
-                }
-                commands.remove_resource::<crate::rules::skirmish::SkirmishScript>();
-            }
-        }
-        // Mines the map placed (Border Dispute, Red Rover): the script gives each field to a player.
-        spawn_mines(commands, map);
-        // The map's space whales and dragons (named in its script's environment).
-        if let Some(script) = data::try_json(&crate::assets_dir().join(format!("maps/{map_id}/script.json"))) {
-            crate::environment::spawn(commands, assets, &script, true);
-        }
-        // The map script's Setup Island 'Combat Strength' is what boarders must wear down (retail: it seeds the base's strength).
-        let strengths = data::try_json(&crate::assets_dir().join(format!("maps/{map_id}/script.json"))).map(|s| setup_strengths(&s)).unwrap_or_default();
-        spawn_bases(commands, assets, lib, &bases, &players, &groups, &strengths);
     } else {
         spawn_arena(commands, assets, lib, fxl, cfg, &ours);
     }
     commands.insert_resource(Target::default());
     commands.insert_resource(Outcome::Playing);
+}
+
+/// A skirmish map's battle: the fleets of its players at their start points, the victory rules, the map script, mines, animals and bases.
+#[allow(clippy::too_many_arguments)]
+fn spawn_skirmish(
+    commands: &mut Commands,
+    assets: &AssetServer,
+    lib: &Library,
+    fxl: &fx::FxLib,
+    cfg: &Config,
+    map: &serde_json::Value,
+    bases: &[(Entity, serde_json::Value)],
+    ours: &[String],
+) {
+    commands.remove_resource::<campaign::Mission>();
+    let players = map["players"].as_array().cloned().unwrap_or_default();
+    assert!(!players.is_empty(), "map {:?} has no players", cfg.map);
+    let mut groups = if cfg.groups.is_empty() {
+        // Command line: our fleet at the first player, the enemy fleet at the first player of another team.
+        let us = &players[0];
+        let them = players.iter().position(|p| p["team"] != us["team"]).unwrap_or(players.len().min(2) - 1);
+        let fleet = |f: &[String]| f.iter().map(|n| (n.clone(), None, None)).collect();
+        vec![
+            Group {
+                player: 0,
+                side: Side::Player,
+                human: true,
+                race: Race::from_twt(players[0]["race"].as_u64().unwrap_or(4)),
+                team: players[0]["team"].as_i64().unwrap_or(-1) as i32,
+                row: None,
+                ids: vec![],
+                ships: fleet(ours),
+                weapons: vec![],
+                crew: vec![],
+            },
+            Group {
+                player: them,
+                side: Side::Enemy,
+                human: false,
+                race: Race::from_twt(players[them]["race"].as_u64().unwrap_or(4)),
+                team: players[them]["team"].as_i64().unwrap_or(-1) as i32,
+                row: None,
+                ids: vec![],
+                ships: fleet(&cfg.enemies),
+                weapons: vec![],
+                crew: vec![],
+            },
+        ]
+    } else {
+        cfg.groups
+            .iter()
+            .map(|g| Group {
+                player: g.player,
+                side: g.side,
+                human: g.human,
+                race: g.race,
+                team: g.team,
+                row: g.row.clone(),
+                ids: g.ids.clone(),
+                ships: g.ships.clone(),
+                weapons: g.weapons.clone(),
+                crew: g.crew.clone(),
+            })
+            .collect()
+    };
+    if cfg.script.as_deref() == Some("fleet")
+        && let Some(player) = (0..players.len()).find(|i| !groups.iter().any(|g| g.player == *i))
+    {
+        groups.push(Group {
+            player,
+            side: Side::Player,
+            human: false,
+            race: Race::Unchosen,
+            team: -1,
+            row: None,
+            ids: vec![],
+            ships: vec![(ship::DEFAULT_SHIP.into(), None, Some("Allied captain".into()))],
+            weapons: vec![],
+            crew: vec![],
+        });
+    }
+    // A map with its own script (Convoy Raid's convoys, ...): the ships of its non-playable players join the battle on their
+    // team's side, and every ship carries its map player and rule name for the script (rules::skirmish).
+    let map_id = cfg.map.clone().unwrap_or_default();
+    // The map's script, read once for the ship names, end rules, rule script, animals and island strengths below.
+    let script_json = data::try_json(&crate::assets_dir().join(format!("maps/{map_id}/script.json")));
+    let script_names = script_json.as_ref().and_then(crate::rules::skirmish::ship_names);
+    if script_names.is_some() {
+        for (p, pl) in players.iter().enumerate() {
+            if pl["playable"] == true || groups.iter().any(|g| g.player == p) {
+                continue;
+            }
+            let placed: Vec<&serde_json::Value> = map["ships"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter(|o| o["player"].as_u64() == Some(p as u64) && o["type"].as_str().is_some_and(|t| lib.classes.iter().any(|c| c.name == t)))
+                .collect();
+            if placed.is_empty() {
+                continue;
+            }
+            let team = pl["team"].as_i64().unwrap_or(-1) as i32;
+            let side = groups.iter().find(|g| team >= 0 && g.team == team).map_or(Side(groups.iter().map(|g| g.side.0).max().unwrap_or(0) + 1), |g| g.side);
+            groups.push(Group {
+                player: p,
+                side,
+                human: false,
+                race: Race::Unchosen,
+                team,
+                row: None,
+                ids: placed.iter().map(|o| o["id"].as_i64()).collect(),
+                ships: placed
+                    .iter()
+                    .map(|o| {
+                        (o["type"].as_str().unwrap_or_default().into(), Some([0, 1, 2].map(|i| o["pos"][i].as_f64().unwrap_or(0.0) as f32)), o["name"].as_str().map(String::from))
+                    })
+                    .collect(),
+                weapons: vec![],
+                crew: vec![],
+            });
+        }
+    }
+    let mut namer = Namer::new();
+    let mut roster = alliance::Roster { changeable: map["alliance_change"].as_bool().unwrap_or(false), ..default() };
+    for g in &groups {
+        let Some(p) = players.get(g.player) else { continue };
+        let f = game_to_bevy(&p["forward"]);
+        let heading = crate::geom::heading_of(f);
+        let radii: Vec<f32> = g.ships.iter().map(|(n, ..)| lib.classes[lib.index(n)].sphere.1).collect();
+        let kind = ship::Formation::from_index(p["formation"].as_u64().unwrap_or(0) as usize);
+        let slots: Vec<_> = ship::formation_slots(kind, &radii).into_iter().map(|v| game_to_bevy(&p["start"]) + Quat::from_rotation_y(heading) * v).collect();
+        // A scripted map's ships answer to their map player's name (`MissionShip::owner`), so the fleet is keyed the same way, or the
+        // fleet bookkeeping drops the human's command ship (no control, no HUD).
+        let owner: crate::names::Owner = if script_names.is_some() { p["name"].as_str().unwrap_or_default().to_string() } else { format!("player{}", g.player) }.into();
+        if let Some((name, flag)) = &g.row {
+            let colour = p["color"]
+                .as_array()
+                .filter(|c| c.len() >= 3)
+                .map_or(Color::WHITE, |c| Color::srgb(c[0].as_f64().unwrap_or(1.0) as f32, c[1].as_f64().unwrap_or(1.0) as f32, c[2].as_f64().unwrap_or(1.0) as f32));
+            roster.rows.push(alliance::Row::new(owner.clone(), name.clone(), *flag, colour, g.side == Side::Player));
+        }
+        if g.human {
+            let owner = owner.clone();
+            commands.queue(move |w: &mut World| {
+                w.resource_mut::<ship::Fleets>().local = owner;
+            });
+        }
+        for (i, ((name, at, label), slot)) in g.ships.iter().zip(slots).enumerate() {
+            let pos = at.map_or(slot, |a| game_to_bevy(&serde_json::json!(a)));
+            let e = spawn_ship(commands, assets, lib, fxl, name, g.side, pos, heading, label.clone().or_else(|| namer.pick(lib, name)));
+            let id = g.ids.get(i).copied().flatten();
+            commands.entity(e).insert((ship::FleetMember(owner.clone(), i), MapObject { id, start: g.side }));
+            if let Some(c) = p["color"].as_array().filter(|c| c.len() >= 3) {
+                let k = |i: usize| c[i].as_f64().unwrap_or(0.0) as f32;
+                commands.entity(e).insert(PlayerColor(Color::srgb(k(0), k(1), k(2))));
+            }
+            if let Some(names) = &script_names {
+                commands.entity(e).insert(campaign::MissionShip::placed(
+                    id.unwrap_or(-1),
+                    id.and_then(|id| names.get(&id).cloned()).unwrap_or_default(),
+                    p["name"].as_str().unwrap_or_default().into(),
+                ));
+            }
+            // A computer fleet built in the lobby carries its crew (`SkirmishCrew` below); its ships left without crew have empty posts
+            // like ours (retail saves: factor 1.125, scan x1.125). Pre-placed computer ships keep the measured crewed factor.
+            let built = g.crew.iter().any(|c| c.iter().any(|r| !r.is_empty()));
+            if !g.human && !built {
+                commands.entity(e).entry::<Ship>().and_modify(|mut s| (s.crew_speed, s.crew_turn) = (ship::COMPUTER_CREW, ship::COMPUTER_CREW));
+                // PROVISIONAL: the crew factor matching the measured speed (Average-to-Elite, retail save scale)
+                commands.entity(e).insert(crate::environment::ScanFactor(1.35));
+            }
+            if let Some(fit) = g.weapons.get(i).filter(|fit| !fit.is_empty()) {
+                commands.entity(e).insert(crate::crew_arms::WeaponFit(fit.clone()));
+            }
+            if let Some(crew) = g.crew.get(i).filter(|c| c.iter().any(|r| !r.is_empty())) {
+                commands.entity(e).insert(crate::crew_arms::SkirmishCrew(crew.clone()));
+            } else if g.human || built {
+                // No crew assigned: every post holds the rating-1 hand, which still gives the lookout factor 1.125 (retail saves).
+                let scan = crate::crew_arms::CrewPosts(Default::default()).scan(&crate::boarding::counts(name));
+                commands.entity(e).insert(crate::environment::ScanFactor(scan));
+            }
+            if g.side == Side::Player && !(g.human && i == 0) {
+                commands.entity(e).remove::<PlayerShip>();
+            }
+        }
+        let owner = owner.clone();
+        commands.queue(move |w: &mut World| ship::set_formation(w, &owner, Some(kind), kind != ship::Formation::None));
+    }
+    if roster.rows.is_empty() {
+        commands.remove_resource::<alliance::Roster>();
+    } else {
+        commands.insert_resource(roster);
+    }
+    // The map's own end rules, when we model all of them (else the plain "no enemy ships left" outcome stays).
+    let map_teams = map["teams"].as_array().cloned().unwrap_or_default();
+    let teams: Vec<(String, Vec<Side>)> = if map_teams.is_empty() {
+        let mut sides: Vec<Side> = groups.iter().map(|g| g.side).collect();
+        sides.sort_by_key(|s| s.0);
+        sides.dedup();
+        sides.into_iter().map(|s| (format!("side{}", s.0), vec![s])).collect()
+    } else {
+        map_teams
+            .iter()
+            .enumerate()
+            .map(|(i, t)| (t["name_id"].as_str().unwrap_or_default().to_string(), groups.iter().filter(|g| g.team == i as i32).map(|g| g.side).collect()))
+            .collect()
+    };
+    // A condition of the map's end rules may name a group of its script instead of listing object ids. A map that lets its script
+    // decide (`"victory": "script"`) needs the victory rules even without usable map rules of its own.
+    let script_groups = script_json.as_ref().map_or(serde_json::Value::Null, |s| s["groups"].clone());
+    let scripted = script_json.as_ref().is_some_and(crate::rules::skirmish::script_decides);
+    match victory::Victory::from_map_in(map, teams.clone(), &script_groups) {
+        Some(v) => commands.insert_resource(v),
+        None if scripted => commands.insert_resource(victory::Victory::scripted(teams)),
+        None => commands.remove_resource::<victory::Victory>(),
+    }
+    // The map player -> side table and team rosters the script needs (a base player such as 'pirate base' fights for the fleet of
+    // its type, as the bases below do).
+    let sides: std::collections::HashMap<String, Side> = players
+        .iter()
+        .enumerate()
+        .filter_map(|(i, p)| {
+            let team = p["team"].as_i64().unwrap_or(-1) as i32;
+            let name = p["name"].as_str()?;
+            let side = groups.iter().find(|g| g.player == i).or_else(|| groups.iter().find(|g| team >= 0 && g.team == team)).map(|g| g.side);
+            let side = side.or_else(|| faction(name).and_then(|f| groups.iter().find(|g| g.race == f)).map(|g| g.side))?;
+            Some((name.to_string(), side))
+        })
+        .collect();
+    let rosters = map_teams
+        .iter()
+        .enumerate()
+        .map(|(i, t)| {
+            let names = players.iter().filter(|p| p["team"].as_i64() == Some(i as i64)).filter_map(|p| p["name"].as_str().map(String::from)).collect();
+            (t["name_id"].as_str().unwrap_or_default().to_string(), names)
+        })
+        .collect();
+    match script_json.as_ref().map(|data| crate::rules::skirmish::SkirmishScript::load(&map_id, data, rosters, sides)) {
+        Some(s) => commands.insert_resource(s),
+        None => {
+            if campaign::start_requested() {
+                warn!("--fire-rule / --start-at: map '{map_id}' has no script.json, so there are no rules to fire and nothing runs them; they are ignored");
+            }
+            commands.remove_resource::<crate::rules::skirmish::SkirmishScript>();
+        }
+    }
+    // Mines the map placed (Border Dispute, Red Rover): the script gives each field to a player.
+    spawn_mines(commands, map);
+    // The map's space whales and dragons (named in its script's environment).
+    if let Some(script) = &script_json {
+        crate::environment::spawn(commands, assets, script, true);
+    }
+    // The map script's Setup Island 'Combat Strength' is what boarders must wear down (retail: it seeds the base's strength).
+    let strengths = script_json.as_ref().map(setup_strengths).unwrap_or_default();
+    spawn_bases(commands, assets, lib, bases, &players, &groups, &strengths);
 }
 
 /// The mines a map places (`mines`: `[{type, id, pos}]`), resting where the map put them until a script hands them to a player.

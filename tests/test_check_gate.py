@@ -12,7 +12,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 @unittest.skipUnless(shutil.which("sh"), "needs a POSIX shell")
 class CheckGateTests(unittest.TestCase):
-    def run_gate(self, imported, test_status=0, args=(), changed=None):
+    def run_gate(self, imported, test_status=0, args=(), changed=None, py_status=0):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             (root / "tools").mkdir()
@@ -34,7 +34,14 @@ class CheckGateTests(unittest.TestCase):
 name=${0##*/}
 printf '%s\\n' "$name $*" >> "$GATE_LOG"
 case "$name" in
-  python3) [ "$1" != -c ] || echo "$IMPORTED" ;;
+  python3)
+    [ "$*" != "-m tools.import_assets --print-assets" ] || echo "$IMPORTED"
+    if [ "$*" = "-m unittest discover -s tests" ]; then
+      [ -z "$PROCYON_HYGIENE_DONE" ] || echo "hygiene-skipped" >> "$GATE_LOG"
+      sleep 1  # long enough that the Rust steps start before it ends
+      echo "py-tests-end" >> "$GATE_LOG"
+      exit "$PY_STATUS"
+    fi ;;
   cargo) [ "$1" != test ] || exit "$TEST_STATUS" ;;
   timeout) exit 124 ;;
 esac
@@ -52,6 +59,7 @@ esac
                 GATE_LOG=str(log),
                 IMPORTED="/fake/assets" if imported else "",
                 TEST_STATUS=str(test_status),
+                PY_STATUS=str(py_status),
                 DISPLAY=":test",
             )
             result = subprocess.run(
@@ -88,6 +96,58 @@ esac
                         "GATE OK default" if imported else "GATE PARTIAL default"
                     )
                 )
+
+    def test_python_tests_run_beside_the_rust_steps_and_skip_the_hygiene_rules(self):
+        result, calls = self.run_gate(True)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(
+            calls.count(
+                "python3 -m unittest discover -s tests -p test_repo_hygiene.py"
+            ),
+            1,
+        )
+        self.assertIn(
+            "hygiene-skipped", calls
+        )  # the discover run is told the rules already ran
+        self.assertLess(
+            calls.index(
+                "cargo test --manifest-path game/Cargo.toml -- --include-ignored"
+            ),
+            calls.index("py-tests-end"),
+        )
+        lines = result.stdout.splitlines()
+        steps = [line.split()[1] for line in lines if line.startswith("ok ")]
+        self.assertEqual(
+            steps,
+            [
+                "ruff-format",
+                "ruff-lint",
+                "hygiene",
+                "rustfmt",
+                "clippy",
+                "rust-tests",
+                "python-tests",
+            ],
+        )
+        self.assertRegex(lines[-2], r"^ok   python-tests +\d+s$")  # fmt: skip
+
+    def test_python_test_failure_fails_the_gate_after_the_rust_steps(self):
+        result, calls = self.run_gate(True, py_status=1)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn(
+            "cargo test --manifest-path game/Cargo.toml -- --include-ignored", calls
+        )
+        self.assertRegex(result.stdout, r"FAIL python-tests +\d+s")
+        self.assertIn(
+            "rerun: env PROCYON_HYGIENE_DONE=1 python3 -m unittest discover -s tests",
+            result.stdout,
+        )
+        self.assertTrue(self.last_line(result).startswith("GATE FAIL python-tests"))
+
+    def test_rust_failure_still_reports_the_python_tests_line_first(self):
+        result, _ = self.run_gate(True, test_status=1)
+        self.assertRegex(result.stdout, r"ok   python-tests .*\n(.*\n)*FAIL rust-tests")
+        self.assertTrue(self.last_line(result).startswith("GATE FAIL rust-tests"))
 
     def test_full_tier_runs_the_game(self):
         result, calls = self.run_gate(True, args=["--full"])

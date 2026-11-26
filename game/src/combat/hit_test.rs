@@ -15,6 +15,10 @@ pub fn seg_sphere(a: Vec3, b: Vec3, c: Vec3, r: f32) -> Option<f32> {
     let t = (-qb - disc.sqrt()) / (2.0 * qa);
     (0.0..=1.0).contains(&t).then_some(t)
 }
+/// Distance along a pick `ray` (3000 units long) to the sphere of radius `r` around `c`; the click-targeting reach.
+pub fn ray_sphere(ray: Ray3d, c: Vec3, r: f32) -> Option<f32> {
+    seg_sphere(ray.origin, ray.origin + *ray.direction * 3000.0, c, r).map(|t| t * 3000.0)
+}
 /// Nearest ray hit against a class's triangles in the ship's local frame; used for click-targeting.
 pub fn ray_hit(c: &Class, tf: &Transform, ray: Ray3d) -> Option<f32> {
     let inv = tf.to_matrix().inverse();
@@ -125,7 +129,5 @@ pub(super) fn seg_mesh_hit(a: Vec3, b: Vec3, s: &Section) -> Option<(f32, Vec3)>
 
 /// Distance from `p` to the segment `a`-`b`.
 pub(super) fn segment_distance(p: Vec3, a: Vec3, b: Vec3) -> f32 {
-    let ab = b - a;
-    let t = if ab.length_squared() > 0.0 { ((p - a).dot(ab) / ab.length_squared()).clamp(0.0, 1.0) } else { 0.0 };
-    p.distance(a + ab * t)
+    crate::geom::segment_distance(p, a, b)
 }

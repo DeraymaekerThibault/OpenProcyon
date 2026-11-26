@@ -10,11 +10,9 @@ map-script tags hiding the captain's target). Runs take ~10-40 s each; logs go t
 Needs imported assets and a display, or Xvfb + Mesa like tools/shot.sh."""
 
 import argparse
-import contextlib
 import json
 import os
 import re
-import subprocess
 import sys
 import tempfile
 import time
@@ -23,9 +21,15 @@ from pathlib import Path
 from typing import NamedTuple
 
 from tools import gamelog
-from tools.autoplay import assets_env, build_game, display_wrapper, silent_data_home
+from tools.paths import REPO
+from tools.rungame import (
+    build_game,
+    display_wrapper,
+    game_env,
+    run_logged,
+    silent_data_home,
+)
 
-REPO = Path(__file__).resolve().parents[1]
 REPORT = re.compile(r"battle report (\{.*\})")
 FLEETS = ["--ship", "Ship_Navy_Cutter", "--allies", "Ship_Navy_Cutter",
           "--enemies", "Ship_Pirate_Barque,Ship_Pirate_Sloop"]  # fmt: skip
@@ -349,31 +353,18 @@ def main():
         with tempfile.TemporaryDirectory() as xdg:
             # A scratch XDG_DATA_HOME (default bindings, no saves, silent) and X11, as tools/autoplay.py.
             silent_data_home(xdg)
-            env = {
-                **os.environ,
-                "XDG_DATA_HOME": xdg,
-                **assets_env(),
-                "WAYLAND_DISPLAY": "",
-                "PROCYON_OVERLAY": str(Path(xdg) / "overlay"),
-                "PROCYON_REPORT": str(seconds),
-                **env_extra,
-            }
-            if wrap:
-                env["WGPU_BACKEND"] = "vulkan"
+            env = game_env(
+                xdg,
+                wrap,
+                **{
+                    "PROCYON_OVERLAY": str(Path(xdg) / "overlay"),
+                    "PROCYON_REPORT": str(seconds),
+                    **env_extra,
+                },
+            )
             cmd = [*wrap, str(game), *game_args, "--speed", str(args.speed), *extra]
             # Wall-clock cap for a hung run (below ~10 fps the game runs slower than asked; a fixed-step run needs one frame per tick); a timeout reports no battle.
-            with (
-                log.open("w", encoding="utf-8") as f,
-                contextlib.suppress(subprocess.TimeoutExpired),
-            ):
-                subprocess.run(
-                    cmd,
-                    cwd=REPO / "game",
-                    env=env,
-                    stdout=f,
-                    stderr=subprocess.STDOUT,
-                    timeout=seconds * (4 if extra else 1) + 120,
-                )
+            run_logged(cmd, log, env, seconds * (4 if extra else 1) + 120)
         return gamelog.read(log, r"panicked at|battle report")
 
     start = time.monotonic()

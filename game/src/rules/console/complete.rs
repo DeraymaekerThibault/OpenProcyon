@@ -27,6 +27,38 @@ pub struct Names {
     pub speech: Vec<String>,
 }
 
+impl Names {
+    /// The names a field of `kind` can hold, for the kinds the console completes and checks by name. Every kind is listed: a new
+    /// `Kind` does not compile until it says whether the console knows its names. Speech ids are checked (when the mission has any)
+    /// but not completed, so they are not here.
+    fn of(&self, kind: Kind) -> Option<&Vec<String>> {
+        match kind {
+            Kind::Group | Kind::Player => Some(&self.groups),
+            Kind::PointSet => Some(&self.point_sets),
+            Kind::Volume => Some(&self.volumes),
+            Kind::Path => Some(&self.paths),
+            Kind::Task => Some(&self.tasks),
+            Kind::Rule => Some(&self.rules),
+            Kind::Flag => Some(&self.flags),
+            Kind::Timer => Some(&self.timers),
+            Kind::Counter => Some(&self.counters),
+            Kind::Point
+            | Kind::CampaignCounter
+            | Kind::ConditionList
+            | Kind::Condition
+            | Kind::Speech
+            | Kind::MapText
+            | Kind::Message
+            | Kind::Team
+            | Kind::ShipName
+            | Kind::Bool
+            | Kind::Number
+            | Kind::Enum(_)
+            | Kind::Text => None,
+        }
+    }
+}
+
 fn sorted(set: BTreeSet<String>) -> Vec<String> {
     set.into_iter().filter(|s| !s.is_empty()).collect()
 }
@@ -186,16 +218,11 @@ impl Script {
                     }
                     return Err(format!("{} (for {} in '{}')", group_error(x, w, n), f.name, def.name));
                 }
-                Kind::PointSet => (&n.point_sets, false),
-                Kind::Volume => (&n.volumes, false),
-                Kind::Path => (&n.paths, false),
-                Kind::Task => (&n.tasks, false),
-                Kind::Rule => (&n.rules, false),
-                Kind::Flag => (&n.flags, true),
-                Kind::Timer => (&n.timers, true),
-                Kind::Counter => (&n.counters, true),
                 Kind::Speech if !n.speech.is_empty() => (&n.speech, false),
-                _ => continue,
+                kind => match n.of(kind) {
+                    Some(list) => (list, kind.creatable()),
+                    None => continue,
+                },
             };
             if known.iter().any(|k| k == x) {
                 continue;
@@ -430,18 +457,9 @@ fn json_completion(cond: bool, line: &str, off: usize, n: &Names) -> Completion 
     }
     let Some(f) = schema::lookup(role, &at.ty).and_then(|d| d.field(&at.of)) else { return Completion::default() };
     let list: Vec<String> = match f.kind {
-        Kind::Group | Kind::Player => n.groups.clone(),
-        Kind::PointSet => n.point_sets.clone(),
-        Kind::Volume => n.volumes.clone(),
-        Kind::Path => n.paths.clone(),
-        Kind::Task => n.tasks.clone(),
-        Kind::Rule => n.rules.clone(),
-        Kind::Flag => n.flags.clone(),
-        Kind::Timer => n.timers.clone(),
-        Kind::Counter => n.counters.clone(),
         Kind::Enum(values) => values.iter().map(|v| v.to_string()).collect(),
         Kind::Bool => vec!["TRUE".into(), "FALSE".into()],
-        _ => vec![],
+        kind => n.of(kind).cloned().unwrap_or_default(),
     };
     pick(open, partial, &list, close)
 }

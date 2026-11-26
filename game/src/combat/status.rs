@@ -94,7 +94,7 @@ pub fn lob_solution(lib: &Library, class: &Class, health: &Health, guns: &GunSta
     class.mounts.iter().enumerate().filter(|(_, m)| m.bank == bank && m.parent.is_none_or(|p| health.sections[p] > 0.0)).any(|(i, m)| {
         let offset = point - tf.transform_point(m.pos);
         let local = (tf.rotation * m.rot).inverse() * offset;
-        Vec2::new(offset.x, offset.z).length() <= lib.guns[guns.gun(i)].range[2] && (-local.x).atan2(-local.z).abs() <= m.arc / 2.0
+        Vec2::new(offset.x, offset.z).length() <= lib.guns[guns.gun(i)].range[2] && crate::geom::arc_covers(local, m.arc)
     })
 }
 

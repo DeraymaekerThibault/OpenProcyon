@@ -1,12 +1,7 @@
 use super::*;
 use serde_json::json;
 
-fn e(n: u32) -> Entity {
-    Entity::from_raw_u32(n).unwrap()
-}
-fn unit(n: u32, name: &str, owner: &str) -> Unit {
-    Unit { name: name.into(), owner: owner.into(), primary: name == "Flagship", ..Unit::new(e(n), -1, Vec3::ZERO) }
-}
+use crate::rules::fixtures::{e, hero_world, script_with, unit};
 fn script() -> Script {
     let never = json!({"Type": "Timer Condition", "Timer Name": "t", "Equivalence": "Greater Than", "Time in seconds": 5});
     let data = json!({
@@ -20,10 +15,12 @@ fn script() -> Script {
         "tasks": [{"Name": "Escape", "text": "Get away", "Active": true}],
         "volumes": null, "ships": []
     });
-    Script::new(&data, Value::Null)
+    script_with(data)
 }
 fn world() -> Vec<Unit> {
-    vec![unit(1, "Flagship", "Hero"), unit(2, "Escort", "Hero"), Unit { visible: false, ..unit(3, "Raider", "Pirates") }]
+    let mut w = hero_world();
+    w[2] = Unit { visible: false, ..unit(3, "Raider", "Pirates") };
+    w
 }
 fn run(sc: &mut Script, line: &str, w: &mut [Unit], target: Option<Entity>) -> (Vec<Fx>, Outcome) {
     let cmd = parse(line, sc.player(), false).unwrap_or_else(|e| panic!("{line}: {e}"));
@@ -654,7 +651,7 @@ fn every_table_row_has_a_need_and_help_says_where_it_runs() {
 #[test]
 fn the_view_and_ship_commands_run_in_a_battle_without_any_rules() {
     let mut sc = bare();
-    let mut w = vec![unit(1, "Flagship", "Hero"), unit(3, "Raider", "Pirates")];
+    let mut w = vec![Unit { primary: true, ..unit(1, "Flagship", "Hero") }, unit(3, "Raider", "Pirates")];
     // View commands.
     for (line, view) in [("fps", ViewChange::Fps(None)), ("hud off", ViewChange::Hud(false)), ("cam free", ViewChange::FreeCam(true)), ("cam player", ViewChange::FreeCam(false))] {
         let (fx, o) = run_in(Caps::BARE, &mut sc, line, &mut w, None);
@@ -688,7 +685,7 @@ fn the_view_and_ship_commands_run_in_a_battle_without_any_rules() {
 #[test]
 fn rule_commands_say_what_they_need_in_a_battle_without_rules() {
     let mut sc = bare();
-    let mut w = vec![unit(1, "Flagship", "Hero")];
+    let mut w = vec![Unit { primary: true, ..unit(1, "Flagship", "Hero") }];
     for line in ["flags", "rules", "fire gate", "tp Harbour", "set key", "counter n 1", "show volumes", "list groups", "skip", "stance Hero aggressive"] {
         let (fx, o) = run_in(Caps::BARE, &mut sc, line, &mut w, None);
         let word = line.split(' ').next().unwrap();

@@ -10,7 +10,7 @@ from pathlib import Path
 
 from tools import cli, ogg
 from tools.export_maps import strings
-from tools.jsonio import dump
+from tools.jsonio import write
 
 # Maps whose audio is copied into assets/sound (the JSON lists every cue regardless): the 13 campaign missions and both tutorials.
 PLAYABLE = {f"mission{n:02d}" for n in range(1, 14)} | {"tutorial", "basic_tutorial"}
@@ -102,13 +102,9 @@ def export(root, out, mid):
                 root / "Sound/Music" / (t + ".ogg"),
                 out / "sound" / (t.lower() + ".ogg"),
             )
-    (out / f"campaign/{mid}_media.json").write_text(
-        dump(
-            dict(
-                speech=speech, messages=messages, ship_names=ship_names, journal=journal
-            )
-        ),
-        encoding="utf-8",
+    write(
+        (out / f"campaign/{mid}_media.json"),
+        dict(speech=speech, messages=messages, ship_names=ship_names, journal=journal),
     )
     print(mid, len(speech), "speech events,", len(music), "music tracks")
 

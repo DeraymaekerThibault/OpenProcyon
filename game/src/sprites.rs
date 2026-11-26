@@ -272,10 +272,7 @@ impl View {
 /// scale comes from the size of their PNG.
 pub fn sheet_scale(name: &str) -> f32 {
     static S: std::sync::OnceLock<HashMap<String, f32>> = std::sync::OnceLock::new();
-    S.get_or_init(|| crate::data::try_json(&crate::assets_dir().join("hud/scales.json")).and_then(|v| serde_json::from_value(v).ok()).unwrap_or_default())
-        .get(name)
-        .copied()
-        .unwrap_or(1.0)
+    S.get_or_init(|| crate::data::try_load("hud/scales.json").unwrap_or_default()).get(name).copied().unwrap_or(1.0)
 }
 /// The slice groups of `data/hud/slices.json` (the file `tools/make_slices.py` builds the strips from), read once per process. A mod
 /// adds a group by overlaying the file and shipping the strip PNGs `hud/tex/slice_<group>_<skin>_<state>.png`.
@@ -324,10 +321,8 @@ pub fn plugin(app: &mut App) {
         warn!("no HUD data at {path:?}; run tools/build_assets.sh");
         return;
     }
-    let Some(comps) = crate::data::load_asset::<Value>("hud/hud.json", "the HUD is not drawn") else { return };
-    app.insert_resource(HudData { comps: comps.into(), skin: "Navy" })
-        .add_systems(PostStartup, load_fonts)
-        .add_systems(Update, choose_skin.run_if(in_state(crate::menu::Screen::Battle)));
+    let Some(comps) = crate::data::hud_json() else { return };
+    app.insert_resource(HudData { comps, skin: "Navy" }).add_systems(PostStartup, load_fonts).add_systems(Update, choose_skin.run_if(in_state(crate::menu::Screen::Battle)));
 }
 
 // ---- UI fonts (Fonts/*.fft metrics, vector faces) -----------------------------------------------------------------

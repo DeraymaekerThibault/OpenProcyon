@@ -11,7 +11,7 @@ from pathlib import Path
 
 from tools import cli
 from tools.gamefs import ci_files
-from tools.jsonio import dump
+from tools.jsonio import write
 from tools.mdb_to_glb import with_layer_offset
 from tools.msb import parse as parse_msb
 from tools.msb import parse_scene
@@ -79,7 +79,7 @@ def export(root, out):
         if points:
             scenes[msb.stem] = points
     (Path(out) / "data").mkdir(exist_ok=True)
-    (Path(out) / "data/mesh_effects.json").write_text(dump(scenes), encoding="utf-8")
+    write(Path(out) / "data/mesh_effects.json", scenes)
     print(
         "mesh effects:",
         sum(map(len, scenes.values())),

@@ -7,74 +7,23 @@ reached, peak entity/particle counts, the slowest frame and how many rules never
 Needs a display, or Xvfb + Mesa like tools/shot.sh. The effective speed is capped by the frame rate (an autoplay frame advances at most speed/60 game s)."""
 
 import argparse
-import json
-import os
 import re
-import subprocess
-import sys
 import tempfile
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from tools import gamelog
-from tools.import_assets import find_assets
-
-REPO = Path(__file__).resolve().parents[1]
-
-
-def build_game(profile="fast"):
-    """Builds the game with a Cargo profile (`fast` for checking runs, `release` as players get it) and returns the binary."""
-    subprocess.run(
-        ["cargo", "build", "--profile", profile, "--quiet"],
-        cwd=REPO / "game",
-        check=True,
-    )
-    target = Path(os.environ.get("CARGO_TARGET_DIR", REPO / "game/target"))
-    # Cargo names the release profile's folder `release` and every custom profile's after the profile.
-    return (
-        target
-        / profile
-        / ("openprocyon.exe" if sys.platform == "win32" else "openprocyon")
-    )
-
+from tools.paths import REPO
+from tools.rungame import (
+    build_game,
+    display_wrapper,
+    game_env,
+    run_logged,
+    silent_data_home,
+)
 
 PROFILE = re.compile(r"profile .*frame_ms=([\d.]+) entities=(\d+) .*particles=(\d+)")
 END = re.compile(r'autoplay end outcome="([^"]+)" time=(\d+) never_fired=\[(.*)\]')
-
-
-def display_wrapper():
-    """The command prefix that gives the game a display: none where there is one, else a virtual X server."""
-    if (
-        sys.platform == "win32"
-        or os.environ.get("DISPLAY")
-        or os.environ.get("WAYLAND_DISPLAY")
-    ):
-        return []
-    # -d lets Xvfb pick a free display (-displayfd); -a races between parallel runs. Older xvfb-run (Debian) has only -a.
-    helptext = subprocess.run(
-        ["xvfb-run", "--help"], capture_output=True, text=True
-    ).stdout
-    auto = "-d" if "--auto-display" in helptext else "-a"
-    return ["xvfb-run", auto, "-s", "-screen 0 1280x720x24"]
-
-
-def assets_env():
-    """PROCYON_ASSETS for a game run (the scratch XDG_DATA_HOME hides the per-user import and a linked worktree has none), and
-    this checkout's own PROCYON_OVERLAY: the default overlay sits next to the assets, shared by every worktree using the main import."""
-    assets = find_assets()
-    overlay = os.environ.get("PROCYON_OVERLAY", str(REPO / "local/tool-overlay"))
-    return {
-        "PROCYON_OVERLAY": overlay,
-        **({"PROCYON_ASSETS": str(assets)} if assets else {}),
-    }
-
-
-def silent_data_home(xdg):
-    """Fills a scratch XDG_DATA_HOME with settings that mute the game (default bindings, no saves)."""
-    (Path(xdg) / "openprocyon").mkdir()
-    (Path(xdg) / "openprocyon/settings.json").write_text(
-        json.dumps({"master": 0}), encoding="utf-8"
-    )
 
 
 def summarise(log, code):
@@ -131,39 +80,25 @@ def main():
         # A scratch XDG_DATA_HOME: default key bindings, master volume 0 (other options default) and no saves of the player's;
         # X11, since some Wayland sessions render black.
         silent_data_home(xdg)
-        env = {
-            **os.environ,
-            "XDG_DATA_HOME": xdg,
-            **assets_env(),
-            "WAYLAND_DISPLAY": "",
+        extra = {
             "PROCYON_AUTOPLAY": str(args.limit),
             "PROCYON_PROFILE": "1",
+            **({} if args.mortal else {"PROCYON_AUTOINVULN": "1"}),
         }
-        if not args.mortal:
-            env["PROCYON_AUTOINVULN"] = "1"
-        if wrap:
-            env["WGPU_BACKEND"] = "vulkan"
 
         def run(n):
             log = out / f"mission{n:02}.log"
             # Each run builds its own asset overlay (game/src/modding.rs); parallel runs sharing local/overlay broke each other.
-            menv = {**env, "PROCYON_OVERLAY": str(Path(xdg) / f"overlay{n}")}
+            menv = game_env(
+                xdg, wrap, **extra, PROCYON_OVERLAY=str(Path(xdg) / f"overlay{n}")
+            )
             cmd = [*wrap, str(game), "--mission", str(n), "--script", "mission", "--speed", str(args.speed),
                    "--shot", str(out / f"mission{n:02}.png"), "--shot-frame", "1000000000", "--late-frame", "0"]  # fmt: skip
             print(f"mission {n} ...", flush=True)
-            with log.open("w", encoding="utf-8") as f:
-                try:
-                    # Wall-clock cap for a hung run; below 10 fps the game runs slower than 1x, so leave room.
-                    code = subprocess.run(
-                        cmd,
-                        cwd=REPO / "game",
-                        env=menv,
-                        stdout=f,
-                        stderr=subprocess.STDOUT,
-                        timeout=args.limit * 1.5 + 120,
-                    ).returncode
-                except subprocess.TimeoutExpired:
-                    code = "timeout"
+            # Wall-clock cap for a hung run; below 10 fps the game runs slower than 1x, so leave room.
+            code = run_logged(cmd, log, menv, args.limit * 1.5 + 120)
+            if code is None:
+                code = "timeout"
             return (
                 n,
                 *summarise(

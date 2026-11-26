@@ -6,12 +6,11 @@ use bevy::input::keyboard::KeyboardInput;
 use super::*;
 use crate::menu::Screen;
 use crate::rules::console::{Caps, Cheats, Command, Console, DevView, Edit, Env, FrameStats, Needs, ShipInfo, ViewChange, marks_path, parse};
-use crate::rules::skirmish::SkirmishScript;
 
 /// Whether the console is on without the Display option "Developer Console": debug builds, `--console` or `PROCYON_CONSOLE` in the
 /// environment. A release build otherwise leaves it to the option (off by default), so a stray `~` never hands a player the cheats.
 pub fn enabled() -> bool {
-    cfg!(debug_assertions) || std::env::args().any(|a| a == "--console") || std::env::var_os("PROCYON_CONSOLE").is_some()
+    cfg!(debug_assertions) || crate::cli::has("--console") || std::env::var_os("PROCYON_CONSOLE").is_some()
 }
 
 /// The rules script the console works on in a battle that runs none (a skirmish map without a `script.json`, a lobby battle): empty, so the
@@ -52,9 +51,7 @@ fn close_on_leaving(mut console: ResMut<Console>, mut vtime: ResMut<Time<Virtual
 fn close(console: &mut Console, vtime: &mut Time<Virtual>) {
     console.open = false;
     console.line.clear();
-    if std::mem::take(&mut console.paused_by_us) {
-        vtime.unpause();
-    }
+    console.paused_by_us.release(vtime);
 }
 
 /// The console key (`Act::Console`, the backquote key by default; F12 always works) opens the console and pauses the battle; Escape or the console key closes it. While it is open typing goes to its line and the
@@ -85,10 +82,7 @@ fn keys(
         if !console.open {
             if toggle {
                 console.open = true;
-                if !vtime.is_paused() {
-                    vtime.pause();
-                    console.paused_by_us = true;
-                }
+                console.paused_by_us.claim(&mut vtime);
                 if console.log.is_empty() {
                     console.say("Developer console. `help` lists the commands; Escape or the console key closes it.");
                 }
@@ -144,7 +138,7 @@ pub(super) fn attach_ship_state(
     for (e, ship, member, name) in &ships {
         let owner = member.map_or_else(|| if ship.side == crate::Side::Player { "player".to_string() } else { "enemy".to_string() }, |m| m.0.to_string());
         let name = name.map_or_else(|| lib.classes[ship.class].name.clone(), |n| n.0.clone());
-        commands.entity(e).insert(MissionShip { id: -1, name, owner: owner.as_str().into(), visible: true, ..default() });
+        commands.entity(e).insert(MissionShip::placed(-1, name, owner.as_str().into()));
     }
 }
 
@@ -155,8 +149,7 @@ pub(super) fn run(
     mut console: ResMut<Console>,
     mut dev: ResMut<DevView>,
     mut restart: ResMut<crate::scenario::RestartRequest>,
-    mut mission: Option<ResMut<Mission>>,
-    mut skirmish: Option<ResMut<SkirmishScript>>,
+    mut active: crate::rules::active::ActiveScriptMut,
     mut bare: ResMut<BareScript>,
     fleets: Option<Res<crate::ship::Fleets>>,
     target: Res<Target>,
@@ -173,14 +166,13 @@ pub(super) fn run(
         return;
     }
     // The script the battle runs, with what applying its effects needs: a campaign mission, a skirmish map's script, or neither.
-    let in_mission = mission.is_some();
+    let in_mission = active.is_mission();
     let (null, no_sides) = (serde_json::Value::Null, std::collections::HashMap::new());
-    let (script, paths, sides, caps, mission_id): (&mut Script, &serde_json::Value, _, _, _) = if let Some(m) = mission.as_deref_mut() {
-        let Mission { script, data, id, .. } = m;
-        (script, &data["paths"], None, Caps::MISSION, id.clone())
-    } else if let Some(sk) = skirmish.as_deref_mut() {
-        let SkirmishScript { script, paths, sides, .. } = sk;
-        (script, &*paths, Some(&*sides), Caps::SKIRMISH_SCRIPT, String::new())
+    let (script, paths, sides, caps, mission_id): (&mut Script, &serde_json::Value, _, _, _) = if let Some(p) = active.parts() {
+        match p.mission_id {
+            Some(id) => (p.script, p.paths, p.sides, Caps::MISSION, id.to_string()),
+            None => (p.script, p.paths, p.sides, Caps::SKIRMISH_SCRIPT, String::new()),
+        }
     } else {
         (bare.0.get_or_insert_with(|| Script::new(&serde_json::json!({"rules": []}), serde_json::Value::Null)), &null, Some(&no_sides), Caps::BARE, String::new())
     };
@@ -188,11 +180,7 @@ pub(super) fn run(
     // `Extra` holds the read side of `Cheats` (the points gate in `update`), so changes go through the command queue.
     let mut god = extra.cheats.as_ref().is_some_and(|c| c.god);
     // The unit list as `update` builds it each frame.
-    let mut world = units(&ships, &lib);
-    world.extend(animals.iter().map(|(e, a, tf, _)| a.unit(e, tf)));
-    world.extend(extra.bases.iter_mut().map(|(e, b, tf, armed)| super::base_unit(&b, e, tf, armed, &lib)));
-    world.extend(rocks.iter().map(|(e, tf, a)| a.unit(e, tf)));
-    script.tag(&mut world);
+    let mut world = build_world(script, WorldKind::Console, &ships, &animals, &rocks, &extra.fx, &lib);
     if console.open {
         console.names = script.console_names(&world);
     }
@@ -262,7 +250,8 @@ pub(super) fn run(
         }
         apply_view(&outcome.view, &mut console, &mut dev, settings.as_deref_mut());
         each_ship(&mut ships, outcome.repair, |s| crate::docking::repair(&lib, &s.ship, &mut s.health, true));
-        apply_fx(fx, script, paths, sides, &mut commands, &mut ships, &mut animals, &mut extra, &mut orbit, &lib);
+        let mut env = extra.fx.env(script, paths, &lib, Some(&mut orbit), sides);
+        apply::apply(fx, &mut env, &mut commands, &mut ships, &mut animals);
     }
 }
 

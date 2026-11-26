@@ -7,7 +7,7 @@ Values are raw WOT literals (units not established); each carries its source lin
 from pathlib import Path
 
 from tools import cli
-from tools.jsonio import dump
+from tools.jsonio import write
 from tools.wot import parse_lines, properties, read_wot
 
 KEYS = (
@@ -44,5 +44,5 @@ def export(root, name):
 
 if __name__ == "__main__":
     root, name, out = cli.args(__doc__, 3)
-    Path(out).write_text(dump(export(root, name)), encoding="utf-8")
+    write(Path(out), export(root, name))
     print("wrote", out)

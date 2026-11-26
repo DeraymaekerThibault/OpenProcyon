@@ -7,12 +7,12 @@ mod swap_tests {
     #[test]
     #[ignore = "needs imported assets"]
     fn guns_of_a_destroyed_section_are_hidden_with_its_intact_mesh() {
-        let lib = Library::load(crate::assets_dir());
+        let lib = crate::testutil::lib();
         let swapped = |c: &crate::data::Class| c.mounts.iter().find_map(|m| m.parent.filter(|p| c.sections[*p].swappable));
         let class = lib.classes.iter().position(|c| swapped(c).is_some()).expect("a class with a mounted swappable section");
         let lost = swapped(&lib.classes[class]).unwrap();
         let mut app = App::new();
-        app.insert_resource(Library::load(crate::assets_dir())).add_systems(Update, swap_meshes);
+        app.insert_resource(crate::testutil::lib()).add_systems(Update, swap_meshes);
         let mut hp = Health::new(&lib.classes[class]);
         hp.sections[lost] = 0.0;
         let state = |root| crate::combat::gunnery::GunState {
@@ -48,10 +48,10 @@ mod swap_tests {
     #[test]
     #[ignore = "needs imported assets"]
     fn a_destroyed_base_part_shows_its_damaged_mesh() {
-        let lib = Library::load(crate::assets_dir());
+        let lib = crate::testutil::lib();
         let class = lib.index("Base_Procyon1");
         let mut app = App::new();
-        app.insert_resource(Library::load(crate::assets_dir())).add_systems(Update, swap_meshes);
+        app.insert_resource(crate::testutil::lib()).add_systems(Update, swap_meshes);
         let mut hp = Health::new(&lib.classes[class]);
         hp.sections[0] = 0.0; // BaseProcyons_Layer2
         let node = |app: &mut App, parent, name: &str| app.world_mut().spawn((Name::new(name.to_string()), Visibility::default(), ChildOf(parent))).id();
@@ -71,10 +71,10 @@ mod swap_tests {
     #[test]
     #[ignore = "needs imported assets"]
     fn late_nodes_are_swapped_at_once_and_a_repair_swaps_back() {
-        let lib = Library::load(crate::assets_dir());
+        let lib = crate::testutil::lib();
         let class = lib.index("Base_Procyon1");
         let mut app = App::new();
-        app.insert_resource(Library::load(crate::assets_dir())).add_systems(Update, swap_meshes);
+        app.insert_resource(crate::testutil::lib()).add_systems(Update, swap_meshes);
         let mut hp = Health::new(&lib.classes[class]);
         hp.sections[0] = 0.0; // BaseProcyons_Layer2
         let base = app.world_mut().spawn((ArmedBase { class }, hp)).id();
@@ -96,12 +96,12 @@ mod swap_tests {
     #[ignore = "needs imported assets"]
     fn a_destroyed_unswappable_section_keeps_its_mesh() {
         // Station Montgomery's island is a 10 HP section with swappable=0: shot down, the island stays.
-        let lib = Library::load(crate::assets_dir());
+        let lib = crate::testutil::lib();
         let class = lib.index("Base_Montgomery");
         let island = lib.classes[class].sections.iter().position(|s| s.layer == "WayStationMontgomery_Layer1").unwrap();
         assert!(!lib.classes[class].sections[island].swappable, "re-run the asset importer");
         let mut app = App::new();
-        app.insert_resource(Library::load(crate::assets_dir())).add_systems(Update, swap_meshes);
+        app.insert_resource(crate::testutil::lib()).add_systems(Update, swap_meshes);
         let mut hp = Health::new(&lib.classes[class]);
         hp.sections[island] = 0.0;
         let base = app.world_mut().spawn((ArmedBase { class }, hp)).id();
@@ -140,7 +140,7 @@ mod fire_tests {
     #[test]
     #[ignore = "needs imported assets"]
     fn the_scripted_percent_hit_takes_sections_through_the_hit_routine_and_leaves_the_core() {
-        let lib = Library::load(crate::assets_dir());
+        let lib = crate::testutil::lib();
         let class = &lib.classes[lib.index("Ship_Navy_Cutter")];
         let lost = |human: bool, p: f32| {
             let mut hp = Health::new(class);
@@ -157,7 +157,7 @@ mod fire_tests {
     #[test]
     #[ignore = "needs imported assets"]
     fn a_dead_fire_changes_state_only_on_the_six_second_ticks() {
-        let lib = Library::load(crate::assets_dir());
+        let lib = crate::testutil::lib();
         let class = lib.index("Ship_Navy_Cutter");
         let mut app = App::new();
         app.init_resource::<Time>().init_resource::<crate::scenario::Difficulty>().add_systems(Update, fires);

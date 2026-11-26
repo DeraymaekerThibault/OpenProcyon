@@ -3,7 +3,14 @@
 use crate::Nearest;
 use crate::bindings::Act;
 use crate::commands::{Engine, Kind, Orders};
-use crate::*;
+use crate::{
+    GunStates, Health, Library, Outcome, PlayerShip, Ship, Side, Target, audio, bindings, briefing, campaign, combat, course, docking, environment, menu, panels, rules, ship,
+    toggle_pause,
+};
+use bevy::input::mouse::AccumulatedMouseMotion;
+use bevy::input::mouse::AccumulatedMouseScroll;
+use bevy::prelude::*;
+use bevy::window::PrimaryWindow;
 
 #[derive(Component, Clone, Copy)]
 pub enum Slot {
@@ -165,11 +172,26 @@ fn keyboard_orders(c: &Controlled, keys: &ButtonInput<KeyCode>, pointer: &mut Po
     }
 }
 
+/// The world ray under a window position (shared by every cursor pick).
+pub fn cursor_ray(camera: &Camera, gt: &GlobalTransform, cursor: Vec2) -> Option<Ray3d> {
+    camera.viewport_to_world(gt, cursor).ok()
+}
+
+/// Where a ray meets the sea plane (the world's y = 0 plane), if it does.
+pub fn ray_on_sea(ray: Ray3d) -> Option<Vec3> {
+    ray.intersect_plane(Vec3::ZERO, InfinitePlane3d::new(Vec3::Y)).map(|t| ray.get_point(t))
+}
+
+/// Window position of a world point, if the camera can project it.
+pub fn project(camera: &Camera, gt: &GlobalTransform, world: Vec3) -> Option<Vec2> {
+    camera.world_to_viewport(gt, world).ok()
+}
+
 /// An armed indirect bank takes this click as its shot target (a click with no ground point under it keeps the bank armed).
 fn armed_shot(c: &Controlled, ray: Ray3d, target: &mut Target, lob: &combat::LobAim, sfx: &mut MessageWriter<audio::Sfx>, orders: &mut Orders) -> bool {
-    let (true, Some(bank), Some(t)) = (c.direct, target.2.armed, ray.intersect_plane(Vec3::ZERO, InfinitePlane3d::new(Vec3::Y))) else { return false };
+    let (true, Some(bank), Some(point)) = (c.direct, target.2.armed, ray_on_sea(ray)) else { return false };
     target.2.armed = None;
-    orders.send(Kind::Lob { ship: c.actor, shot: Some((bank, ray.get_point(t))) });
+    orders.send(Kind::Lob { ship: c.actor, shot: Some((bank, point)) });
     // Retail plays a sound only for gravity charges (PROVISIONAL: star/nova silent as decoded, unconfirmed in play)
     if let Some(a) = lob.0.filter(|a| a.kind == crate::combat::LobKind::GravCharge) {
         sfx.write(audio::Sfx::ui(if a.solution { "HUD_LobWeapon_Accept" } else { "HUD_LobWeapon_Reject" }));
@@ -221,8 +243,8 @@ fn left_click(c: &Controlled, ray: Ray3d, scene: &ClickScene, pointer: &mut Poin
     if attack_only {
         return;
     }
-    let Some(t) = ray.intersect_plane(Vec3::ZERO, InfinitePlane3d::new(Vec3::Y)) else { return };
-    move_order(c, ray.get_point(t), scene.keys, pointer, orders);
+    let Some(point) = ray_on_sea(ray) else { return };
+    move_order(c, point, scene.keys, pointer, orders);
 }
 
 /// A click on empty water: plot a course point (advanced movement) or order the ship there (Shift appends).
@@ -251,14 +273,14 @@ pub fn input(
     lib: Res<Library>,
     mut target: ResMut<Target>,
     mut vtime: ResMut<Time<Virtual>>,
-    ui: Res<crate::panels::UiClick>,
+    focus: panels::UiFocus,
     docks: docking::Dockees,
     (sensors, mission, mut sfx, lob, mut orders): (Res<environment::Sensors>, Option<Res<campaign::Mission>>, MessageWriter<audio::Sfx>, Res<combat::LobAim>, Orders),
     objects: ObjectQuery,
 ) {
     let Some(actor) = pointer.fleets.selected else { return };
     let direct = pointer.fleets.direct();
-    let clicking = mouse.just_pressed(MouseButton::Left) && !ui.0;
+    let clicking = mouse.just_pressed(MouseButton::Left) && !focus.blocks_world_click();
     let others: Vec<Clickable> =
         if clicking { ships.iter().map(|(e, s, tf, h, m)| (e, tf.compute_transform(), s.clone(), h.destroyed, m.is_none_or(|m| m.visible))).collect() } else { vec![] };
     let Ok((_, _, player_tf, ..)) = ships.get(actor) else { return };
@@ -269,9 +291,9 @@ pub fn input(
         camera_input(&mouse, &keys, &pointer, &mut orbit, time.delta_secs(), radius);
         keyboard_orders(&c, &keys, &mut pointer, &mut vtime, &mut orders);
         // Left click: an enemy ship selects it as target, otherwise set a destination on the plane (Shift appends).
-        if clicking && !docks.menu_swallows_click() {
+        if clicking {
             let (camera, gt) = *cam;
-            if let Some(ray) = window.cursor_position().and_then(|cursor| camera.viewport_to_world(gt, cursor).ok()) {
+            if let Some(ray) = window.cursor_position().and_then(|cursor| cursor_ray(camera, gt, cursor)) {
                 let scene =
                     ClickScene { keys: &keys, lib: &lib, sensors: &sensors, mission: mission.as_deref(), others: &others, objects: &objects, player_pos: player_tf.translation() };
                 if !armed_shot(&c, ray, &mut target, &lob, &mut sfx, &mut orders) && !select_own(ray, &scene, &mut pointer.fleets, &mut orbit) {
@@ -290,10 +312,9 @@ pub fn fleet_keys(
     mission: Option<Res<campaign::Mission>>,
     mut orders: Orders,
     mut sfx: MessageWriter<audio::Sfx>,
-    maps: Query<(), With<crate::starmap::Starmap>>,
-    menu: Option<Res<options_menu::OptionsMenu>>,
+    focus: panels::UiFocus,
 ) {
-    if menu.as_ref().is_some_and(|m| m.is_open()) || !maps.is_empty() || panels::cinematic(mission.as_deref()) || rules::locked(mission.as_deref()) {
+    if focus.blocks_fleet_keys() {
         return;
     }
     let mut picked = None;
@@ -449,7 +470,7 @@ impl StarRng {
     }
     /// The low 23 bits as a fraction in [0, 1).
     fn unit(&mut self) -> f32 {
-        f32::from_bits(self.step() & 0x7f_ffff | 0x3f80_0000) - 1.0
+        crate::fx::lcg_unit(&mut self.0)
     }
     /// Uniform direction: height first, then the turn about the vertical.
     fn dir(&mut self) -> Vec3 {
@@ -511,8 +532,7 @@ pub fn camera(
     // `--look x,y[,z]` (game axes) aims screenshots at a world point instead of the player's ship.
     static LOOK: std::sync::OnceLock<Option<Vec3>> = std::sync::OnceLock::new();
     let look = LOOK.get_or_init(|| {
-        let a: Vec<String> = std::env::args().collect();
-        let v: Vec<f32> = a.windows(2).find(|w| w[0] == "--look")?.get(1)?.split(',').filter_map(|x| x.parse().ok()).collect();
+        let v: Vec<f32> = crate::cli::value("--look")?.split(',').filter_map(|x| x.parse().ok()).collect();
         Some(Vec3::new(*v.first()?, *v.get(2).unwrap_or(&0.0), -*v.get(1)?))
     });
     let tracked = orbit.focus.filter(|e| !contacts.contains(*e) || sensors.player_sees(*e, mission.as_deref()));
@@ -607,7 +627,7 @@ pub fn object_hit<'a>(
             } else {
                 rock?.radius
             };
-            combat::seg_sphere(ray.origin, ray.origin + *ray.direction * 3000.0, tf.translation, radius).map(|t| (e, t * 3000.0))
+            combat::ray_sphere(ray, tf.translation, radius).map(|t| (e, t))
         })
         .min_by(|a, b| a.1.total_cmp(&b.1))
 }
@@ -665,7 +685,7 @@ mod camera_tests {
         world.init_resource::<crate::bindings::Bindings>();
         world.init_resource::<course::Plot>();
         world.init_resource::<panels::UiClick>();
-        world.init_resource::<options_menu::OptionsMenu>();
+        world.init_resource::<crate::options_menu::OptionsMenu>();
         world.init_resource::<environment::Sensors>();
         world.init_resource::<Messages<docking::DockMsg>>();
         world.init_resource::<Messages<audio::Sfx>>();
@@ -751,7 +771,7 @@ mod camera_tests {
         world.init_resource::<crate::bindings::Bindings>();
         world.init_resource::<course::Plot>();
         world.init_resource::<panels::UiClick>();
-        world.init_resource::<options_menu::OptionsMenu>();
+        world.init_resource::<crate::options_menu::OptionsMenu>();
         world.init_resource::<environment::Sensors>();
         world.init_resource::<Messages<docking::DockMsg>>();
         world.init_resource::<Messages<audio::Sfx>>();

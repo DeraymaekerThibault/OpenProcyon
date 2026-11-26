@@ -63,7 +63,7 @@ Git Bash (`GIT_BASH=<path>` if it is not in the default place), and the screensh
    arguments nor a setup hold it). Arguments that take a path (`--mod <dir>`, ...) are left out of the header. `battle_check
    --replay` (in `check.sh --full` for `red_rover` and the lobby scenario `border_dispute_full`) records a run of `--script
    commands` and fails when its replay's battle report differs; a lobby scenario replays from the log alone.
-   `--fixed-step` (or `PROCYON_FIXED_STEP=1`; `--shot` implies it unless `PROCYON_FIXED_STEP=0`, `lib.rs::wants_fixed_step`) makes a scripted run reproducible: each frame is one 33 ms tick at 1x whatever
+   `--fixed-step` (or `PROCYON_FIXED_STEP=1`; `--shot` implies it unless `PROCYON_FIXED_STEP=0`, `gametime.rs::wants_fixed_step`) makes a scripted run reproducible: each frame is one 33 ms tick at 1x whatever
    the frame rate, and the clock-seeded cosmetic draws (ship names, stars) use a fixed seed. Run twice, it gives the same
    pictures and the same trace. `python3 -m tools.tracediff A.csv B.csv` compares two traces (one line per file, then the
    first differing row). `python3 -m tools.visdiff` renders fixed-step scenes from the merge base (a warm worktree,
@@ -107,7 +107,7 @@ tools/shot.sh local/pause-restart.png --map red_rover --script pause-restart --s
 ```
 
 `make check` calls `tools/check.sh` (`make check ARGS=--quick` / `--full` pick a tier). The steps, cheapest first: ruff format check and
-lint (Python, rules in `ruff.toml`) → hygiene rules → Python tests → rustfmt check → strict Clippy → Rust tests; `--full` then builds the
+lint (Python, rules in `ruff.toml`) → hygiene rules (once; the Python tests skip them via `PROCYON_HYGIENE_DONE`) → rustfmt check → strict Clippy → Rust tests; the Python tests run in the background beside those three and are reported just before the final line; `--full` then builds the
 game and runs the startup smoke and the battle check.
 
 | Tier | When | Runs |
@@ -147,7 +147,7 @@ Use a scratch `XDG_DATA_HOME` for automated campaign runs if the player's campai
 Converted assets are found in this order: `PROCYON_ASSETS`, `assets/` in the source checkout (the checkout is found from the working directory or the executable: either must lie inside it), then the
 per-user folder `$XDG_DATA_HOME/openprocyon/assets` (Linux default `~/.local/share`; `%APPDATA%\openprocyon\assets` on Windows). Without
 any, the game exits with import instructions. `content/` is always layered on top. The tools (tests, `check.sh`, `shot.sh`, `smokes.sh`,
-`battle_check`, `autoplay`) use one order, `find_assets()` in `tools/import_assets.py`: the game's, with the main checkout's `assets/`
+`battle_check`, `autoplay`) use one order, `find_assets()` in `tools/import_assets.py` (`python3 -m tools.import_assets --print-assets` for the shell tools): the game's, with the main checkout's `assets/`
 after this checkout's, so a linked worktree uses the main import (never copy `assets/`). They export it as `PROCYON_ASSETS` for the game;
 `check.sh` prints `ASSETS: <path>` or `ASSETS: missing`. CLI mod/screenshot paths remain relative to the working directory.
 
@@ -167,7 +167,7 @@ only compare runs on the same machine and scene.
 ## Battle clock and scheduling
 
 Battle simulation runs in `FixedUpdate` at **0.033 s**, the interval documented in [re/gunnery.md](re/gunnery.md)
-and [re/effects.md](re/effects.md). `lib.rs::BattleSet` orders command application → sensors → AI → fleet following →
+and [re/effects.md](re/effects.md). `battle.rs::BattleSet` orders command application → sensors → AI → fleet following →
 docking/boarding orders → environmental forces → ship movement → combat → cleanup/accounting → outcome. Keep plugin systems
 in the owning stage; use a local chain for dependencies within one feature. Simulation uses fixed `Res<Time>` without per-system
 delta clamps. Virtual pause and speed still control this clock. At the original's speeds (up to 5x) one call catches up at most 10 frames
@@ -233,28 +233,32 @@ Keep the existing module boundaries. New files should own a real feature, not ju
 
 | Module (`game/src/`) | Owns | Change here when… |
 |---|---|---|
-| `lib.rs` | Library root and `run(view)`: application wiring, CLI `Config`, time scale/pause, profiling and the screenshot driver | Wiring/ordering systems; feature logic goes in its owning module |
+| `lib.rs` | Library root and `run(view)`: application wiring (plugin list, the camera and light `setup`, the lobby scenario); re-exports the old crate-root names | Wiring/ordering systems; feature logic goes in its owning module |
+| `cli.rs` | The command line: `--help` text, the one `FLAGS` table (value, scripted, recorded), the parsed `args()` every single-flag reader uses, and the list of `PROCYON_*` environment variables (`ENV_VARS`) | A new flag or environment variable: add it to the table/list and to `HELP` |
+| `gametime.rs`, `profile.rs`, `shot.rs`, `paths.rs` | The battle tick, game speed, pause and fixed-step mode; `PROCYON_PROFILE` logging; `--shot` pictures and the run's `Config`; where assets, content and bundled mods are found | Those concerns; `lib.rs` only re-exports them |
 | `ship.rs` | `Ship`/`Side` state, movement integration (`step`), skirmish AI | Changing free motion or AI; movement tests live here |
+| `alliance.rs` `hostility` | The named answers to "is X hostile to Y" (`by_side`, `by_script`, `pair`, `base`, `friendly_dock`) that boarding, docking and the captain's target check use; gunnery, shells, cloak and crew still compare sides themselves. The test there pins where the side and script answers disagree (three factions) | Asking who is an enemy; do not add a sixth private copy |
 | `scenario.rs` | Battle lifecycle: spawn from map/mission, restart, leave, outcome, ship naming | Changing what spawns or how a battle starts/ends |
-| `view.rs` | Orbit camera, world mouse/keyboard input, sky and background stars (`docs/re/sky.md`), retail and free camera (`docs/re/camera.md`), F1 debug text | Changing camera or world input |
+| `view.rs` | Orbit camera, world mouse/keyboard input, sky and background stars (`docs/re/sky.md`), retail and free camera (`docs/re/camera.md`), F1 debug text, and the shared pick helpers `cursor_ray`, `ray_on_sea`, `project` (cursor ray, sea-plane hit, world to window) | Changing camera or world input |
 | `data.rs` | JSON → ship classes, sections, mounts, geometry and shared weapon definitions | Changing simulation data schemas; coordinate the exporter and mod fixtures |
+| `geom.rs` | `heading_of`, `angdiff`, `arc_covers`, point-to-segment distance and nearest-point helpers (bodies are the exact expressions the call sites used) | Any new heading, arc or segment-distance code; do not write another copy |
 | `combat/` | `mod.rs` health, targets, messages, engines, destruction; `gunnery.rs` gun mounts, turret aim/lead, bursts, ship and tower fire; `shells.rs` shells in flight, torpedo guidance, point defence, hit damage; `hit_test.rs` ray/segment tests against sections; `asteroid.rs` asteroid motion/breakup; `damage.rs` smoke/fires/mesh swaps; `status.rs` HUD-facing gun/section queries; `tests.rs` | Changing combat; report hits/firing/destruction through the existing messages |
 | `commands.rs` | Player orders as data (`PlayerCommand`, `Orders`), applied at the start of the next tick (or at the end of a paused frame); `Commander(PlayerId)`, the simulation's mark of a human's command ship (`PlayerShip` is the local view's, and gives player 0 its `Commander`); command-log recording (`PROCYON_COMMANDS`) and `--replay` | Routing another order kind through it (one group per PR, `tracediff` before and after) or changing the log format (ask a maintainer) |
 | `collision.rs` | Ship movement substeps, ship/scenery contact, separation and contact velocity; AI collision avoidance (`collision/avoid.rs`) | Changing physical collision; free-motion equations remain in `step` |
 | `campaign.rs` | Mission loading (`load_id`, `next`), campaign ship/map setup, campaign points and save files (`CampaignSave`, `list_saves`, `write_save`) | Changing mission initialization or which exported mission is loadable |
-| `rules/` | `eval.rs` pure rule evaluator (`Script`, no ECS; `eval/` holds types, state, conditions, actions); `systems.rs` ECS dispatch (`systems/` holds mission AI, presentation, autopilot); `tests.rs` | Implementing a retail condition/action; test the evaluator before ECS wiring |
+| `rules/` | `eval.rs` pure rule evaluator (`Script`, no ECS; `eval/` holds types, state, conditions, actions); `systems.rs` ECS dispatch (`systems/` holds mission AI, presentation, autopilot; `build_world` is the one rule-world builder for mission, skirmish script and dev console, `apply::FxParam` the one effect-environment param, `apply::spawn_voice` the one speech start); `active.rs` `ActiveScript`/`ActiveScriptMut`, the battle's script whether it is a `Mission` or a `SkirmishScript`; `tests.rs` | Implementing a retail condition/action; test the evaluator before ECS wiring; `fixtures.rs` (test-only) holds the shared Unit, world and Script builders of the rule tests; `eval/types.rs` `selects` is the one group-selector rule (`matches` and `Script::answers` call it) |
 | `docking.rs` | Dock points and their marker effects, dock routine (wait / approach / docked / return), repair while docked, dock rule hooks, click-to-dock picking | Changing docking/repair or the `Group/Unit Is Docked`-style rules |
 | `boarding.rs` | Submodules `boarding/odds.rs` (strengths, casualty odds), `grapple.rs` (harpoon, hook, winch), `fight.rs` (the fight and capture), `ai.rs`, `order.rs` (the board order the mission rule `OP Board Ship` gives). Crew strengths, grapple order/hook/winch, boarding fight and capture, the status bar, AI boarding of bases; `BoardMsg` / `Captured` messages | Changing boarding/grappling or the capture rules (`docs/re/boarding.md`) |
 | `crew_arms.rs` | Submodules `crew_arms/posts.rs` (crew data, posts), `fitting.rs` (guns, banks, applying outfits), `view.rs` (screen model). Campaign outfitting model, recruitment, post/bank transactions, live crew/equipment application; `classic/crew_arms.rs` draws it | Changing crew/arms purchases, assignment and their gameplay consumers (`docs/re/scoring-saves.md` §7, `docs/re/crew.md`) |
 | `lifeboats.rs` | Lifeboats: `Lifeboat` marker, `ShipLost` message, boat spawn when a flagged ship is destroyed, drift, nearest-ship sphere pickup, pickup sound/points/table, rule-visible owner list; `Abandoned`, the hull left disabled by `OP Abandon Ship` | Changing lifeboat creation/pickup (`docs/re/lifeboats.md`); the creation flag lives on `MissionShip`, the saved table in `rules::Script` |
 | `loading.rs` | Battle start gate: `Loading` exists while models, textures, sky pictures and shader pipelines are not ready; the battle is paused, takes no input, starts no sound (music included) and counts no screenshot frames meanwhile, and views draw a cover (`Loading::busy` for a system that waits on an asset of its own) | Changing what a battle waits for before it starts |
-| `battle.rs` | The battle wiring that crosses modules: the `BattleActive` set (battle screen, no overlay) and the tick and frame chains whose order spans owners; each owner adds the rest in its own `plugin` | Adding a system to the per-tick or per-frame battle chain |
+| `battle.rs` | The battle wiring that crosses modules: `BattleSet`, `FrameRules`, removal/joining of objects (`Removed`, `Joining`, `tick_start`), the `BattleActive` set (battle screen, no overlay) and the tick and frame chains whose order spans owners; each owner adds the rest in its own `plugin` | Adding a system to the per-tick or per-frame battle chain |
 | `smoke/` | Validated `--script` names, fleet/campaign and lifeboat smoke drivers, tender setup hook, `PROCYON_END_SHOT`/`PROCYON_NIS_SHOT` screenshot hooks | Adding a script name or changing scripted checks; keep production simulation in its owning module and preserve system ordering |
 | `classic/` | Retail-art views (default): `menu.rs` front-end screens and list scrolling, `widgets.rs` the front-end widget kit (canvas, panels, buttons, lists, scrollbars, pull-downs, fleet bar, info panel) drawn from `theme.rs` / `data/hud/theme.json`, with the hover state swap, `panels.rs` HUD sprites (bar, compass, dial, talking head, weapon panel), `options_menu.rs` right-click menu art and context cursor, `world_hud.rs` ship-name banners, target chevrons and objective indicator, `starmap.rs` star map art, `mission_ui.rs` objectives, speech banners, hints, end text and letterboxes, `boarding_bar.rs` boarding status bar, `crew_arms.rs` outfitting screens, `setup.rs` the first-run import screen (content/ fonts and plain boxes) | Changing how the retail look is drawn; behaviour goes in the shared module |
 | `victory.rs` | Skirmish end rules: the map's exported `victory` rules (base destroyed, no ships left, last team), decided from a battle snapshot; `scenario::outcome` feeds it | Changing how a skirmish is won or lost |
 | `options_menu.rs` | Right-click menu: opening, items, hit rects, actions and sounds (`OptionsMenuArt` for the views), which context cursor to show (`HoverCursor`: dock / can't / attack) | Adding menu items (Hold and Cloak are implemented; Board and Grapple live in `boarding.rs`) |
 | `briefing.rs` | Opening NIS, subtitles and skip behaviour (widgets: `BriefingUi`, `Subtitle`, `Portrait`) | Changing intro timing, camera handoff or skip placement |
-| `panels.rs` | HUD contract: widget markers, HUD input, gauge values, radar contacts, status icon, talking-head state, pause and speed buttons | Adding panel controls: marker + behaviour here, drawing in each view |
+| `panels.rs` | HUD contract: widget markers, HUD input, gauge values, radar contacts, status icon, talking-head state, pause and speed buttons; `hud_scale` (window height over `REF_H`), `UiFocus` (the named "UI is blocking this input" predicates, one per call site's set) and `PauseClaim` (one owner's remembered pause) | Adding panel controls: marker + behaviour here, drawing in each view |
 | `starmap.rs` | Star map opened by the radar disk (`docs/re/starmap.md`): open/close, sounds and what it shows (`StarmapContents`) | Which icons/labels the map shows; world extent comes from map JSON `world_half` |
 | `sprites.rs` | Retail sprite/font access for any view: `HudData` and faction skin choice, `Sprite`/`View` (a trimmed per-sprite PNG and where it sits in its untrimmed box), offsets, 9-slices and their HD scales, `Fonts` | Changing shared art metrics; keep menus (`MENU_SKIN`) separate from battle skin selection |
 | `setup.rs` | First run without imported assets: its own small app with the "Import your game" screen state, install discovery (Steam libraries, installed-program entries, Program Files or a Wine prefix) and folder checks, the importer child process and its `[n/total]` progress, then a relaunch of the game | Changing how a player gets from a download to the menu |
@@ -298,6 +302,7 @@ compares two imports by meaning (JSON by value, images by pixels) to check expor
 | Retail format readers | `source_text.py`, `wot.py`, `mdb.py`, `msb.py`, `hdt.py`, `fft.py`, `eft.py` |
 | Mesh conversion | `mdb_to_glb.py`, `preview.py` |
 | Content export | `export_ship.py`, `export_combat.py`, `export_maps.py`, `export_campaign.py`, `export_campaign_media.py`, `export_environment.py`, `export_crew.py`, `export_effects.py`, `export_hud.py`, `export_voices.py`, `export_waypoint_art.py`, `export_collision.py`, `export_asteroids.py`, `ogg.py` |
+| Shared helpers | `paths.py` (`REPO`), `jsonio.py` (`dump`/`write`: the one JSON layout the exporters write), `rungame.py` (build the game, display, scratch data home and environment, logged run: `autoplay.py`, `battle_check.py`) |
 | Asset preparation | `pack_data.py`, `format_json.py`, `fix_alpha_bleed.py`, `make_slices.py`, `hud_sprites.py` (shared sprite layout) |
 | Workflow | `import_assets.py` (the importer; `build_assets.sh` wraps it), `check.sh`, `shot.sh`, `compare_assets.py`, `package_release.py` (player download) |
 | Research | `extract_wot.py` (catalog of WOT properties) |

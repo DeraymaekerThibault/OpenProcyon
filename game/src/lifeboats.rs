@@ -53,11 +53,10 @@ fn world_sphere(lib: &Library, ship: &Ship, tf: &Transform) -> (Vec3, f32) {
 }
 
 pub fn plugin(app: &mut App) {
-    use crate::menu::Screen;
     app.add_message::<ShipLost>().add_systems(
         FixedUpdate,
         // Consume combat deaths before the next rules tick.
-        lifeboats.in_set(crate::BattleSet::Cleanup).run_if(in_state(Screen::Battle)).run_if(crate::menu::overlay_closed),
+        lifeboats.in_set(crate::BattleSet::Cleanup).in_set(crate::battle::BattleActive),
     );
 }
 
@@ -137,7 +136,7 @@ fn launch(
     for _ in 0..class.lifeboats {
         let (offset, throttle) = drift(rng);
         let to = Vec3::new(offset.x, 0.0, -offset.y);
-        let heading = if to.length_squared() > 1e-6 { (-to.x).atan2(-to.z) } else { ship.heading };
+        let heading = if to.length_squared() > 1e-6 { crate::geom::heading_of(to) } else { ship.heading };
         let id = crate::spawn_ship(commands, assets, lib, fxl, &boat.name, Side::Player, tf.translation, heading, None);
         commands.entity(id).remove::<PlayerShip>().remove::<crate::boarding::Boardable>().insert((
             Lifeboat { owner: ms.owner.clone() },

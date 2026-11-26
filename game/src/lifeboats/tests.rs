@@ -6,7 +6,7 @@ fn app(mission: &str) -> App {
     app.add_plugins((MinimalPlugins, bevy::asset::AssetPlugin::default()))
         .init_asset::<WorldAsset>()
         .init_resource::<crate::fx::FxLib>()
-        .insert_resource(Library::load(crate::assets_dir()))
+        .insert_resource(crate::testutil::lib())
         .insert_resource(crate::combat::SimRng::new(5))
         .init_resource::<crate::scenario::Difficulty>()
         .insert_resource(crate::campaign::load_id(mission))
@@ -113,7 +113,7 @@ fn boats_sail_straight_at_a_fraction_of_class_speed_and_never_collide_with_ships
     let mut time = Time::<()>::default();
     time.advance_by(std::time::Duration::from_secs_f32(0.1));
     let mut w = App::new();
-    w.insert_resource(time).insert_resource(Library::load(crate::assets_dir())).add_systems(Update, crate::collision::sail);
+    w.insert_resource(time).insert_resource(crate::testutil::lib()).add_systems(Update, crate::collision::sail);
     let health = |w: &App, c: usize| Health::new(&w.world().resource::<Library>().classes[c]);
     let (h1, h2) = (health(&w, cutter), health(&w, boat));
     let a = w.world_mut().spawn((mk(cutter), h1, Transform::from_xyz(0.0, 0.0, 0.0), crate::collision::Drift::default())).id();
@@ -159,7 +159,7 @@ fn pickup_by_nearest_live_non_lifeboat_ship_in_sphere_contact() {
 #[test]
 #[ignore = "needs imported assets"]
 fn preplaced_mission4_boats_are_lifeboats_by_flag_and_mission9_longboat_is_not() {
-    let lib = Library::load(crate::assets_dir());
+    let lib = crate::testutil::lib();
     let flagged = |mission: &str, id: i64| {
         let d = crate::campaign::load_id(mission).data;
         let s = d["ships"].as_array().unwrap().iter().find(|s| s["id"] == id).unwrap().clone();

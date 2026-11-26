@@ -146,6 +146,50 @@ fn click(
     }
 }
 
+/// The answers to "is X hostile to Y" that the battle code gives today, each under its own name. They are NOT one rule and do not
+/// always agree (see `three_factions_show_where_the_two_answers_part`); callers keep the one they always used. MAINTAINER QUESTION:
+/// which of them is the original's?
+pub mod hostility {
+    use crate::campaign::{Mission, MissionBase};
+    use crate::{Ship, Side};
+
+    /// By skirmish side: hostile when the sides differ. Used by gunnery, shells, cloak, crew and the captain's target check.
+    pub fn by_side(a: Side, b: Side) -> bool {
+        a != b
+    }
+
+    /// By the mission script's alliance table (owner names): hostile when the pair is at war; false for one owner and for non-players.
+    pub fn by_script(script: &crate::rules::Script, a: &str, b: &str) -> bool {
+        script.hostile(a, b)
+    }
+
+    /// Two objects (owner, side): by the mission's table when both have owners in a mission, else by side when both have one.
+    pub fn pair(mission: Option<&Mission>, a: (Option<&str>, Option<Side>), b: (Option<&str>, Option<Side>)) -> bool {
+        if let (Some(m), Some(x), Some(y)) = (mission, a.0, b.0) {
+            return by_script(&m.script, x, y);
+        }
+        matches!((a.1, b.1), (Some(x), Some(y)) if by_side(x, y))
+    }
+
+    /// A mission base is hostile when the script says so of its owner and the player; in a skirmish when its side is not the player's.
+    pub fn base(mission: Option<&Mission>, base: Option<&MissionBase>, side: Option<&crate::combat::BaseSide>) -> bool {
+        let Some(base) = base else { return false };
+        match mission {
+            Some(m) => by_script(&m.script, m.script.player(), &base.owner),
+            None => side.is_some_and(|s| s.0 != Side::Player),
+        }
+    }
+
+    /// A dock owner is a friend of `me` (its owner, in a mission) when the script does not call them hostile; without a mission or an
+    /// owner on either side, when the dock's ship (if any) is on `me`'s side.
+    pub fn friendly_dock(script: Option<&crate::rules::Script>, my_owner: Option<&str>, my_side: Side, dock_ship: Option<&Ship>, dock_owner: Option<&str>) -> bool {
+        match (my_owner, script, dock_owner) {
+            (Some(m), Some(sc), Some(o)) => !by_script(sc, m, o),
+            _ => dock_ship.is_none_or(|d| !by_side(d.side, my_side)),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -157,5 +201,22 @@ mod tests {
         assert_eq!(press(false, false, true), Press::Accept);
         assert_eq!(press(false, true, true), Press::Accept);
         assert_eq!(press(false, false, false), Press::Offer);
+    }
+
+    /// Three factions, A and B each at war with the player and with each other: by script they are hostile to each other, by side
+    /// both sit on the enemy side and are "the same". The skirmish-side answer (gunnery, shells, cloak, crew) and the script answer
+    /// (mission AI, boarding, docking) disagree here today. MAINTAINER QUESTION: which does the original use for three-way maps?
+    #[test]
+    fn three_factions_show_where_the_two_answers_part() {
+        let data = serde_json::json!({"rules": [], "players": ["Hero", "A", "B"], "alliances": []});
+        let sc = crate::rules::Script::new(&data, serde_json::Value::Null);
+        // Mission ships are sorted into two sides: the player's group and everyone hostile to it.
+        let side = |owner: &str| if hostility::by_script(&sc, owner, "Hero") { Side::Enemy } else { Side::Player };
+        for (x, y) in [("A", "Hero"), ("B", "Hero"), ("Hero", "A")] {
+            assert!(hostility::by_script(&sc, x, y) && hostility::by_side(side(x), side(y)), "{x} vs {y}: both answers say hostile");
+        }
+        assert!(hostility::by_script(&sc, "A", "B") && hostility::by_script(&sc, "B", "A"));
+        assert!(!hostility::by_side(side("A"), side("B")), "by side, A and B are on the same (enemy) side");
+        assert!(!hostility::by_script(&sc, "A", "A"));
     }
 }
