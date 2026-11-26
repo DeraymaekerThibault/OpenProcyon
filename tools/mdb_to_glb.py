@@ -31,27 +31,30 @@ def to_gltf(p):
     return (p[0], p[2], -p[1])
 
 
+def model_frame(nodes):
+    """{node id: place in the model frame}: each node at its parent's place plus its own position minus its pivot (the original's
+    rest pose; docs/re/scenery-placement.md "Ship models"). Rotations are ignored (no retail ship layer but the Procyon Refueling
+    Station's is rotated). PROVISIONAL: the root node is the origin; its own pivot's effect on the drawn model is not read."""
+    by_id = {n.id: n for n in nodes}
+
+    def place(n, depth=0):
+        if n.parent not in by_id or depth > 16:
+            return (0.0, 0.0, 0.0)
+        p = place(by_id[n.parent], depth + 1)
+        return tuple(a + b - c for a, b, c in zip(p, n.pos, n.pivot, strict=True))
+
+    return {i: place(n) for i, n in by_id.items()}
+
+
 def hardpoints(root, scene):
-    """Nodes in MDB-vertex frame: translation-only parent chain, minus the common layer offset."""
+    """The scene's nodes other than its mesh layers, each with its place in the model frame (`model_frame`)."""
     try:
         path = ci_file(Path(root) / "BD_MeshScenes", f"{scene}.msb")
     except FileNotFoundError:
         return []
-    nodes = {n.id: n for n in parse_msb(path.read_bytes())}
-
-    def world(n, depth=0):
-        if n.parent not in nodes or depth > 16:
-            return n.pos
-        w = world(nodes[n.parent], depth + 1)
-        return tuple(a + b for a, b in zip(w, n.pos, strict=True))
-
-    layer = [world(n) for n in nodes.values() if n.kind == "DamageSection"]
-    off = layer[0] if layer else (0, 0, 0)
-    return [
-        (n, tuple(a - b for a, b in zip(world(n), off, strict=True)))
-        for n in nodes.values()
-        if n.kind != "DamageSection"
-    ]
+    nodes = parse_msb(path.read_bytes())
+    at = model_frame(nodes)
+    return [(n, at[n.id]) for n in nodes if n.kind != "DamageSection"]
 
 
 def scene_layers(root, scene):
@@ -114,7 +117,8 @@ def scene_files(root, scene):
 
 
 def convert(root, scene, model=0, files=None, skin=None, offsets=False):
-    """offsets: place each layer at its MSB node's position minus pivot (scenery: islands and bases), as a node translation.
+    """offsets: place each layer at its MSB node's position minus pivot, as a node translation (the original's rest pose: ships,
+    their debris, islands and bases; without it a layer stays in its MDB vertex frame).
     files: explicit MDB paths (e.g. one gun layer); default is every <scene>_Layer*.mdb plus MSB hardpoints.
     model: the detail level (index into the MDB's models), or a function of the layer's file stem.
     skin: the MSB scene holding the skeleton and clip of a skinned animal mesh (tools/skin.py)."""
@@ -259,8 +263,12 @@ def convert(root, scene, model=0, files=None, skin=None, offsets=False):
         meshes.append({"name": f.stem, "primitives": prims})
         mesh_node = len(nodes)
         nodes.append({"name": f.stem, "mesh": len(meshes) - 1})
-        if any(shifts.get(f.stem.lower(), ())):
-            nodes[-1]["translation"] = list(to_gltf(shifts[f.stem.lower()]))
+        # A destroyed section's "<A>Damage_<B>" mesh replaces "<A>_<B>" on the same scene node, so it takes that node's place.
+        shift = shifts.get(f.stem.lower()) or shifts.get(
+            f.stem.lower().replace("damage_", "_", 1)
+        )
+        if any(shift or ()):
+            nodes[-1]["translation"] = list(to_gltf(shift))
         skinned = skin and build_skin(
             root, skin, raw, len(m.vertices), add_view, accessors, nodes
         )
@@ -332,6 +340,11 @@ if __name__ == "__main__":
     ap.add_argument("scene")
     ap.add_argument("out")
     ap.add_argument("--model", type=int, default=0)
+    ap.add_argument(
+        "--offsets",
+        action="store_true",
+        help="place layers at position minus pivot (ships)",
+    )
     a = ap.parse_args()
-    Path(a.out).write_bytes(convert(a.root, a.scene, a.model))
+    Path(a.out).write_bytes(convert(a.root, a.scene, a.model, offsets=a.offsets))
     print(f"wrote {a.out}")
