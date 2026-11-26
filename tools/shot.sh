@@ -39,7 +39,7 @@ else
     game="${CARGO_TARGET_DIR:-$root/game/target}/fast/openprocyon"
 fi
 start=$SECONDS
-# The run mode (PROCYON_RUN: window, software, gpu-hidden, auto) and its display and graphics settings are decided in one place
+# The run mode (PROCYON_RUN: window, software, auto) and its display and graphics settings are decided in one place
 # for every tool (tools/rungame.py), which also prints the `run:` line (mode, adapter, frames). PROCYON_JOBS: games running at once.
 (cd "$root" && exec python3 -m tools.rungame run -- "$game" --shot "$out" "$@"); code=$?
 elapsed=$((SECONDS - start))

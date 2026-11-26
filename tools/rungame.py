@@ -5,7 +5,6 @@ them by smokes.sh, visdiff.py and check.sh: the one place that decides how a gam
 The run mode comes from PROCYON_RUN:
   window      the game in a window on the desktop session (needs DISPLAY on Linux: X11 or XWayland)
   software    a virtual X server (Xvfb) and Mesa's software Vulkan (lavapipe); no GPU, CPU-bound
-  gpu-hidden  as window, and PROCYON_HIDDEN=1 asks the game to keep its window hidden
   auto        (or unset) window when there is a display or on Windows, else software
 On Linux the game never talks to Wayland directly (WAYLAND_DISPLAY is cleared): some Wayland sessions render it black.
 Every run prints one `run:` line with the mode, the graphics adapter and backend the game got, frames and wall time."""
@@ -25,7 +24,7 @@ from tools import gamelog
 from tools.import_assets import find_assets
 from tools.paths import REPO
 
-MODES = ("window", "software", "gpu-hidden")
+MODES = ("window", "software")
 # Bevy logs the wgpu adapter it got as `AdapterInfo { name: "...", ..., device_type: Cpu, ..., backend: Vulkan, ... }`, and the game
 # logs `run end: frame N` when it stops (exit.rs).
 ADAPTER = re.compile(
@@ -100,8 +99,6 @@ def launch_plan(
         raise ValueError(
             f"PROCYON_RUN={mode} needs an X11 display (DISPLAY; XWayland on a Wayland desktop); use software without one"
         )
-    if mode == "gpu-hidden":
-        env["PROCYON_HIDDEN"] = "1"
     return Launch(mode, [], env)
 
 

@@ -133,8 +133,8 @@ Shared sight smoke: `tools/shot.sh local/sight.png --script sight --allies Ship_
 
 Screenshot tests need a display, or Xvfb + Mesa for the headless helper. Outputs belong in ignored `local/`.
 Run modes: `shot.sh`, `battle_check.py` and `autoplay.py` (and through them `smokes.sh`, `visdiff.py`, `check.sh`) launch the game through
-`tools/rungame.py`, which reads `PROCYON_RUN`: `window` (the desktop session's GPU), `software` (Xvfb + Mesa lavapipe; CPU-bound),
-`gpu-hidden` (`window` plus `PROCYON_HIDDEN=1` for the game) or `auto`/unset (`window` with `DISPLAY`/`WAYLAND_DISPLAY` or on Windows, else
+`tools/rungame.py`, which reads `PROCYON_RUN`: `window` (the desktop session's GPU), `software` (Xvfb + Mesa lavapipe; CPU-bound)
+or `auto`/unset (`window` with `DISPLAY`/`WAYLAND_DISPLAY` or on Windows, else
 `software`); anything else is an error. On Linux `WAYLAND_DISPLAY` is cleared for the game in every mode (X11/XWayland: some Wayland sessions
 render black), so `window` needs `DISPLAY`. Each run prints one line, e.g. `run: mode=window adapter "..." (DiscreteGpu, Vulkan) 3120 frames
 in 41.0 s (76.1 fps)`, from Bevy's `AdapterInfo` log line and the game's `run end: frame N`; check it before comparing timings. With several

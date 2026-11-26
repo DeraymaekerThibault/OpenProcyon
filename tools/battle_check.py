@@ -7,7 +7,7 @@ Each scenario runs the game (Cargo profile `fast` unless --profile) with PROCYON
 one `battle report {json}` line when one side is gone or the time is up. The expectations below are whole-battle invariants (the computer engages, nobody grinds on
 an island, nothing panics): they catch regressions where one feature quietly changes another (armed volcanoes taken for bases,
 map-script tags hiding the captain's target). Runs take ~10-40 s each; logs go to local/battle_check/<name>.log.
-Needs imported assets; the run mode (window, software, gpu-hidden) comes from PROCYON_RUN (tools/rungame.py)."""
+Needs imported assets; the run mode (window or software) comes from PROCYON_RUN (tools/rungame.py)."""
 
 import argparse
 import json

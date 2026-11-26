@@ -66,7 +66,7 @@ files to `content/`, or anything that publishes (pushing tags, releases).
   in one run. Pictures are 1280x720 on every backend and the run ends right after the last one (about 8 s for frame 300; `--late-frame N`
   adds a `_late` picture). The script prints what it saved and fails on a missing or black picture; in a fresh worktree it uses the main
   checkout's `assets/`. How every tool launches the game (`tools/rungame.py`) is `PROCYON_RUN`: `window` (desktop, GPU), `software` (Xvfb +
-  Mesa software Vulkan, slow), `gpu-hidden` (window + `PROCYON_HIDDEN=1`); unset/`auto` = `window` with a display, else `software`. Linux runs
+  Mesa software Vulkan, slow); unset/`auto` = `window` with a display, else `software`. Linux runs
   always use X11/XWayland. Each run prints a `run:` line (mode, adapter, backend, frames, fps): never compare timings across modes.
 
 ## Workflow

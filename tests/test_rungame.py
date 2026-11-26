@@ -36,13 +36,12 @@ class RunMode(unittest.TestCase):
             "software",
         )
         self.assertEqual(rungame.run_mode({"PROCYON_RUN": "window"}, "linux"), "window")
-        self.assertEqual(
-            rungame.run_mode({"PROCYON_RUN": "gpu-hidden"}, "linux"), "gpu-hidden"
-        )
 
     def test_an_unknown_mode_is_an_error(self):
         with self.assertRaisesRegex(ValueError, "not a run mode"):
             rungame.run_mode({"PROCYON_RUN": "gpu"}, "linux")
+        with self.assertRaisesRegex(ValueError, "not a run mode"):
+            rungame.run_mode({"PROCYON_RUN": "gpu-hidden"}, "linux")
 
 
 class LaunchPlan(unittest.TestCase):
@@ -56,16 +55,11 @@ class LaunchPlan(unittest.TestCase):
     def test_window_on_windows_changes_nothing(self):
         self.assertEqual(plan({}, "win32"), rungame.Launch("window", [], {}))
 
-    def test_gpu_hidden_is_window_plus_the_hidden_flag(self):
-        p = plan({"PROCYON_RUN": "gpu-hidden", "DISPLAY": ":0"})
-        self.assertEqual(p.prefix, [])
-        self.assertEqual(p.env, {"WAYLAND_DISPLAY": "", "PROCYON_HIDDEN": "1"})
-
     def test_a_window_needs_an_x11_display(self):
         with self.assertRaisesRegex(ValueError, "DISPLAY"):
             plan({"WAYLAND_DISPLAY": "wayland-0"})
         with self.assertRaisesRegex(ValueError, "DISPLAY"):
-            plan({"PROCYON_RUN": "gpu-hidden"})
+            plan({"PROCYON_RUN": "window"})
 
     def test_software_is_xvfb_and_mesa_vulkan(self):
         p = plan({"PROCYON_RUN": "software", "DISPLAY": ":0"})
