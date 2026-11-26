@@ -1,7 +1,14 @@
 import json
 import unittest
 
-from tools.battle_check import SCENARIOS, evaluate, outcome, replay_args, same_run
+from tools.battle_check import (
+    FIRE_BY_FOR,
+    SCENARIOS,
+    evaluate,
+    outcome,
+    replay_args,
+    same_run,
+)
 
 
 def report(
@@ -171,6 +178,12 @@ class LobbyExpectations(unittest.TestCase):
         r = lobby_report()
         r["sides"]["side1"]["first_burst"] = None
         self.assertEqual(evaluate(r, {"fire"}), ["side1 never fired"])
+
+    def test_border_dispute_full_alone_has_the_longer_fire_limit(self):
+        late = lobby_report(foe_first=300.0)
+        self.assertEqual(evaluate(late, {"fire"}), ["side1 first fired at 300 s"])
+        self.assertEqual(evaluate(late, {"fire"}, FIRE_BY_FOR["border_dispute_full"]), [])
+        self.assertEqual(list(FIRE_BY_FOR), ["border_dispute_full"])
 
     def test_a_fleet_that_leaves_its_budget_unspent_fails(self):
         # 1000 points and ten ships, and the computer bought a few cheap hulls.

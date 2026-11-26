@@ -51,6 +51,9 @@ MIXED = ["--ship", "Ship_Navy_Frigate", "--allies", "Ship_Navy_Cutter,Ship_Navy_
 SPEND = 0.6
 # Seconds in which every side should have fired. PROVISIONAL: not measured on the retail maps; tighten after the first real runs.
 FIRE_BY = 240
+# PROVISIONAL: a longer limit for one scenario. side5 heads for the nearest hostile base at about 2400 units, at 3-9 units/s; it first
+# fires at 279 s (seed 1). The old 240 s dates from before the one captain.
+FIRE_BY_FOR = {"border_dispute_full": 360}
 
 
 class Scenario(NamedTuple):
@@ -162,7 +165,7 @@ def same_run(
     return False, f"{differ} ({', '.join(keys)})"
 
 
-def evaluate(report, expect):
+def evaluate(report, expect, fire_by=FIRE_BY):
     """The failed expectations of one battle report (empty when it passes)."""
     fails = []
     sides = report["sides"]
@@ -181,7 +184,7 @@ def evaluate(report, expect):
             first = line.get("first_burst")
             if first is None:
                 fails.append(f"{name} never fired")
-            elif first > FIRE_BY:
+            elif first > fire_by:
                 fails.append(f"{name} first fired at {first:.0f} s")
             elif not any(
                 s.get("bursts")
@@ -221,7 +224,7 @@ def evaluate(report, expect):
     return fails
 
 
-def outcome(log, expect):
+def outcome(log, expect, fire_by=FIRE_BY):
     """(passed, summary) for one run's log text."""
     if "panicked at" in log:
         return False, "PANIC"
@@ -229,7 +232,7 @@ def outcome(log, expect):
     if not m:
         return False, "no battle report (crash or wall-clock timeout)"
     report = json.loads(m[1])
-    fails = evaluate(report, expect)
+    fails = evaluate(report, expect, fire_by)
     sides = " ".join(
         f"{k}: {v['bursts']} bursts {v['hits']} hits"
         for k, v in report["sides"].items()
@@ -308,7 +311,7 @@ def main():
                 {"PROCYON_COMMANDS": str(log.with_suffix(".commands.jsonl"))},
             )
         text = play(name, game_args, seconds, log, extra, env_extra)
-        passed, summary = outcome(text, expect)
+        passed, summary = outcome(text, expect, FIRE_BY_FOR.get(name, FIRE_BY))
         if passed and args.replay:
             passed, summary = replay(name, game_args, seconds, text, log)
         if passed and args.twice:
