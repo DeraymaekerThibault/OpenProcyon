@@ -25,6 +25,11 @@ class Node:
     rot: tuple  # (yaw, ?, ?)
     kind: str = ""  # e.g. GunPlacement, DamageSection, FlagAttachmentPoint
     label: str = ""  # e.g. Port_Medmount1, bow_wood
+    pivot: tuple = (
+        0.0,
+        0.0,
+        0.0,
+    )  # the node sits at pos minus pivot in its parent's frame (pattern scan: always 0)
 
 
 def _u32(d, o):
@@ -56,6 +61,7 @@ def parse(d, source="MSB scene"):
             tuple(e["pos"]),
             tuple(e["rot"]),
             *(e["attributes"][0] if e["attributes"] else ("", "")),
+            tuple(e["pivot"]),
         )
         for e in scene["nodes"] + scene["meshes"] + scene["bones"]
     ]

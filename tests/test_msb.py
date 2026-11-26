@@ -92,6 +92,48 @@ class SceneLayers(unittest.TestCase):
         )
 
 
+class ModelFrame(unittest.TestCase):
+    def test_a_layer_sits_at_its_position_minus_its_pivot_and_carries_its_children(
+        self,
+    ):
+        # The Navy Tug's numbers: every hull layer has pivot z -4.61, so the hull and the gun on it rise 4.61; the tow point
+        # under the root keeps its own position.
+        from tools.mdb_to_glb import model_frame
+        from tools.msb import Node
+
+        nodes = [
+            Node(0, -1, "Navy Tug MASTER NULL", (0, 0, 0), (0, 0, 0)),
+            Node(
+                17,
+                0,
+                "NavyTugShip_Layer1",
+                (0.06, 0, 0),
+                (0, 0, 0),
+                "DamageSection",
+                "bow",
+                (0, 0.11, -4.61),
+            ),
+            Node(
+                13,
+                17,
+                "Forward_Medmount",
+                (-0.06, 4.21, -1.64),
+                (0, 0, 0),
+                "GunPlacement",
+            ),
+            Node(1, 0, "front_tow", (0, 4.35, 1.45), (0, 0, 0), "ToweePoint"),
+        ]
+        at = model_frame(nodes)
+        for i, want in (
+            (0, (0, 0, 0)),
+            (17, (0.06, -0.11, 4.61)),
+            (13, (0, 4.10, 2.97)),
+            (1, (0, 4.35, 1.45)),
+        ):
+            for a, b in zip(at[i], want, strict=True):
+                self.assertAlmostEqual(a, b, places=6, msg=i)
+
+
 @unittest.skipUnless(os.environ.get("PROCYON_GAME_ROOT"), "needs PROCYON_GAME_ROOT")
 class LocalMsbTests(unittest.TestCase):
     def test_cutter_hardpoints(self):
@@ -115,6 +157,20 @@ class LocalMsbTests(unittest.TestCase):
         self.assertEqual(sum(n.kind == "GunPlacement" for n, _ in hp), 10)
         mid = next(p for n, p in hp if n.label == "Port_Medmount1")
         self.assertLess(mid[0], 0)  # port is -x
+
+    def test_tug_hull_points_rise_with_its_layers_pivot(self):
+        from tools.mdb_to_glb import hardpoints
+
+        hp = {
+            n.name: p
+            for n, p in hardpoints(os.environ["PROCYON_GAME_ROOT"], "NavyTugShip")
+        }
+        self.assertAlmostEqual(
+            hp["Forward_Medmount"][2], -1.64 + 4.61, places=2
+        )  # on Layer1: moves with the hull
+        self.assertAlmostEqual(
+            hp["front_tow"][2], 1.45, places=2
+        )  # under the root: its own position
 
 
 if __name__ == "__main__":

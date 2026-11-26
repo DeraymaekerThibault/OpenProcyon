@@ -68,7 +68,7 @@ SURFACES = {
 
 def debris_record(root, scene, outdir):
     """A section's `debrisMeshScene`: the piece that breaks off when the section is destroyed. Its mesh scene holds one
-    `...Damage_LayerN` node in the hull's model space; that node's position is the piece's pivot. Writes
+    `...Damage_LayerN` node in the hull's model frame; that node's position is the piece's pivot. Writes
     models/debris/<scene>.glb and returns {model, pivot}, or None when the scene or its mesh is missing."""
     if not scene:
         return None
@@ -86,8 +86,9 @@ def debris_record(root, scene, outdir):
     glb = f"{scene}.glb"
     if not model_path(outdir, glb).exists():
         model_path(outdir, glb, mkdir=True).write_bytes(
-            convert(root, scene, files=[mdb])
+            convert(root, scene, files=[mdb], offsets=True)
         )
+    # The piece's mesh pivot lands on the layer's position (position minus pivot, plus the pivot): it turns about that point.
     return dict(model=glb, pivot=list(layer.pos))
 
 
@@ -393,6 +394,13 @@ def export(root, ship, outdir):
         return out
 
     sections = []
+    # A ship's hit meshes in its model frame, like its model and hardpoints: each layer at its position minus its pivot. Bases and
+    # islands keep their meshes' own frame (their placement: docs/re/scenery-placement.md).
+    shifts = (
+        {}
+        if ship.startswith(("Base_", "Island_", "Asteroid_"))
+        else layer_offsets(root, scene)
+    )
     for mesh, label, assoc in associations(nodes, "DamageSection"):
         a = kv(assoc)
         try:
@@ -406,7 +414,9 @@ def export(root, ship, outdir):
         # The triangles are the detail level retail collides with; the box also covers the full-detail model (it feeds aim points,
         # ring and radius, which were measured on the visible hull).
         m = models[min(collision_lods(root)(mesh), len(models) - 1)]
+        d = shifts.get(mesh.lower(), (0.0, 0.0, 0.0))
         xs = list(zip(*[v.pos for v in models[0].vertices + m.vertices], strict=True))
+        xs = [[c + d[i] for c in axis] for i, axis in enumerate(xs)]
         sections.append(
             dict(
                 layer=mesh,
@@ -432,10 +442,10 @@ def export(root, ship, outdir):
                 debris=debris_record(root, a.get("debrisMeshScene"), outdir),
                 aabb=[[min(c) for c in xs], [max(c) for c in xs]],
                 tris=[
-                    round(c, 3)
+                    round(c + o, 3)
                     for a, b, c3, _ in m.faces
                     for i in (a, b, c3)
-                    for c in m.vertices[i].pos
+                    for c, o in zip(m.vertices[i].pos, d, strict=True)
                 ],
             )
         )
