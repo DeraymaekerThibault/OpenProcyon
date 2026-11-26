@@ -374,8 +374,14 @@ Static analysis of the original's captain AI, written as rules. Nothing in it de
   captain takes the nearer of the nearest hostile ship in its scan range and the nearest hostile base (at any range in skirmish, within
   scan range in a campaign). Failing both it takes the target of a ship of its own fleet, else of an allied ship. Other stances only
   answer ships that target them. The 6 s re-choice applies only while the ship's "AI can override" flag is set (nearly all ships in
-  the retail saved games have it). Remake: one captain (`ship::ai`) runs skirmish and mission ships; the flag counts as set unless the ship
-  has an explicit order (a fleet order or a script's attack order), and stances other than Dummy and Persistent are not read (PROVISIONAL).
+  the retail saved games have it). Remake (PROVISIONAL, read, not observed): one captain (`ship::ai`) runs skirmish and mission ships. The
+  flag belongs to the target: the captain's own pick can be overridden, a target an order names (Attack, help-attack, Board, Grapple,
+  Dock, Tow, the script's attack, ram, dock, tow, board and grapple actions, a chosen repair dock) cannot and is kept until lost.
+  Aggressive takes the nearest hostile ship or dragon in scan range, else a base as above, else a friend's target, else explores, and
+  with no working gun rams; Persistent, Defensive and Neutral only answer a hostile in scan range that targets them, Defensive and
+  Neutral stop with no target unless on a course or in formation, and a Dummy does nothing. A Persistent ship on a path fires from it
+  and holds position when it ends. A player's Attack or "fire when possible" makes a ship Aggressive. Things of no player are allied
+  with every player.
 - **Which attack:** the primary gun bank is the one whose live guns cost the most victory points. Its guns' directions and arc edges
   (counted counter-clockwise from the bow in quadrants; an arc over 180° covers all four) decide: only forward quadrants → **frontal**;
   both rear quadrants → **rear**; otherwise **broadside** on the side it covers (port if only port quadrants). No live gun → **ram**
