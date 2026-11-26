@@ -3,11 +3,11 @@
 //! only within 'Max Boarding Info Visible World Distance' of the camera. PROVISIONAL: its screen position (above the target) and the colours.
 use bevy::prelude::*;
 
+use crate::Ship;
 use crate::boarding::{Boardable, Boarding, friendly_share};
 use crate::campaign::Mission;
 use crate::panels::hud_scale;
 use crate::sprites::HudData;
-use crate::Ship;
 
 const BAR_VISIBLE: f32 = 250.0; // PROVISIONAL: eyeballed against footage
 const BAR_SIZE: Vec2 = Vec2::new(171.0, 40.0);

@@ -1,9 +1,11 @@
-//! Mission AI: alliances, targets, movement, border leashes and path following.
+//! Mission AI, the rules' scripted layer over the computer captain (`ship::ai`): sides, hold fire, attack orders, tows, border
+//! leashes, follow orders and path following.
 
 use super::*;
 use crate::EngineOrder;
 
-/// Alliances -> sides, hold fire, target choice and movement for every unit but the player's; towing.
+/// Owners -> sides, hold fire, the script's attack orders and scripted movement for every unit but the player's; towing. Runs after
+/// the captain (`ship::ai`), which picks targets and attacks.
 pub(super) fn mission_ai(
     mission: Option<Res<Mission>>,
     lib: Res<Library>,
@@ -20,19 +22,11 @@ pub(super) fn mission_ai(
     )>,
     busy: Query<(), crate::ship::CaptainBusy>,
     boats: Query<(), With<crate::lifeboats::Lifeboat>>,
-    sensors: Res<crate::environment::Sensors>,
     held: Query<(), With<crate::ship::HoldPosition>>,
-    holes: Query<(&Transform, &crate::blackhole::Pull), Without<Ship>>,
-    storms: (Option<Res<crate::nebula::Storms>>, Option<Res<crate::nebula::StormShift>>),
-    (guns, time, mut breakoffs): (Query<&crate::combat::GunStates>, Res<Time>, Local<std::collections::HashMap<Entity, crate::ship::attack::Breakoff>>),
-    (spawn_order, mut start, table): (Query<&crate::scenario::SpawnIndex>, crate::scenario::BattleStart, crate::alliance::Hostility),
+    (spawn_order, table, captains): (Query<&crate::scenario::SpawnIndex>, crate::alliance::Hostility, Res<crate::ship::CaptainTargets>),
 ) {
-    if start.is_new() {
-        breakoffs.clear();
-    }
     let key = |e: Entity| crate::scenario::SpawnIndex::of(&spawn_order, e);
     let Some(mission) = mission else { return };
-    let holes = crate::ship::hole_list(&holes, storms.0.as_deref(), storms.1.as_deref());
     let sc = &mission.script;
     // Targets for orders and hostility: ships, then rocks (rocks only answer attack orders, never hostility); tagged with TWT groups.
     let unit = |e, id, name: &str, owner: &str, pos, alive| Unit { name: name.into(), owner: owner.into(), alive, visible: alive, ..Unit::new(e, id, pos) };
@@ -42,8 +36,6 @@ pub(super) fn mission_ai(
     let n_ships = snap.len();
     snap.extend(rocks.iter().map(|(e, tf, a)| unit(e, a.id, &a.kind, &a.group, tf.translation, a.hp > 0.0)));
     sc.tag(&mut snap);
-    // Where each ship's damage sections are, for the attack's aim point (`ship::attack::aim`).
-    let hulls: std::collections::HashMap<Entity, (Transform, usize, Vec<f32>)> = ships.iter().map(|s| (s.0, (*s.2, s.1.class, s.3.sections.clone()))).collect();
     // Where each ship is, which way it points and how fast it goes: what `OP Follow Group` keeps station on.
     let kin: std::collections::HashMap<Entity, (Vec3, f32, f32, usize)> = ships.iter().map(|s| (s.0, (s.2.translation, s.1.heading, s.1.speed, s.1.class))).collect();
     // Followers given the same station on the same group line up one behind the other instead of fighting for one slot: each ship's
@@ -76,7 +68,7 @@ pub(super) fn mission_ai(
             }
             ship.halt();
             ship.throttle = None;
-            ms.target = None;
+            ms.ordered = None;
             continue;
         }
         if sc.tows().iter().any(|link| link.1 == e) {
@@ -110,7 +102,10 @@ pub(super) fn mission_ai(
         if primary || h.destroyed || busy.contains(e) || held.contains(e) || pilot.is_some_and(crate::ship::FleetPilot::is_steering) {
             continue;
         }
-        ship.throttle = None;
+        // The captain's attack throttle stands between its thinks.
+        if captains.of(e).is_none() {
+            ship.throttle = None;
+        }
         // loops: restart an exhausted path
         if ship.waypoints.is_empty()
             && let Some(p) = ms.looping.clone()
@@ -118,29 +113,16 @@ pub(super) fn mission_ai(
             ship.waypoints = p;
             ship.order = EngineOrder::Full;
         }
-        let range = lib.classes[ship.class].engage * 1.3; // PROVISIONAL: the 1.3 factor on engage range is a guess
         let partner = |x: Entity| sc.tows().iter().any(|t| (t.0 == e && t.1 == x) || (t.1 == e && t.0 == x));
-        let near = |pool: &[Unit], pred: &dyn Fn(&Unit) -> bool, acquire: bool| {
-            pool.iter()
-                .filter(|s| s.e != e && s.alive && pred(s) && !partner(s.e) && (!acquire || sensors.in_sight(e, s.e, Some(&mission))))
-                .nearest_to(tf.translation, |a| a.pos)
-                .map(|s| (s.e, s.pos))
+        let near = |pool: &[Unit], pred: &dyn Fn(&Unit) -> bool| {
+            pool.iter().filter(|s| s.e != e && s.alive && pred(s) && !partner(s.e)).nearest_to(tf.translation, |a| a.pos).map(|s| s.e)
         };
-        // 'GroupA to attack GroupB': the nearest ship of the target, else the nearest of its rocks ('attack Asteroid Belt').
-        let explicit = pilot.and_then(|p| p.target).and_then(|e| snap.iter().find(|u| u.e == e && u.alive).map(|u| (u.e, u.pos)));
-        let ordered = explicit.or_else(|| {
-            near(&snap[..n_ships], &|s| ms.attack.iter().any(|g| matches(s, g)), false).or_else(|| near(&snap[n_ships..], &|s| ms.attack.iter().any(|g| matches(s, g)), false))
-        });
-        let hostile = near(&snap[..n_ships], &|s| table.hostile_owners(&ms.owner, &s.owner), true);
-        let want = if hold {
-            None
-        } else if let Some(o) = ordered {
-            Some(o.0)
-        } else {
-            hostile.filter(|(_, p)| p.distance(tf.translation) < range).map(|x| x.0)
-        };
-        if ms.target != want {
-            ms.target = want;
+        // 'GroupA to attack GroupB': the order names the nearest ship of the target, else the nearest of its rocks ('attack Asteroid
+        // Belt'); the captain (ship::ai) attacks it.
+        let attack = |s: &Unit| ms.attack.iter().any(|g| matches(s, g));
+        let ordered = near(&snap[..n_ships], &attack).or_else(|| near(&snap[n_ships..], &attack));
+        if ms.ordered != ordered {
+            ms.ordered = ordered;
         }
         // Not retail: a standing `OP Follow Group` order. The ship keeps its station beside, ahead of or astern of a ship of the group
         // (the one it first chose, until that one is gone) as a fleet's follower holds its formation slot (`ship::follow_speed`); it still
@@ -149,8 +131,7 @@ pub(super) fn mission_ai(
         if !ms.human
             && let Some(mut order) = ms.follow.clone()
         {
-            let leader =
-                order.leader.filter(|l| snap[..n_ships].iter().any(|u| u.e == *l && u.alive)).or_else(|| near(&snap[..n_ships], &|s| matches(s, &order.group), false).map(|x| x.0));
+            let leader = order.leader.filter(|l| snap[..n_ships].iter().any(|u| u.e == *l && u.alive)).or_else(|| near(&snap[..n_ships], &|s| matches(s, &order.group)));
             if order.leader != leader {
                 order.leader = leader;
                 ms.follow = Some(order.clone());
@@ -175,46 +156,11 @@ pub(super) fn mission_ai(
             }
             continue;
         }
-        // Movement: an attack order or an aggressive stance closes on the foe with the original's attack (`ship::attack`, as skirmish).
-        // A human-captained ship (Captain_Human) only fires: it moves on the human fleet's orders (ship.rs fleet_follow).
-        let chase = if ms.human || (ms.stance == Stance::Persistent && !ship.waypoints.is_empty()) {
-            None // Persistent scripted routes take precedence over combat steering (Mission 3's swoop/retreat).
-        } else {
-            ordered.or(if ms.stance == Stance::Aggressive { hostile } else { None })
-        };
         if ms.human {
-            continue;
+            continue; // a human-captained ship (Captain_Human) moves on the human fleet's orders (ship.rs fleet_follow)
         }
-        if let (Some((foe, fp)), false) = (chase, ms.stance == Stance::Dummy) {
-            let (goal, order, throttle) = if ms.ram && ordered.is_some() {
-                let d = fp - tf.translation;
-                (crate::geom::heading_of(d), EngineOrder::Emergency, crate::ship::attack::throttle(crate::ship::attack::Routine::Ram, key(e), tf.translation, ship.heading, fp))
-            } else if let Some(away) = crate::ship::flee(&holes, tf.translation) {
-                (away, EngineOrder::Emergency, None)
-            } else {
-                // PROVISIONAL: the target's radius is left out of the gap (rocks and ships alike), and the course is steered as a heading.
-                let class = &lib.classes[ship.class];
-                match crate::ship::attack::plan(&lib, class, h, guns.get(e).ok()) {
-                    Some((routine, range)) => {
-                        let gap = (fp - tf.translation).with_y(0.0).length() - class.radius;
-                        let at = match hulls.get(&foe) {
-                            Some((t, c, hp)) if routine != crate::ship::attack::Routine::Ram => crate::ship::attack::aim(&lib.classes[*c].sections, hp, t, tf.translation, false),
-                            _ => fp, // Ram, or a rock
-                        };
-                        let course = crate::ship::attack::course(routine, tf.translation, ship.heading, at, gap, range[0], time.elapsed_secs(), breakoffs.entry(e).or_default());
-                        let d = course[0] - tf.translation;
-                        (crate::geom::heading_of(d), EngineOrder::Emergency, crate::ship::attack::throttle(routine, key(e), tf.translation, ship.heading, course[0]))
-                    }
-                    None => (ship.heading, EngineOrder::Stop, None),
-                }
-            };
-            ms.stop_at_end = true;
-            // Land in the way is left to the slow-and-steer near land (`collision::sail`); retail captains never pre-route round islands.
-            ship.waypoints.clear();
-            ship.goal = Some(goal);
-            ship.order = order;
-            ship.throttle = throttle;
-        } else if ms.stop_at_end && ms.looping.is_none() {
+        // A ship its captain sends after a target is not at a path end.
+        if ms.stop_at_end && ms.looping.is_none() && captains.of(e).is_none() {
             // Retail path end (docs/re/movement.md): throttle holds the speed fraction while turned off the point, else full; the last point
             // of the path counts as reached inside 2 x the ship's radius, then the throttle is 0.
             // PROVISIONAL: `class.radius` stands in for the original's radius field. A finished chase (remake AI) likewise waits for orders.

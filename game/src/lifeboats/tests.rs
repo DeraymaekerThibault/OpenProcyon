@@ -28,7 +28,7 @@ fn ship(app: &mut App, class: &str, owner: &str, at: Vec3, flag: bool) -> Entity
         invuln: 0.0,
         visible: true,
         stance: crate::rules::Stance::Neutral,
-        target: None,
+        ordered: None,
         attack: vec![],
         flag: String::new(),
         banner: String::new(),

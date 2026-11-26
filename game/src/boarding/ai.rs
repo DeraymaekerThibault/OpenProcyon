@@ -46,12 +46,9 @@ pub(super) fn ai_boarding(
         if ms.is_some_and(|m| m.stance == crate::rules::Stance::Dummy || m.hold_fire) || pilot.is_some_and(|p| p.hold_fire) {
             continue;
         }
-        // Mission ships: the rules' target. Others: an explicit fleet order, else their captain's target (ship::CaptainTargets),
-        // else (skirmish enemies) the player's ship.
-        let target = match ms {
-            Some(m) => m.target,
-            None => pilot.and_then(|p| p.target).or_else(|| captains.as_deref().and_then(|c| c.of(e))).or_else(|| me.filter(|_| !boarders.table().with_human(ship.side))),
-        };
+        // An explicit fleet order, else the captain's target (ship::CaptainTargets), else (computer ships off the human's side) the
+        // player's ship.
+        let target = pilot.and_then(|p| p.target).or_else(|| captains.as_deref().and_then(|c| c.of(e))).or_else(|| me.filter(|_| !boarders.table().with_human(ship.side)));
         let strong = own.strength.attack > AI_MIN_ATTACK;
         if let Some(t) = target.filter(|t| boarders.hostile(e, *t))
             && let Ok((ttf, tship)) = targets.get(t)

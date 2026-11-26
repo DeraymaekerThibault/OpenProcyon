@@ -917,8 +917,9 @@ fn ai_repair_dock(
         // A dock of a ship or base the table does not call hostile.
         let friendly = |dship: Option<&Ship>, base, side| dship.map(|d| d.side).or_else(|| table.base_side(base, side)).is_none_or(|d| table.allied(ship.side, d));
         let candidates = docks.iter().filter(|(d, _, dk, dship, base, side)| *d != e && dk.open() && dk.repairs && friendly(*dship, *base, *side));
-        let reach = if script.is_some() { lib.classes[ship.class].sight } else { f32::INFINITY };
-        let candidates = candidates.filter(|d| d.1.translation.distance(tf.translation) <= reach);
+        // In a campaign only a dock within scan range (the sight test, else the class's sight), in a skirmish any.
+        let in_scan = |d: Entity, at: Vec3| sensors.as_ref().map_or(at.distance(tf.translation) <= lib.classes[ship.class].sight, |s| s.in_sight(e, d, None));
+        let candidates = candidates.filter(|d| crate::ship::in_reach(script.is_some(), || in_scan(d.0, d.1.translation)));
         let sphere = |e: Entity, tf: &Transform| sensors.as_ref().and_then(|s| s.sphere(e)).unwrap_or((tf.translation, 0.0));
         let own = sphere(e, tf);
         let nearest = nearest_dock(own, candidates.map(|d| (d.0, sphere(d.0, d.1))));

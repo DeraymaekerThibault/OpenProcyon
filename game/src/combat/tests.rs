@@ -249,7 +249,7 @@ fn hostile_island_towers_shoot_the_player_and_neutral_ones_do_not() {
         invuln: 1.0,
         visible: true,
         stance: crate::rules::Stance::Neutral,
-        target: None,
+        ordered: None,
         attack: vec![],
         flag: String::new(),
         banner: String::new(),

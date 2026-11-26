@@ -83,7 +83,7 @@ pub fn plugin(app: &mut App) {
             (
                 crate::briefing::autoplay_skip.in_set(crate::BattleSet::Commands),
                 crate::smoke::autoplay_end.in_set(crate::BattleSet::Outcome),
-                (mission_ai, leash_player).chain().in_set(crate::BattleSet::Ai),
+                (mission_ai, leash_player).chain().after(crate::ai).in_set(crate::BattleSet::Ai),
             )
                 .run_if(in_state(Screen::Battle))
                 .run_if(resource_exists::<Mission>),

@@ -95,7 +95,7 @@ fn hunt_m3(world: &mut World, frame: u32) {
     if frame == 50 {
         assert!(world.get::<campaign::MissionShip>(exile).unwrap().visible);
         assert!(world.resource::<campaign::Mission>().script.holds_fire("Pirate Silver"), "reveal must not launch the hunt");
-        assert!(world.get::<campaign::MissionShip>(exile).unwrap().target.is_none());
+        assert!(world.get::<campaign::MissionShip>(exile).unwrap().ordered.is_none());
     }
     if frame == 60 {
         let start = game_to_bevy(&world.resource::<campaign::Mission>().data["paths"]["Sloop Patrolling"][0]);
@@ -114,7 +114,7 @@ fn hunt_m3(world: &mut World, frame: u32) {
         assert_eq!(world.get::<Ship>(primary).unwrap().speed, 0.0, "helm motion stops during NIS");
         let pirate = world.get::<campaign::MissionShip>(exile).unwrap();
         assert!(pirate.looping.is_none() && pirate.stop_at_end, "Exile retreats instead of patrolling/attacking");
-        assert!(pirate.target.is_none(), "Exile must not engage");
+        assert!(world.resource::<crate::ship::CaptainTargets>().of(exile).is_none(), "Exile must not engage");
     }
     if frame == 90 {
         world.resource_mut::<campaign::Mission>().script.played.insert("1st officer says NO".into());

@@ -15,7 +15,8 @@ pub struct MissionShip {
     pub invuln: f32,
     pub visible: bool,
     pub stance: rules::Stance,
-    pub target: Option<Entity>,
+    /// The unit the script's attack order (`attack`) names now, for the captain (`ship::ai`).
+    pub ordered: Option<Entity>,
     pub attack: Vec<String>,
     pub flag: String,
     pub banner: String,

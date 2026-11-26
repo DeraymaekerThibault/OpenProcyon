@@ -308,7 +308,7 @@ pub(super) fn settled(
                 captured.write(Captured { by: by.clone(), victim: victim.to_string(), unit: s.target });
                 if let Some(mut m) = tms {
                     m.owner = by.clone();
-                    m.target = None;
+                    m.ordered = None;
                     m.attack.clear();
                 }
                 if let Some(mut b) = tbase {

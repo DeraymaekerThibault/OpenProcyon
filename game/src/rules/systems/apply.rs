@@ -263,7 +263,7 @@ pub(in crate::rules) fn apply(
                 s.ship.cap = 0.0;
                 s.mission.hold_fire = true;
                 s.mission.attack.clear();
-                s.mission.target = None;
+                s.mission.ordered = None;
                 commands.entity(s.entity).insert(crate::lifeboats::Abandoned);
             }),
             // Not retail: `OP Place Mines`. The mines are the map's own kind (combat/minefield.rs arms them); one of an unknown bullet is skipped.

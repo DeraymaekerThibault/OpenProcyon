@@ -448,14 +448,10 @@ pub(super) fn fire(
         let generic = posts.is_none().then(|| crate::crew_arms::fallback_posts(table.with_human(ship.side), boarding, &class.name)).flatten();
         // Player's command ship: only the clicked target (retail: direct-fire guns need an enemy click or panic fire). Its other
         // ships: the nearest living enemy. Enemies: their captain's target.
-        // Mission ships other than the player's fire at the target the rules' AI chose (rules::mission_ai). Skirmish ships carry
-        // MissionShip too (map scripts), but no rules AI aims them: unless their script set a target, their captain's applies.
         let ship_target = if pilot.is_some_and(|p| p.hold_fire) || mission.is_some_and(|m| m.hold_fire) {
             None
         } else if let Some(t) = pilot.filter(|_| !primary).and_then(|p| p.target) {
             seen.iter().find(|c| c.entity == t && table.hostile(c.side, ship.side) && c.visible).map(Contact::aim).or_else(|| rocks.iter().find(|r| r.entity == t).copied())
-        } else if let (Some(m), false) = (mission.filter(|m| campaign.is_some() || m.target.is_some()), primary) {
-            m.target.and_then(|t| seen.iter().find(|c| c.entity == t && c.visible).map(Contact::aim).or_else(|| rocks.iter().find(|r| r.entity == t).copied()))
         } else if let (Side::Player, Some(r)) = (ship.side, target.0.filter(|_| primary).and_then(|t| rocks.iter().find(|r| r.entity == t))) {
             Some(*r) // selected space object (asteroid or whale)
         } else {
@@ -465,15 +461,17 @@ pub(super) fn fire(
                     .find(|c| primary && Some(c.entity) == target.0 && !c.with_human && c.visible)
                     .or_else(|| crate::nearest(seen.iter().filter(|c| !primary && !c.with_human && c.visible), tf.translation, |c| c.aim_point))
                     .map(Contact::aim),
-                // Skirmish computer ships fire at their captain's target (ship::CaptainTargets): a ship, else a hostile base; without one, the player ship.
+                // Computer ships fire at their captain's target (ship::CaptainTargets): a ship, a hostile base or a rock the script ordered
+                // attacked; without one, the player ship when it is hostile.
                 // A ship target is aimed at the section its captain picked on choosing it (ship::CaptainTargets), not the hull's centre.
                 _ => match captains.as_deref().and_then(|c| c.aim_of(me)) {
                     Some((t, local)) => seen
                         .iter()
                         .find(|c| c.entity == t && c.visible)
                         .map(|c| AimTarget { position: others.get(t).map_or(c.aim_point, |o| o.1.transform_point(local)), ..c.aim() })
-                        .or_else(|| base_targets.iter().find(|b| b.0.entity == t && table.hostile(b.1, ship.side)).map(|b| b.0)),
-                    None => seen.iter().find(|c| c.is_player && c.visible).map(Contact::aim),
+                        .or_else(|| base_targets.iter().find(|b| b.0.entity == t && table.hostile(b.1, ship.side)).map(|b| b.0))
+                        .or_else(|| rocks.iter().find(|r| r.entity == t).copied()),
+                    None => seen.iter().find(|c| c.is_player && c.visible && table.hostile(c.side, ship.side)).map(Contact::aim),
                 },
             }
         };

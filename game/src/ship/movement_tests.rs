@@ -95,7 +95,7 @@ fn scripted_cross_group_primary_retires_standin_and_updates_mission_identity() {
         invuln: 0.0,
         visible: true,
         stance: rules::Stance::Neutral,
-        target: None,
+        ordered: None,
         attack: vec![],
         flag: String::new(),
         banner: String::new(),
@@ -388,12 +388,77 @@ fn exploring_heads_for_quadrant_centres() {
 fn captain_keeps_its_target_six_seconds_then_takes_the_nearest() {
     let (a, b) = (Entity::from_raw_u32(1).unwrap(), Entity::from_raw_u32(2).unwrap());
     let alive = |_: Entity| true;
-    assert_eq!(choose_target(None, &[(a, 90.0), (b, 40.0)], alive), Some((b, false)), "no target: the nearest");
-    assert_eq!(choose_target(Some((a, 5.9)), &[(a, 90.0), (b, 40.0)], alive), Some((a, true)), "kept inside 6 s though farther");
-    assert_eq!(choose_target(Some((a, 5.9)), &[(b, 40.0)], alive), Some((a, true)), "a held target is followed out of sight");
-    assert_eq!(choose_target(Some((a, 6.0)), &[(a, 90.0), (b, 40.0)], alive), Some((b, false)), "re-chosen after 6 s");
-    assert_eq!(choose_target(Some((a, 1.0)), &[(b, 40.0)], |t| t != a), Some((b, false)), "a sunk target is replaced at once");
-    assert_eq!(choose_target(Some((a, 1.0)), &[], |t| t != a), None);
+    assert_eq!(choose_target(None, &[(a, 90.0), (b, 40.0)], alive, true), Some((b, false)), "no target: the nearest");
+    assert_eq!(choose_target(Some((a, 5.9)), &[(a, 90.0), (b, 40.0)], alive, true), Some((a, true)), "kept inside 6 s though farther");
+    assert_eq!(choose_target(Some((a, 5.9)), &[(b, 40.0)], alive, true), Some((a, true)), "a held target is followed out of sight");
+    assert_eq!(choose_target(Some((a, 6.0)), &[(a, 90.0), (b, 40.0)], alive, true), Some((b, false)), "re-chosen after 6 s");
+    assert_eq!(choose_target(Some((a, 1.0)), &[(b, 40.0)], |t| t != a, true), Some((b, false)), "a sunk target is replaced at once");
+    assert_eq!(choose_target(Some((a, 1.0)), &[], |t| t != a, true), None);
+}
+
+#[test]
+fn without_the_override_flag_a_captain_keeps_its_target_past_six_seconds() {
+    let (a, b) = (Entity::from_raw_u32(1).unwrap(), Entity::from_raw_u32(2).unwrap());
+    assert_eq!(choose_target(Some((a, 60.0)), &[(a, 90.0), (b, 40.0)], |_| true, false), Some((a, true)), "an explicit order is not re-chosen");
+    assert_eq!(choose_target(Some((a, 60.0)), &[(b, 40.0)], |t| t != a, false), Some((b, false)), "but a sunk one is replaced");
+}
+
+#[test]
+fn a_campaign_limits_targets_and_docks_to_scan_range_a_skirmish_does_not() {
+    assert!(in_reach(false, || false), "skirmish: any range");
+    assert!(!in_reach(true, || false) && in_reach(true, || true), "campaign: within scan range only");
+}
+
+/// The one captain in a mission: a computer mission ship picks a hostile base only inside its scan range (here none is in sight), the
+/// same ship in a skirmish at any range. Asset-free.
+#[test]
+fn a_mission_captain_takes_a_base_only_in_scan_range_a_skirmish_one_at_any() {
+    let target_of = |campaign: bool| {
+        let mut w = World::new();
+        let lib = Library { classes: vec![crate::fixed_tests::synthetic_class()], guns: default(), bullets: default(), names: default(), clips: default() };
+        w.insert_resource(lib);
+        w.insert_resource(crate::Config {
+            groups: vec![],
+            player: String::new(),
+            allies: vec![],
+            enemies: vec![],
+            map: None,
+            shot: None,
+            frame: 0,
+            speed: 1.0,
+            ended: None,
+            script: None,
+            autolaunch: false,
+            shot_frame: 0,
+            shot_frames: vec![],
+            late_frame: 0,
+        });
+        w.init_resource::<crate::environment::Sensors>();
+        w.init_resource::<CaptainTargets>();
+        w.init_resource::<Fleets>();
+        w.init_resource::<Time>();
+        if campaign {
+            let data = serde_json::json!({"rules": []});
+            w.insert_resource(campaign::Mission { id: "synthetic".into(), script: crate::rules::Script::new(&data, serde_json::Value::Null), data, opening: None });
+        }
+        let ship = w.spawn((Ship { heading: 0.0, ..Ship::new(0, Side::Enemy) }, Health { sections: vec![], core: 100.0, destroyed: false }, Transform::default())).id();
+        let base = w
+            .spawn((
+                Transform::from_xyz(0.0, 0.0, -5000.0),
+                combat::BaseSide(Side::Player),
+                Health { sections: vec![], core: 100.0, destroyed: false },
+                combat::ArmedBase { class: 0 },
+            ))
+            .id();
+        let captains = w.register_system(ai);
+        w.run_system(captains).unwrap();
+        w.resource_mut::<Time>().advance_by(std::time::Duration::from_secs(1));
+        w.run_system(captains).unwrap();
+        (w.resource::<CaptainTargets>().of(ship), base)
+    };
+    let (skirmish, base) = target_of(false);
+    assert_eq!(skirmish, Some(base), "skirmish: the base at any range");
+    assert_eq!(target_of(true).0, None, "campaign: out of scan range");
 }
 
 #[test]

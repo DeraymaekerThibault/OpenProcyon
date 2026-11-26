@@ -178,6 +178,7 @@ fn mission_ships_halt_when_their_script_route_runs_out() {
         .init_resource::<Time>()
         .init_resource::<crate::environment::Sensors>()
         .add_systems(PreUpdate, crate::environment::refresh_sensors)
+        .init_resource::<crate::ship::CaptainTargets>()
         .add_systems(Update, mission_ai);
     let ship = Ship { heading: 0.0, speed: 5.0, order: EngineOrder::Full, ..Ship::new(0, Side::Player) };
     let n = lib.classes[0].sections.len();
@@ -191,7 +192,7 @@ fn mission_ships_halt_when_their_script_route_runs_out() {
         invuln: 0.0,
         visible: true,
         stance: Stance::Dummy,
-        target: None,
+        ordered: None,
         attack: vec![],
         flag: String::new(),
         banner: String::new(),
@@ -225,7 +226,7 @@ fn mission_ships_halt_when_their_script_route_runs_out() {
         ))
         .id();
     app.update();
-    assert_eq!(app.world().get::<MissionShip>(persistent).unwrap().target, Some(foe));
+    assert_eq!(app.world().get::<MissionShip>(persistent).unwrap().ordered, Some(foe), "the attack order names the target for the captain");
     assert_eq!(app.world().get::<Ship>(persistent).unwrap().waypoints, route, "persistent attack order must not cancel the scripted swoop");
     let order = |e| app.world().get::<Ship>(e).unwrap().order;
     assert_eq!(order(done), EngineOrder::Stop, "finished route stops");
@@ -237,9 +238,6 @@ fn mission_ships_halt_when_their_script_route_runs_out() {
     assert_eq!(order(near), EngineOrder::Stop, "last point within 2 x radius counts as reached");
     assert!(app.world().get::<Ship>(near).unwrap().waypoints.is_empty());
     assert_eq!(order(looping), EngineOrder::Full, "loops restart instead");
-    app.world_mut().get_mut::<MissionShip>(persistent).unwrap().stance = Stance::Aggressive;
-    app.update();
-    assert!(app.world().get::<Ship>(persistent).unwrap().waypoints.is_empty(), "aggressive stance switches to combat steering");
 
     use bevy::ecs::system::RunSystemOnce;
     app.world_mut().entity_mut(persistent).insert(Visibility::Inherited);
@@ -269,6 +267,7 @@ fn ai_world() -> App {
         .init_resource::<Time>()
         .init_resource::<crate::environment::Sensors>()
         .add_systems(PreUpdate, crate::environment::refresh_sensors)
+        .init_resource::<crate::ship::CaptainTargets>()
         .add_systems(Update, mission_ai);
     app
 }
@@ -331,7 +330,7 @@ fn an_abandoned_hull_takes_no_orders_and_is_held_at_zero_speed_whatever_a_rule_s
     app.update();
     let (ship, ms) = (app.world().get::<Ship>(hull).unwrap(), app.world().get::<MissionShip>(hull).unwrap());
     assert_eq!((ship.cap, ship.order, ship.waypoints.len()), (0.0, EngineOrder::Stop, 0));
-    assert!(ms.hold_fire && ms.target.is_none());
+    assert!(ms.hold_fire && ms.ordered.is_none());
     app.world_mut().get_mut::<Ship>(hull).unwrap().cap = 1.0; // a later `Set Group Throttle Percent`
     app.update();
     assert_eq!(app.world().get::<Ship>(hull).unwrap().cap, 0.0, "held again");

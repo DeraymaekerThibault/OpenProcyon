@@ -148,7 +148,7 @@ fn decide_world_marks(
         }
     }
     if !hud_off {
-        let ordered = fleets.selected.map(|e| (pilots.get(e).ok().and_then(|p| p.target), ships.get(e).ok().and_then(|s| s.2.and_then(|m| m.target))));
+        let ordered = fleets.selected.map(|e| (pilots.get(e).ok().and_then(|p| p.target), ships.get(e).ok().and_then(|s| s.2.and_then(|m| m.ordered))));
         let (pilot, mission_target) = ordered.unwrap_or((None, None));
         next.reticle = reticle_target(fleets.direct(), target.0, pilot, mission_target).filter(|&e| {
             let shown = match ships.get(e) {
