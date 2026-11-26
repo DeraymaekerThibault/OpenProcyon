@@ -655,11 +655,11 @@ fn ships_lean_into_turns_except_at_emergency_speed() {
     assert!(roll(EngineOrder::Stop) < 1e-4, "a stopped ship stays level though its rudder is over: {}", roll(EngineOrder::Stop));
 }
 
-/// Border Dispute with every slot filled: allied computer fleets share the human's side but must still go for the enemy base,
-/// while the human's own ships wait for orders.
+/// Border Dispute with every slot filled: allied computer fleets go for the enemy base, and so does every ship of the human's fleet
+/// but the one the human steers, which waits for orders (the captain drives the rest).
 #[test]
 #[ignore = "needs imported assets"]
-fn allied_computer_ships_hunt_the_enemy_base_the_humans_fleet_waits() {
+fn allied_ships_and_the_humans_other_ships_hunt_the_enemy_base_the_ship_the_human_steers_waits() {
     let (mut w, ids) = fleet_world();
     w.despawn(ids[5]);
     let class = w.resource::<Library>().index("Base_SmugglersCamp");
@@ -677,7 +677,8 @@ fn allied_computer_ships_hunt_the_enemy_base_the_humans_fleet_waits() {
     w.resource_mut::<Time>().advance_by(std::time::Duration::from_secs(1));
     w.run_system(captains).unwrap();
     assert!(w.get::<Ship>(ids[4]).unwrap().order > EngineOrder::Stop, "the ally sets off for the enemy base");
-    assert_eq!(w.get::<Ship>(ids[1]).unwrap().order, EngineOrder::Stop, "the human's own ship waits for orders");
+    assert!(w.get::<Ship>(ids[1]).unwrap().order > EngineOrder::Stop, "the captain drives the human's other ships to the base");
+    assert_eq!(w.get::<Ship>(ids[0]).unwrap().order, EngineOrder::Stop, "the ship the human steers waits for orders");
 }
 
 #[test]
