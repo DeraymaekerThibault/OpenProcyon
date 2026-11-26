@@ -141,7 +141,7 @@ fn screen(
         vtime.pause();
     }
     let mut fleet: Vec<_> = ships.iter().filter(|(_, _, h, m)| !h.destroyed && m.owner == mission.script.player()).collect();
-    fleet.sort_by_key(|(_, _, _, m)| m.id);
+    fleet.sort_by_key(|(e, _, _, m)| (!command.contains(*e), m.id)); // the command ship is always slot 1
     choice.ship = choice.ship.min(fleet.len().saturating_sub(1));
     // Jim Hawkins and Mister Onyx stand on the command ship whatever was saved (a new command ship takes them from the old one)
     let command_key = fleet.iter().find(|(e, ..)| command.contains(*e)).map(|(_, s, _, ms)| ship_key(&lib.classes[s.class], ms));

@@ -830,3 +830,15 @@ fn a_sunk_ship_is_a_kill_for_the_player_who_sank_it() {
     assert!(script.flag("ship kill"), "a raider sunk by the player's ship is a ship kill");
     assert!(!script.flag("rock kill"), "and not a rock kill");
 }
+
+#[test]
+fn a_script_nis_that_never_aims_the_camera_leaves_the_chase_camera_running() {
+    // Mission 4's opening: `NIS Start` and no camera action for 39 s.
+    let data = serde_json::json!({"rules": []});
+    let mut mission = Mission { id: "synthetic".into(), script: Script::new(&data, serde_json::json!({})), data, opening: None };
+    assert!(!crate::rules::nis_camera_idle(Some(&mission)), "no NIS, no idle NIS camera");
+    mission.script.nis = true;
+    assert!(crate::rules::nis_camera_idle(Some(&mission)));
+    mission.script.cam.focus_unit = Some("Player0 Group".into());
+    assert!(!crate::rules::nis_camera_idle(Some(&mission)), "a focus makes the NIS camera the script's");
+}

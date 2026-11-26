@@ -205,7 +205,9 @@ def export_ships(root, out, want, part=lambda i, k: None):
         glb = out / "models/ships" / f"{scene}.glb"
         if (
             not glb.is_file()
-            and not tool("tools.mdb_to_glb", root, scene, glb, quiet=True)[0]
+            and not tool("tools.mdb_to_glb", root, scene, glb, "--offsets", quiet=True)[
+                0
+            ]
         ):
             (out / f"{s}.json").unlink(missing_ok=True)
             print(f"skip {s} (no mesh)")
