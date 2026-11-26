@@ -132,6 +132,15 @@ Python tests that need the install or assets skip.
 Shared sight smoke: `WAYLAND_DISPLAY= tools/shot.sh local/sight.png --script sight --allies Ship_Navy_Cutter --enemies Ship_Pirate_Schooner --shot-frame 135 --late-frame 0`; it freezes three ships and asserts group/range/cloak transitions against real radar widgets. This is wiring validation, not a campaign playthrough.
 
 Screenshot tests need a display, or Xvfb + Mesa for the headless helper. Outputs belong in ignored `local/`.
+Hidden runs: `--hidden` (or `PROCYON_HIDDEN=1`, which a tool launcher sets; `0` switches it off) starts any run with its window never
+shown, never focused and off the taskbar, while the game still renders into the window's surface on the real GPU, so screenshots,
+trace and battle-report runs stay off the desktop without Xvfb (`game/src/shot.rs`). Bevy takes a window picture from its own texture
+before presenting, so the picture does not depend on the window being on screen. A hidden run also updates continuously: by default
+Bevy updates at most 60 times a second while no window has focus. Native Wayland cannot hide a window, so there the run warns and opens
+a normal one; on Linux, clear `WAYLAND_DISPLAY` so the run goes through X11 (XWayland). PROVISIONAL, not yet tried on a real machine:
+that no window or taskbar entry appears on Fedora (XWayland) and Windows, that pictures are not black, that presenting to a hidden
+window is not throttled (vsync on a window that is not on screen may be held back by the X server; runs with vsync off avoid that), and
+how much faster a hidden run is than a visible one.
 The `pause` / `pause-restart` scripts assert that the non-retail Pause key freezes virtual time and that Pause / restarting resumes it; a scripted run goes on 100 frames after its last picture, which covers frame 70 (use a later `--shot-frame` or `--late-frame` for assertions beyond that).
 Every run writes `<user dir>/logs/openprocyon.log` (`~/.local/share/openprocyon/`, `%APPDATA%\openprocyon\`; the run before, or the first 20 MB of a very long one, is `openprocyon.previous.log`): header with version/system/arguments, the console log, panics. Testers attach it to bug reports (`game/src/logging.rs`).
 

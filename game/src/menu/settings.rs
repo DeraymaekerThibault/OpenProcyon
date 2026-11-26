@@ -211,8 +211,8 @@ pub(super) fn apply_settings(settings: Res<Settings>, vtime: Res<Time<Virtual>>,
     AA.store(settings.aa, std::sync::atomic::Ordering::Relaxed);
     VSYNC.store(settings.vsync, std::sync::atomic::Ordering::Relaxed);
     let present = crate::present_mode(crate::profiling(), vtime.relative_speed());
-    let mode = if settings.fullscreen { bevy::window::WindowMode::BorderlessFullscreen(bevy::window::MonitorSelection::Current) } else { bevy::window::WindowMode::Windowed };
     for mut w in &mut window {
+        let mode = window_mode(settings.fullscreen, w.visible);
         if w.mode != mode {
             w.mode = mode;
         }
@@ -220,6 +220,21 @@ pub(super) fn apply_settings(settings: Res<Settings>, vtime: Res<Time<Virtual>>,
             w.present_mode = present;
         }
     }
+}
+
+/// The video mode option, except that a hidden tool run (`--hidden`) stays windowed: a saved fullscreen option must not show or
+/// resize a window that is meant to stay off the desktop.
+fn window_mode(fullscreen: bool, visible: bool) -> bevy::window::WindowMode {
+    if fullscreen && visible { bevy::window::WindowMode::BorderlessFullscreen(bevy::window::MonitorSelection::Current) } else { bevy::window::WindowMode::Windowed }
+}
+
+#[cfg(test)]
+#[test]
+fn a_hidden_window_ignores_the_fullscreen_option() {
+    use bevy::window::WindowMode;
+    assert_eq!(window_mode(true, true), WindowMode::BorderlessFullscreen(bevy::window::MonitorSelection::Current));
+    assert_eq!(window_mode(false, true), WindowMode::Windowed);
+    assert_eq!(window_mode(true, false), WindowMode::Windowed);
 }
 
 #[cfg(test)]

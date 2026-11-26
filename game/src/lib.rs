@@ -189,6 +189,7 @@ pub fn run(view: fn(&mut App), setup_view: fn(&mut App)) {
     let arg = |k: &str| cli::value_of(args, k);
     let shot = arg("--shot");
     set_fixed_step(wants_fixed_step(args, std::env::var("PROCYON_FIXED_STEP").ok().as_deref()));
+    let hidden = shot::hide_window(args);
     // Debug aids for mission authors: fire named rules at the start (repeatable) and place the primary ship (x,y in game units).
     let at: Option<Vec<f32>> = arg("--start-at").map(|v| v.split(',').filter_map(|x| x.parse().ok()).collect());
     campaign::set_start(args.windows(2).filter(|w| w[0] == "--fire-rule").map(|w| w[1].clone()).collect(), at.and_then(|c| (c.len() == 2).then(|| (c[0], c[1]))));
@@ -214,8 +215,9 @@ pub fn run(view: fn(&mut App), setup_view: fn(&mut App)) {
             DefaultPlugins
                 .set(AssetPlugin { file_path: assets_dir().to_string_lossy().into_owned(), ..default() })
                 .set(logging::plugin())
-                .set(WindowPlugin { primary_window: Some(shot::shot_window(shot.is_some())), ..default() }),
+                .set(WindowPlugin { primary_window: Some(shot::shot_window(shot.is_some(), hidden)), ..default() }),
         )
+        .add_plugins(shot::hidden_plugin(hidden))
         .add_plugins((clips::plugin, render::plugin))
         .add_plugins((
             fx::plugin,

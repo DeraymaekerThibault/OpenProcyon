@@ -57,10 +57,11 @@ pub fn flag_named(arg: &str) -> Option<&'static Flag> {
 
 /// The environment variables the game reads, with what they do (a test checks each is still read somewhere in the sources).
 /// Reads stay where they are used; this is the one list.
-pub const ENV_VARS: [(&str, &str); 15] = [
+pub const ENV_VARS: [(&str, &str); 16] = [
     ("PROCYON_ASSETS", "folder of the imported assets (default: the checkout's assets/, else the per-user folder)"),
     ("PROCYON_OVERLAY", "where this launch builds its overlay of assets, content and mods"),
     ("PROCYON_FIXED_STEP", "1 or 0: one 33 ms tick per frame (also --fixed-step); 0 switches it off even for --shot"),
+    ("PROCYON_HIDDEN", "1 or 0: start with the window hidden and unfocused (also --hidden; not on native Wayland)"),
     ("PROCYON_AUTOPLAY", "<game seconds>: an unattended mission run (tools/autoplay.py); also lets the speed cap grow with the speed"),
     ("PROCYON_PROFILE", "frame-time logging, and vsync off"),
     ("PROCYON_SEED", "the battle's random seed when --seed is not given"),
@@ -127,6 +128,8 @@ Developer and smoke-test flags (docs/development.md):
   --ship <class>              the human's ship of a --map battle without a lobby (a class name such as Ship_Navy_Frigate)
   --allies <a,b,...>          allied computer ships of that battle; --enemies <a,b,...|none> the enemy ships
   --speed <x>                 game speed multiplier (default 1)
+  --hidden                    keep the window hidden and unfocused; the game still renders and takes pictures (also PROCYON_HIDDEN=1;
+                                 native Wayland cannot hide a window: clear WAYLAND_DISPLAY to go through X11)
   --seed <n>                  replay a battle's random seed (also PROCYON_SEED); --fixed-step: one 33 ms tick per frame (PROCYON_FIXED_STEP=1)
   --replay <file.jsonl>       play back a command log recorded with PROCYON_COMMANDS=<file> (same scenario arguments, seed, mods)
   --cam <yaw,pitch,dist>      camera orbit (also --yaw, --pitch, --dist); --look <x,y[,z]> aims it at a point (game axes)
