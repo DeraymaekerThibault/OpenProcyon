@@ -405,13 +405,13 @@ pub fn ai(
         // Between thinks the ship keeps the course, speed order and target of its last think.
         let clock = clocks.entry(e).or_insert_with(|| ThinkClock::new(now, key.0 as usize));
         let Some(dt) = clock.due(now) else { continue };
-        // A ship the human controls (its own fleet, a Captain_Human ship) keeps its stance but the computer captain does not drive it
-        // (PROVISIONAL); the command ship only in demo (--shot) runs, as an autopilot. A ship that was just sunk has left its fleet and is
+        // The ship the human steers is not the captain's, except as the demo autopilot of a skirmish screenshot run (in a mission, its
+        // cutscenes included, never). Every other ship of the human's fleet (a Captain_Human ship too) is captained with its own stance
+        // but never explores and never docks for repair on its own (PROVISIONAL). A ship that was just sunk has left its fleet and is
         // computer-run, whoever steered it (docs/re/effects.md "Death drive").
         let sinking = dying.contains(e);
-        // The demo autopilot is a skirmish's only: in a mission (its cutscenes included) the human's ship is never the captain's, as
-        // before the captain ran there.
         let demo = me && !campaign && cfg.shot.is_some() && cfg.script.as_deref() != Some("fleet");
+        let steered = me && !sinking && !demo;
         let human = !sinking && !demo && (is_human_ship(s.side, member, Some(&fleets)) || scripted.get(e).is_ok_and(|m| m.human));
         let script = scripted.get(e).ok().map(|m| (m.ordered, m.ram, m.follow.is_some()));
         if busy.contains(e) || scripted.get(e).is_ok_and(left_to_script) {
@@ -430,7 +430,7 @@ pub fn ai(
             s.goal = None;
             continue;
         }
-        if (h.destroyed && !sinking) || human || matches!(cfg.script.as_deref(), Some("fxtest") | Some("damage") | Some("course") | Some("speedtest")) {
+        if (h.destroyed && !sinking) || steered || matches!(cfg.script.as_deref(), Some("fxtest") | Some("damage") | Some("course") | Some("speedtest")) {
             continue;
         }
         let explicit = pilot.and_then(|p| p.target).or(script.and_then(|m| m.0));
@@ -468,7 +468,7 @@ pub fn ai(
         }
         // An Aggressive ship with no working gun and nothing else to attack rams the nearest hostile ship at any range (PROVISIONAL).
         let gunless = attack::plan(&lib, &lib.classes[s.class], h, guns).is_none_or(|p| p.0 == attack::Routine::Ram);
-        if chosen.is_none() && aggressive && gunless {
+        if chosen.is_none() && aggressive && gunless && !human {
             chosen = options.iter().filter(|o| !o.base).min_by(|a, b| a.dist.total_cmp(&b.dist)).map(|o| (o.e, false, true));
         }
         match chosen {
@@ -522,7 +522,7 @@ pub fn ai(
         let Some((foe_pos, foe_radius, foe_base, foe_aim)) = foe else {
             // With no target an Aggressive ship explores (a mission ship on a path keeps to it: PROVISIONAL); the others keep a path or
             // stop dead (a formation is the fleet's, above).
-            if aggressive && explicit.is_none() && !(campaign && path) {
+            if aggressive && !human && explicit.is_none() && !(campaign && path) {
                 explore_now(&mut s, &mut explore);
                 courses.insert(e, s.waypoints[0]);
             } else if !path {

@@ -1037,25 +1037,41 @@ fn a_ship_without_a_stance_is_aggressive_in_a_mission_and_a_skirmish() {
     }
 }
 
-/// A ship the human controls (its own fleet, a Captain_Human ship) keeps its stance and is not driven by the computer captain.
+/// The human's fleet: every ship but the one the human steers is captained with its own stance: it hunts a hostile in sight, takes a
+/// fleet mate's target when it has none, and with nothing stops dead (it never explores); the steered ship is left alone.
 #[test]
-fn a_ship_the_human_controls_keeps_its_stance_and_is_not_captained() {
-    let mut w = captain_world(true);
-    let _foe = captain_ship(&mut w, Side::Enemy, Vec3::X * 30.0);
-    let own = captain_ship(&mut w, Side::Player, Vec3::ZERO);
+fn the_humans_other_ships_are_captained_and_stop_rather_than_explore() {
+    let mut w = captain_world(false);
     let local = w.resource::<Fleets>().local.clone();
-    w.entity_mut(own).insert((FleetMember(local, 1), campaign::MissionShip { stance: crate::rules::Stance::Defensive, ..default() }));
-    let handed = captain_ship(&mut w, Side::Player, Vec3::Z * 10.0);
-    w.entity_mut(handed).insert(campaign::MissionShip { human: true, ..default() });
-    for e in [own, handed] {
+    let mine = |w: &mut World, at: Vec3, me: bool| {
+        let e = captain_ship(w, Side::Player, at);
+        w.entity_mut(e).insert(FleetMember(local.clone(), 1));
+        if me {
+            w.entity_mut(e).insert(crate::commands::Commander(crate::commands::PlayerId(0)));
+        }
         w.get_mut::<Ship>(e).unwrap().order = EngineOrder::Slow;
-    }
+        e
+    };
+    let foe = captain_ship(&mut w, Side::Enemy, Vec3::X * 60.0);
+    let (steered, hunter, idle) = (mine(&mut w, Vec3::X * 50.0, true), mine(&mut w, Vec3::X * 30.0, false), mine(&mut w, Vec3::Z * 4000.0, false));
+    w.entity_mut(idle).insert(campaign::MissionShip { stance: crate::rules::Stance::Defensive, ..campaign::MissionShip::placed(1, "i".into(), "o".into()) });
     think(&mut w);
-    for e in [own, handed] {
-        assert_eq!(w.resource::<CaptainTargets>().of(e), None, "no captain's target");
-        assert_eq!(w.get::<Ship>(e).unwrap().order, EngineOrder::Slow, "nor a captain's course");
-    }
-    assert_eq!(w.get::<campaign::MissionShip>(own).unwrap().stance, crate::rules::Stance::Defensive, "its stance stays");
+    let t = |e| w.resource::<CaptainTargets>().of(e);
+    assert_eq!((t(hunter), w.get::<Ship>(hunter).unwrap().order), (Some(foe), EngineOrder::Emergency), "it hunts what it sees");
+    assert_eq!((t(steered), w.get::<Ship>(steered).unwrap().order), (None, EngineOrder::Slow), "the steered ship is the human's");
+    let s = w.get::<Ship>(idle).unwrap();
+    assert_eq!((s.order, s.waypoints.len()), (EngineOrder::Stop, 0), "nothing for its stance: it stops, no search");
+    assert_eq!(w.get::<campaign::MissionShip>(idle).unwrap().stance, crate::rules::Stance::Defensive, "it keeps its stance");
+    let far = mine(&mut w, Vec3::NEG_Z * 4000.0, false);
+    think(&mut w);
+    assert_eq!(w.resource::<CaptainTargets>().of(far), Some(foe), "out of sight, an Aggressive one takes a fleet mate's target");
+    let mut w = captain_world(false);
+    let lone = captain_ship(&mut w, Side::Player, Vec3::ZERO);
+    w.entity_mut(lone).insert(FleetMember(local.clone(), 1));
+    w.get_mut::<Ship>(lone).unwrap().order = EngineOrder::Full;
+    think(&mut w);
+    let s = w.get::<Ship>(lone).unwrap();
+    assert_eq!((s.order, s.waypoints.len()), (EngineOrder::Stop, 0), "nothing at all: it stops, it never explores");
 }
 
 /// A base whose owner is no player of the battle is hostile to everyone: a computer captain goes for it (and for a base of the
