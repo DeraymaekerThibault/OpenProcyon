@@ -182,7 +182,9 @@ class LobbyExpectations(unittest.TestCase):
     def test_border_dispute_full_alone_has_the_longer_fire_limit(self):
         late = lobby_report(foe_first=300.0)
         self.assertEqual(evaluate(late, {"fire"}), ["side1 first fired at 300 s"])
-        self.assertEqual(evaluate(late, {"fire"}, FIRE_BY_FOR["border_dispute_full"]), [])
+        self.assertEqual(
+            evaluate(late, {"fire"}, FIRE_BY_FOR["border_dispute_full"]), []
+        )
         self.assertEqual(list(FIRE_BY_FOR), ["border_dispute_full"])
 
     def test_a_fleet_that_leaves_its_budget_unspent_fails(self):
