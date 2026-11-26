@@ -8,7 +8,7 @@ from pathlib import Path
 from tools import cli, importlog
 from tools.export_combat import flat, load
 from tools.gamefs import ci_files
-from tools.jsonio import dump
+from tools.jsonio import write
 
 
 def export(root, out):
@@ -26,7 +26,7 @@ def export(root, out):
                 sound=f["AmbientSoundName"], distance=f["AmbientSoundMaxDistance"]
             )
     (out / "data").mkdir(exist_ok=True)
-    (out / "data/island_sounds.json").write_text(dump(islands), encoding="utf-8")
+    write(out / "data/island_sounds.json", islands)
     (out / "sound").mkdir(exist_ok=True)
     for sound in {i["sound"] for i in islands.values()}:
         src = ci_files(root / "Sound/Dialogue", sound + ".ogg")

@@ -34,10 +34,10 @@ fn a_nova_splits_into_one_straight_and_four_turned_secondaries() {
 #[test]
 #[ignore = "needs imported assets"]
 fn a_star_blast_strikes_every_section_once_as_its_ring_passes_and_spares_nobody() {
-    let lib = Library::load(crate::assets_dir());
+    let lib = crate::testutil::lib();
     let class = lib.index("Ship_Navy_Cutter");
     let ship = Ship { heading: 0.0, ..Ship::new(class, Side::Enemy) };
-    let data = Library::load(crate::assets_dir());
+    let data = crate::testutil::lib();
     let c = &data.classes[class];
     let bullet = "Bullet_StarMortar";
     let Payload::Blast { radius, .. } = lib.bullets[bullet].payload else { panic!("star mortar is a blast") };
@@ -80,7 +80,7 @@ fn a_star_blast_strikes_every_section_once_as_its_ring_passes_and_spares_nobody(
 #[test]
 #[ignore = "needs imported assets"]
 fn storm_wind_uses_weather_damage_and_respects_mission_protection() {
-    let lib = Library::load(crate::assets_dir());
+    let lib = crate::testutil::lib();
     let class = lib.index("Ship_Navy_Sloop");
     let k = lib.classes[class].sections.iter().position(|s| s.material.contains("Cloth")).unwrap();
     let hp = Health::new(&lib.classes[class]);
@@ -124,7 +124,7 @@ fn storm_wind_uses_weather_damage_and_respects_mission_protection() {
 #[test]
 #[ignore = "needs imported assets"]
 fn a_ram_hits_only_the_section_nearest_the_contact() {
-    let lib = Library::load(crate::assets_dir());
+    let lib = crate::testutil::lib();
     let mut app = App::new();
     let ship = |class, side| Ship { heading: 0.0, ..Ship::new(class, side) };
     let [cutter, mow] = ["Ship_Navy_Cutter", "Ship_Navy_ManOWar"].map(|n| lib.index(n));
@@ -161,7 +161,7 @@ fn a_ram_hits_only_the_section_nearest_the_contact() {
 #[test]
 #[ignore = "needs imported assets"]
 fn a_hit_on_a_dead_section_spills_four_tenths_to_its_neighbours() {
-    let lib = Library::load(crate::assets_dir());
+    let lib = crate::testutil::lib();
     let c = lib.index("Ship_Navy_Cutter");
     let class = &lib.classes[c];
     let k = class.sections.iter().position(|s| s.label == "bow_wood").unwrap();

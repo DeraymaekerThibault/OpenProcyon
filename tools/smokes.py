@@ -6,11 +6,10 @@ The names are the first column of the table in tools/smokes.sh; `battles` stands
 import re
 import subprocess
 import sys
-from pathlib import Path
 
 from tools import gamelog
+from tools.paths import REPO
 
-REPO = Path(__file__).resolve().parents[1]
 # A self-judging script logs one of these when its assertions all held (smoke/lifeboats.rs, smoke/fleet.rs).
 PASS = re.compile(r": PASS| smoke passed| ECS smoke passed| dispatch passed")
 RELEVANT = re.compile(

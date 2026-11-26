@@ -222,10 +222,7 @@ fn wave(
     let dt = time.delta_secs();
     for (mut f, mesh, parent, seen) in &mut q {
         if cloth.wind {
-            let share = lib
-                .as_ref()
-                .zip(ships.get(parent.parent()).ok())
-                .map_or(0.0, |(lib, s)| (s.speed.abs() / crate::ship::full_speed(&lib.classes[s.class]).max(1e-3)).clamp(0.0, 1.0));
+            let share = lib.as_ref().zip(ships.get(parent.parent()).ok()).map_or(0.0, |(lib, s)| crate::ship::speed_share(s.speed, &lib.classes[s.class]));
             f.wind += (share - f.wind) * (dt * 1.5).min(1.0);
             f.clock += dt * (0.35 + 0.65 * f.wind);
         } else {

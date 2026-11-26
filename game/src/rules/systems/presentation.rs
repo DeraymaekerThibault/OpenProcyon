@@ -184,17 +184,15 @@ pub(super) fn presentation(
     mut vtime: ResMut<Time<Virtual>>,
     map: Query<(), With<crate::starmap::Starmap>>,
     mut proj: Query<&mut Projection, With<Camera3d>>,
-    mut paused_by_map: Local<bool>,
+    mut paused_by_map: Local<crate::panels::PauseClaim>,
 ) {
     const DEFAULT_FOV: f32 = std::f32::consts::FRAC_PI_4;
     let sc = &mut mission.script;
     sc.starmap_open = !map.is_empty();
-    if sc.starmap_open && sc.starmap_pause && !vtime.is_paused() {
-        vtime.pause();
-        *paused_by_map = true;
-    } else if !sc.starmap_open && *paused_by_map {
-        vtime.unpause();
-        *paused_by_map = false;
+    if sc.starmap_open && sc.starmap_pause {
+        paused_by_map.claim(&mut vtime);
+    } else if !sc.starmap_open {
+        paused_by_map.release(&mut vtime);
     }
     let (want, rate) = sc.zoom.filter(|_| sc.nis).unwrap_or((DEFAULT_FOV, 0.5));
     for mut p in &mut proj {

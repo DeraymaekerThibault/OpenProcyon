@@ -3,10 +3,13 @@
 //! exported records; unsupported types are logged once and treated as false / no-op. `Script::step` is pure (no ECS) so it can be tested.
 //! PROVISIONAL: Enter Volume is level-triggered for run-once rules, formations/borders are approximated or ignored,
 //! docking is docking.rs and camera moves are smoothed guesses. Environment presentation lives in environment.rs.
+pub mod active;
 pub mod check;
 pub mod cli;
 pub mod console;
 mod eval;
+#[cfg(test)]
+mod fixtures;
 pub mod refs;
 pub mod skirmish;
 mod systems;

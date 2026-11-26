@@ -10,7 +10,7 @@ from pathlib import Path
 from tools import cli, importlog
 from tools.export_combat import associations, export, load
 from tools.gamefs import ci_files
-from tools.jsonio import dump
+from tools.jsonio import write
 from tools.pack_data import rnd, sections_by_label
 
 
@@ -92,19 +92,17 @@ def export_bases(root, assets):
                 ship[k] = j[k]
         d = assets / "ships" / name
         d.mkdir(parents=True, exist_ok=True)
-        (d / "ship.json").write_text(dump(rnd(ship)), encoding="utf-8")
-        (d / "geometry.json").write_text(
-            dump(
-                {
-                    s["layer"]: {"aabb": rnd(s["aabb"], 4), "tris": rnd(s["tris"], 4)}
-                    for s in j["sections"]
-                }
-            ),
-            encoding="utf-8",
+        write(d / "ship.json", rnd(ship))
+        write(
+            (d / "geometry.json"),
+            {
+                s["layer"]: {"aabb": rnd(s["aabb"], 4), "tris": rnd(s["tris"], 4)}
+                for s in j["sections"]
+            },
         )
         print("base:", name, len(j["guns"]), "guns")
-    (wdir / "guns.json").write_text(dump(rnd(guns)), encoding="utf-8")
-    (wdir / "bullets.json").write_text(dump(rnd(bullets)), encoding="utf-8")
+    write(wdir / "guns.json", rnd(guns))
+    write(wdir / "bullets.json", rnd(bullets))
 
 
 if __name__ == "__main__":

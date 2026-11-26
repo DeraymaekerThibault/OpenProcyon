@@ -60,6 +60,8 @@ pub(in crate::rules) struct Ext {
 
 /// An optional field that was written: not missing and not the empty string an authoring tool writes for "nothing chosen".
 fn given<'a>(v: &'a Value, k: &str) -> Option<&'a Value> {
+    #[cfg(test)]
+    read_log::note(k);
     Some(&v[k]).filter(|x| !x.is_null() && x.as_str() != Some(""))
 }
 
@@ -161,14 +163,14 @@ impl Script {
             T::OPCampaignCounterCondition => cmp(s(c, "Equivalence"), self.ext.campaign.get(s(c, "Counter Name")).copied().unwrap_or(0.0), f(c, "Value")),
             // `Boolean` TRUE (the default): every live member is fully cloaked; FALSE: none is. A group with no live member holds neither.
             T::OPGroupIsCloaked => {
-                let m: Vec<&Unit> = members(w, s(c, "Group Name")).into_iter().filter(|u| u.alive).collect();
+                let m = alive_members(w, s(c, "Group Name"));
                 let on = given(c, "Boolean").is_none_or(|_| b(c, "Boolean"));
                 !m.is_empty() && m.iter().all(|u| u.cloaked == on)
             }
             // The fastest or slowest of the live ships' own speeds (units per second, along their headings) against `Speed`; a group with
             // no live ship holds nothing.
             T::OPGroupSpeed => {
-                let speeds = members(w, s(c, "Group Name")).into_iter().filter(|u| u.alive).filter_map(|u| u.speed);
+                let speeds = alive_members(w, s(c, "Group Name")).into_iter().filter_map(|u| u.speed);
                 let pick = if s(c, "Which") == "Slowest" { speeds.reduce(f32::min) } else { speeds.reduce(f32::max) };
                 pick.is_some_and(|v| cmp(s(c, "Equivalence"), v, f(c, "Speed")))
             }
@@ -198,11 +200,10 @@ impl Script {
                 let (set, group) = (s(a, "Point Set Name"), s(a, "Group/Unit Name"));
                 // A whole number from 0 up; anything else that is a number moves nothing (what `--check-mission` says of it).
                 let index = given(a, "Point Index").map_or(0.0, |_| f(a, "Point Index"));
-                let Some(p) = Some(index).filter(|i| *i >= 0.0 && i.fract() == 0.0).and_then(|i| self.point_sets[set].get(i as usize)) else {
+                let Some(dest) = Some(index).filter(|i| *i >= 0.0 && i.fract() == 0.0).and_then(|i| self.point_of(set, i as usize)) else {
                     self.warn(&format!("point {index} of point set '{set}' in 'OP Teleport' of rule '{rule}'"));
                     return;
                 };
-                let dest = game_to_bevy(&p["pos"]);
                 let all = members(w, group);
                 let live: Vec<&Unit> = all.iter().copied().filter(|u| u.alive).collect();
                 let anchor = if live.is_empty() { &all } else { &live };

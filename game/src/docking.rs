@@ -17,7 +17,7 @@ use std::f32::consts::PI;
 
 use crate::audio::Sfx;
 use crate::campaign::{Mission, MissionBase};
-use crate::combat::{Health, Library, ray_hit, seg_sphere};
+use crate::combat::{Health, Library, ray_hit, ray_sphere};
 use crate::fx::FxLib;
 use crate::{PlayerShip, Ship, Side, assets_dir, game_to_bevy};
 
@@ -110,13 +110,17 @@ fn repair_secs(class: Option<&str>) -> (f32, f32) {
     }
 }
 
+/// One ship's own `ships/<id>/docks.json`, if it has one.
+pub fn ship_docks(id: &str) -> Option<Value> {
+    crate::data::try_json(&assets_dir().join(format!("ships/{id}/docks.json")))
+}
+
 /// Dock points by entity: `data/docks.json` (bases, islands) plus each ship's own `ships/<id>/docks.json`.
 pub fn load_docks() -> Value {
     let root = assets_dir();
-    let read = |p: std::path::PathBuf| crate::data::try_json(&p);
-    let mut docks = read(root.join("data/docks.json")).unwrap_or_else(|| Value::Object(Default::default()));
+    let mut docks = crate::data::try_json(&root.join("data/docks.json")).unwrap_or_else(|| Value::Object(Default::default()));
     for id in crate::data::ship_ids(root) {
-        if let Some(d) = read(root.join(format!("ships/{id}/docks.json"))) {
+        if let Some(d) = ship_docks(&id) {
             docks[id] = d;
         }
     }
@@ -256,25 +260,14 @@ pub fn plugin(app: &mut App) {
     // Backspace's dock cancel is an order (`commands::Kind::CancelDock`).
     app.add_message::<DockMsg>()
         .init_resource::<crate::commands::Outbox>()
-        .add_systems(FixedUpdate, handle_messages.in_set(crate::BattleSet::Commands).run_if(in_state(crate::menu::Screen::Battle)).run_if(crate::menu::overlay_closed))
-        .add_systems(FixedUpdate, docked_hold.in_set(crate::BattleSet::Forces).run_if(in_state(crate::menu::Screen::Battle)).run_if(crate::menu::overlay_closed))
-        .add_systems(
-            FixedUpdate,
-            dock_glide
-                .in_set(crate::BattleSet::Simulate)
-                .after(crate::collision::sail)
-                .before(crate::out_of_map)
-                .run_if(in_state(crate::menu::Screen::Battle))
-                .run_if(crate::menu::overlay_closed),
-        )
-        .add_systems(
-            FixedUpdate,
-            (ai_repair_dock, routine, tow_routine).chain().in_set(crate::BattleSet::Ai).run_if(in_state(crate::menu::Screen::Battle)).run_if(crate::menu::overlay_closed),
-        )
+        .add_systems(FixedUpdate, handle_messages.in_set(crate::BattleSet::Commands).in_set(crate::battle::BattleActive))
+        .add_systems(FixedUpdate, docked_hold.in_set(crate::BattleSet::Forces).in_set(crate::battle::BattleActive))
+        .add_systems(FixedUpdate, dock_glide.in_set(crate::BattleSet::Simulate).after(crate::collision::sail).before(crate::out_of_map).in_set(crate::battle::BattleActive))
+        .add_systems(FixedUpdate, (ai_repair_dock, routine, tow_routine).chain().in_set(crate::BattleSet::Ai).in_set(crate::battle::BattleActive))
         .add_systems(FixedUpdate, docks_lost.in_set(crate::BattleSet::Combat).run_if(in_state(crate::menu::Screen::Battle)))
-        .add_systems(FixedUpdate, docked_repair.in_set(crate::BattleSet::Combat).run_if(in_state(crate::menu::Screen::Battle)).run_if(crate::menu::overlay_closed))
+        .add_systems(FixedUpdate, docked_repair.in_set(crate::BattleSet::Combat).in_set(crate::battle::BattleActive))
         .add_systems(Update, play_cranes.run_if(in_state(crate::menu::Screen::Battle)))
-        .add_systems(Update, (cancel_input, markers).chain().before(crate::input).run_if(in_state(crate::menu::Screen::Battle)).run_if(crate::menu::overlay_closed));
+        .add_systems(Update, (cancel_input, markers).chain().before(crate::input).in_set(crate::battle::BattleActive));
 }
 
 /// Where a base's crane clips are: `CRANES` (one set, any dock) or `CRANESnn` (the set of dock point nn) run from their first frame
@@ -473,10 +466,7 @@ pub(crate) fn repair(lib: &Library, ship: &Ship, h: &mut Health, full: bool) {
 /// Bevy heading (as `Ship::heading`) that points the bow from `from` to `to`.
 fn bearing(from: Vec3, to: Vec3) -> f32 {
     let d = to - from;
-    (-d.x).atan2(-d.z)
-}
-fn angdiff(a: f32, b: f32) -> f32 {
-    (a - b + PI).rem_euclid(2.0 * PI) - PI
+    crate::geom::heading_of(d)
 }
 fn flat(a: Vec3, b: Vec3) -> f32 {
     (a - b).with_y(0.0).length()
@@ -501,7 +491,7 @@ fn claim(dockable: &mut Dockable, docker: &mut Docker, e: Entity, i: usize) {
 /// and the ship moves along its own heading, `GLIDE_TURNING` while turning and up to `GLIDE_STRAIGHT` once lined up; `turn_only`
 /// turns in place. Normal sailing is off meanwhile (`collision::sail` skips gliding ships).
 fn glide(ship: &mut Ship, tf: &mut Transform, to: Vec3, top: f32, turn_only: bool, dt: f32) {
-    let err = angdiff(bearing(tf.translation, to), ship.heading);
+    let err = crate::ship::angdiff(bearing(tf.translation, to), ship.heading);
     let step = err.signum() * (err.abs() / GLIDE_FULL_ERR).min(1.0) * GLIDE_TURN * dt;
     ship.heading += step;
     ship.ang_vel = 0.0;
@@ -752,7 +742,7 @@ fn leave_phase(st: &Step, dockable: &Dockable, docker: &mut Docker, ship: &mut S
         }
         Phase::Turn => {
             docker.timer += st.dt;
-            if angdiff(bearing(here, docker.start), ship.heading).abs() < TURN_DONE || docker.timer >= LEG_SECS {
+            if crate::ship::angdiff(bearing(here, docker.start), ship.heading).abs() < TURN_DONE || docker.timer >= LEG_SECS {
                 // Retail: one leg of 100 units toward where the ship came from, not back to that point.
                 let dir = (docker.start - here).with_y(0.0).normalize_or_zero();
                 (ship.waypoints, ship.order) = (vec![here + dir * RETURN_LEG], EngineOrder::Emergency);
@@ -923,10 +913,7 @@ fn ai_repair_dock(
         if h.destroyed || !computer || !needs_repair(&lib, ship, h) {
             continue;
         }
-        let friendly = |dship: Option<&Ship>, downer: Option<&str>| match (ms, script, downer) {
-            (Some(m), Some(sc), Some(o)) => !sc.hostile(&m.owner, o),
-            _ => dship.is_none_or(|d| d.side == ship.side),
-        };
+        let friendly = |dship: Option<&Ship>, downer: Option<&str>| crate::alliance::hostility::friendly_dock(script, ms.map(|m| m.owner.as_str()), ship.side, dship, downer);
         let candidates = docks
             .iter()
             .filter(|(d, _, dk, dship, dms, base)| *d != e && dk.open() && dk.repairs && friendly(*dship, dms.map(|m| m.owner.as_str()).or(base.map(|b| b.owner.as_str()))));
@@ -955,15 +942,10 @@ pub struct Dockees<'w, 's> {
     lib: Res<'w, Library>,
     sensors: Res<'w, crate::environment::Sensors>,
     mission: Option<Res<'w, Mission>>,
-    menu: Res<'w, crate::options_menu::OptionsMenu>,
 }
 /// A base is hostile by mission rules, or in a skirmish (no mission rules) when its side is not the player's.
 fn hostile_base(mission: Option<&Mission>, base: Option<&MissionBase>, side: Option<&crate::combat::BaseSide>) -> bool {
-    let Some(base) = base else { return false };
-    match mission {
-        Some(m) => m.script.hostile(m.script.player(), &base.owner),
-        None => side.is_some_and(|s| s.0 != Side::Player),
-    }
+    crate::alliance::hostility::base(mission, base, side)
 }
 impl Dockees<'_, '_> {
     fn base_hostile(&self, e: Entity, base: Option<&MissionBase>) -> bool {
@@ -985,7 +967,7 @@ impl Dockees<'_, '_> {
                     (None, Ok(hull)) => hull.ray_hit(ray)?,
                     (None, Err(_)) => {
                         let r = d.points.iter().map(|p| p.pos.length()).fold(0.0, f32::max) + 8.0;
-                        seg_sphere(ray.origin, ray.origin + *ray.direction * 3000.0, tf.translation, r)? * 3000.0
+                        ray_sphere(ray, tf.translation, r)?
                     }
                 };
                 Some((e, t, self.can_dock(actor, e)))
@@ -1008,10 +990,6 @@ impl Dockees<'_, '_> {
                 Some((e, t, tf.to_matrix().inverse().transform_point3(ray.get_point(t))))
             })
             .min_by(|a, b| a.1.total_cmp(&b.1))
-    }
-    /// True on the frame an options-menu click closed the menu: that click is not a world click.
-    pub fn menu_swallows_click(&self) -> bool {
-        self.menu.swallow.load(std::sync::atomic::Ordering::Relaxed)
     }
     /// The ship `tower` is towing, if any (links are kept by the rules: campaign missions only).
     pub fn towee_of(&self, tower: Entity) -> Option<Entity> {

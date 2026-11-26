@@ -8,7 +8,7 @@ from pathlib import Path
 from tools import cli
 from tools.export_maps import convert_scene
 from tools.gamefs import ci_file, ci_files
-from tools.jsonio import dump
+from tools.jsonio import write
 from tools.mdb_to_glb import convert
 from tools.models import model_path
 from tools.wot import parse_text, properties
@@ -91,7 +91,7 @@ def export(root, assets):
                 else convert_scene(root, scene)
             )
     (assets / "data").mkdir(exist_ok=True)
-    (assets / "data/asteroids.json").write_text(dump(defs), encoding="utf-8")
+    write(assets / "data/asteroids.json", defs)
     print(f"exported {len(defs)} ordinary asteroid definitions")
 
 

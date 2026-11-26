@@ -64,6 +64,10 @@ impl Asteroid {
         self.hp = (self.hp - amount).max(0.0);
         self.hp == 0.0
     }
+    /// `damage` by the shooter/ramming ship `by`: the `Destroyed` message to send when this hit broke the rock.
+    pub fn strike(&mut self, amount: f32, by: Entity, victim: Entity) -> Option<Destroyed> {
+        self.damage(amount).then_some(Destroyed { by, victim })
+    }
     pub fn unit(&self, e: Entity, tf: &Transform) -> crate::rules::Unit {
         crate::rules::Unit { name: self.kind.as_str().into(), owner: self.group.as_str().into(), alive: self.hp > 0.0, ..crate::rules::Unit::new(e, self.id, tf.translation) }
     }
@@ -351,9 +355,9 @@ pub fn asteroid_demo(
     if cfg.frame == 180
         && let Some(e) = *selected
         && let Ok((_, mut rock, _)) = rocks.get_mut(e)
-        && rock.damage(f32::MAX)
+        && let Some(d) = rock.strike(f32::MAX, *player, e)
     {
-        killed.write(Destroyed { by: *player, victim: e });
+        killed.write(d);
     }
 }
 

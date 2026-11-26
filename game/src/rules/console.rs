@@ -47,7 +47,7 @@ pub struct Console {
     /// Index into `history` while Up / Down recall is in use.
     recall: Option<usize>,
     /// The console paused the simulation when it opened (and resumes it on closing).
-    pub(in crate::rules) paused_by_us: bool,
+    pub(in crate::rules) paused_by_us: crate::panels::PauseClaim,
     /// Lines submitted and not yet run (systems/console.rs runs them once per frame).
     pub(in crate::rules) pending: Vec<String>,
     /// The mission's names, for Tab (refreshed each frame while open).

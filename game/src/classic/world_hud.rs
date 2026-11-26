@@ -3,13 +3,13 @@
 use bevy::prelude::*;
 
 use crate::combat::Health;
-use crate::panels::{REF_H, Toggles, cinematic};
+use crate::panels::{Toggles, cinematic, hud_scale, message_text_size};
 use crate::sprites::{Fonts, HudData, size_of, slice, sprite};
 use crate::{Library, PlayerShip, Ship};
 
 pub fn plugin(app: &mut App) {
     app.add_systems(PostStartup, spawn_reticle.run_if(resource_exists::<HudData>))
-        .add_systems(Update, navigation.after(crate::camera).before(crate::sky).run_if(in_state(crate::menu::Screen::Battle)).run_if(crate::menu::overlay_closed))
+        .add_systems(Update, navigation.after(crate::camera).before(crate::sky).in_set(crate::battle::BattleActive))
         .add_systems(Update, lob_marker.run_if(in_state(crate::menu::Screen::Battle)).run_if(resource_exists::<crate::combat::LobAim>))
         .add_systems(Update, end_line.run_if(in_state(crate::menu::Screen::Battle)).run_if(resource_exists::<Fonts>))
         .add_systems(Update, loading_cover)
@@ -68,7 +68,7 @@ fn end_line(
     line: Res<crate::scenario::EndLine>,
     mut shown: Query<(Entity, &mut Text, &mut TextFont), With<EndLineText>>,
 ) {
-    let size = 17.0 * window.height() / 1080.0;
+    let size = message_text_size(&window);
     let Some(id) = line.0.as_deref() else {
         for (e, ..) in &shown {
             commands.entity(e).despawn();
@@ -110,7 +110,7 @@ fn loading_cover(
             };
             let mut cover = commands.spawn((LoadingCover, node, BackgroundColor(Color::BLACK), GlobalZIndex(1000)));
             if let Some(font) = fonts.as_ref().and_then(|f| f.0.get("Immi14")) {
-                cover.with_child(font.text("Loading...", 17.0 * window.height() / 1080.0 / font.size, Color::WHITE));
+                cover.with_child(font.text("Loading...", message_text_size(&window) / font.size, Color::WHITE));
             }
         }
         _ => {}
@@ -125,7 +125,7 @@ struct RefRect {
 }
 /// Scales label children (ribbon pieces) from reference pixels to the window.
 fn place_ref_rects(window: Single<&Window, With<bevy::window::PrimaryWindow>>, mut q: Query<(&RefRect, &mut Node)>) {
-    let s = window.height() / REF_H;
+    let s = hud_scale(&window);
     for (r, mut n) in &mut q {
         n.left = Val::Px(r.pos.x * s);
         n.top = Val::Px(r.pos.y * s);
@@ -215,7 +215,7 @@ const COMPASS_RADIUS: f32 = 5.9;
 
 fn navigation_heading(ship: Vec3, goal: Vec3) -> f32 {
     let d = goal - ship;
-    (-d.x).atan2(-d.z)
+    crate::geom::heading_of(d)
 }
 
 // ---- ship name banners and the target reticle -----------------------------------------------------------------
@@ -280,7 +280,7 @@ struct LabelText {
 #[derive(Component)]
 struct LabelSize(f32);
 fn scale_label_text(window: Single<&Window, With<bevy::window::PrimaryWindow>>, mut w: Query<(&LabelText, &mut Node)>, mut t: Query<(&LabelSize, &mut TextFont)>) {
-    let s = window.height() / REF_H;
+    let s = hud_scale(&window);
     for (l, mut n) in &mut w {
         n.left = Val::Px(l.pos.x * s);
         n.top = Val::Px(l.pos.y * s);
@@ -352,9 +352,9 @@ fn place_labels(
     (wrappers, mut texts, real): (Query<&Children, With<LabelText>>, Query<&mut TextColor>, Res<Time<Real>>),
     mut reticle: Query<(&Reticle, &mut Node, &mut Visibility), With<Reticle>>,
 ) {
-    let s = window.height() / REF_H;
+    let s = hud_scale(&window);
     let (camera, ctf) = *cam;
-    let project = |g: &GlobalTransform, up: f32| camera.world_to_viewport(ctf, g.translation() + Vec3::Y * up).ok();
+    let project = |g: &GlobalTransform, up: f32| crate::view::project(camera, ctf, g.translation() + Vec3::Y * up);
     for (e, mut label, mut node, mut vis, kids) in &mut labels {
         let Ok((g, _, sh, ms, owner)) = ships.get(label.ship) else {
             commands.entity(e).despawn();
@@ -400,7 +400,7 @@ fn place_labels(
         };
         let p = project(g, 0.0)?;
         // Chevrons stand on the diagonals just outside the target's projected radius.
-        let edge = camera.world_to_viewport(ctf, g.translation() + ctf.right() * r).ok().map_or(0.0, |q| (q - p).length());
+        let edge = crate::view::project(camera, ctf, g.translation() + ctf.right() * r).map_or(0.0, |q| (q - p).length());
         Some((p, edge))
     })();
     for (Reticle(i), mut node, mut vis) in &mut reticle {

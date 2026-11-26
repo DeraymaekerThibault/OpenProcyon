@@ -831,7 +831,7 @@ fn sail_motion(
     let Some(rows) = state.cast_slice_mut::<Vec4>() else { return };
     let dt = time.delta_secs();
     for mut sail in &mut sails {
-        let share = sail.ship.and_then(|e| ships.get(e).ok()).map_or(0.0, |sh| (sh.speed.abs() / crate::ship::full_speed(&lib.classes[sh.class]).max(1e-3)).clamp(0.0, 1.0));
+        let share = sail.ship.and_then(|e| ships.get(e).ok()).map_or(0.0, |sh| crate::ship::speed_share(sh.speed, &lib.classes[sh.class]));
         sail.wind += (share - sail.wind) * (dt * WIND_RATE).min(1.0);
         sail.clock += dt * s.speed * (CLOCK_IDLE + CLOCK_WIND * sail.wind);
         // PROVISIONAL: the crew folds the sails on the All Stop order (not when the ship has coasted to a stop), in `FOLD_SECONDS`.

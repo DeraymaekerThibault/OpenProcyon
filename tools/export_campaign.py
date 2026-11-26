@@ -14,7 +14,7 @@ from tools.export_campaign_media import PLAYABLE
 from tools.export_combat import export as export_ship
 from tools.export_environment import export_environment
 from tools.export_maps import convert_scene, mesh_scene, parse_twt, strings, tiles
-from tools.jsonio import dump
+from tools.jsonio import write
 from tools.mdb_to_glb import convert
 from tools.models import model_path
 from tools.wot import blocks, fields, objects, parse_text, properties
@@ -264,7 +264,7 @@ def export_skirmish_script(root, out, twt):
         for f in script["map_text"]
     ]
     (out / "campaign").mkdir(exist_ok=True)
-    (out / f"campaign/{mid}_script.json").write_text(dump(script), encoding="utf-8")
+    write(out / f"campaign/{mid}_script.json", script)
 
 
 def export_mission(root, out, twt):
@@ -357,9 +357,7 @@ def export_mission(root, out, twt):
     for typ in sorted({s["type"] for s in mission["ships"]}):
         if typ not in registry:
             try:
-                (out / f"{typ}.json").write_text(
-                    dump(export_ship(root, typ, out)), encoding="utf-8"
-                )
+                write(out / f"{typ}.json", export_ship(root, typ, out))
                 scene = mesh_scene(root, typ)
                 if not model_path(out, scene).exists():
                     # Layer names come from the MSB (mdb_to_glb.scene_layers).
@@ -369,7 +367,7 @@ def export_mission(root, out, twt):
                 mission["unresolved_ships"].append(
                     typ
                 )  # wrecks and other non-combat hulls
-    (out / "ships.json").write_text(dump(registry), encoding="utf-8")
+    write(out / "ships.json", registry)
     handoff = next(
         (r for r in mission["rules"] if r["name"].startswith("END Opening NIS")), None
     )
@@ -386,13 +384,13 @@ def export_mission(root, out, twt):
         src = next((root / "Sound/Music").glob(track + ".ogg"), None) if track else None
         if src and mid in PLAYABLE:
             shutil.copyfile(src, out / "sound" / (track.lower() + ".ogg"))
-    (out / f"maps/{mid}.json").write_text(dump(m), encoding="utf-8")
+    write(out / f"maps/{mid}.json", m)
     bd = out / "menu" / f"{(m.get('backdrop') or '').lower()}.png"
     if m.get("backdrop") and not bd.exists() and (im := tiles(root, m["backdrop"])):
         bd.parent.mkdir(parents=True, exist_ok=True)
         im.save(bd)  # star-map picture; pack_layout moves it to maps/<id>/backdrop.png
     (out / "campaign").mkdir(exist_ok=True)
-    (out / f"campaign/{mid}.json").write_text(dump(mission), encoding="utf-8")
+    write(out / f"campaign/{mid}.json", mission)
     print(
         f"{mid}: {len(mission['ships'])} ships, {len(mission['rules'])} rules, {len(mission['volumes'])} volumes"
     )

@@ -65,10 +65,14 @@ pub fn write_world(world: &World) {
         return;
     }
     let decided = world.get_resource::<Outcome>().copied();
-    if let Some(m) = world.get_resource::<Mission>() {
-        write(&m.id, &m.script, decided);
-    } else if let (Some(s), Some(cfg)) = (world.get_resource::<SkirmishScript>(), world.get_resource::<crate::Config>()) {
-        write(cfg.map.as_deref().unwrap_or(""), &s.script, decided);
+    match crate::rules::active::script_of(world) {
+        Some((script, Some(id))) => write(id, script, decided),
+        Some((script, None)) => {
+            if let Some(cfg) = world.get_resource::<crate::Config>() {
+                write(cfg.map.as_deref().unwrap_or(""), script, decided);
+            }
+        }
+        None => {}
     }
 }
 

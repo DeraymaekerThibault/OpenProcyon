@@ -5,6 +5,7 @@ use bevy::prelude::*;
 
 use crate::boarding::{Boardable, Boarding, friendly_share};
 use crate::campaign::Mission;
+use crate::panels::hud_scale;
 use crate::sprites::HudData;
 use crate::{Ship, Side};
 
@@ -13,7 +14,7 @@ const BAR_SIZE: Vec2 = Vec2::new(171.0, 40.0);
 const BAR_INNER: (Vec2, Vec2) = (Vec2::new(40.0, 13.0), Vec2::new(130.0, 29.0));
 
 pub fn plugin(app: &mut App) {
-    app.add_systems(Update, board_bars.after(crate::input).run_if(in_state(crate::menu::Screen::Battle)).run_if(crate::menu::overlay_closed));
+    app.add_systems(Update, board_bars.after(crate::input).in_set(crate::battle::BattleActive));
 }
 
 #[derive(Component)]
@@ -44,15 +45,13 @@ fn board_bars(
             commands.entity(entity).despawn();
         }
     }
-    let scale = window.height() / crate::panels::REF_H;
+    let scale = hud_scale(&window);
     let (camera, camera_transform) = *camera;
     let friendly = |e: Entity| things.get(e).ok().and_then(|thing| thing.2).is_some_and(|ship| ship.side == Side::Player);
     for (boarder, fight) in fights.iter().filter(|fight| fight.1.live()) {
         let target = fight.target();
         let Ok([(_, boarder_crew, _), (target_transform, target_crew, _)]) = things.get_many([boarder, target]) else { continue };
-        let screen = camera
-            .world_to_viewport(camera_transform, target_transform.translation)
-            .ok()
+        let screen = crate::view::project(camera, camera_transform, target_transform.translation)
             .filter(|_| !crate::panels::cinematic(mission.as_deref()) && camera_transform.translation().distance(target_transform.translation) <= BAR_VISIBLE);
         let Some((_, _, mut node, mut visibility, children)) = bars.iter_mut().find(|bar| bar.1.boarder == boarder) else {
             if screen.is_some() {

@@ -1,4 +1,5 @@
 //! Skirmish lobby model: map list, player slots, races, fleets within the victory points and ship stats for the views.
+use crate::data::MapDoc;
 use crate::scenario::Race;
 use bevy::prelude::*;
 use serde_json::Value;
@@ -223,7 +224,8 @@ pub struct Skirmish {
     pub draw: u64,
     /// Victory points a fleet may cost (the setup's Victory Limit; ships spend their 'Victory Point Cost').
     pub victory_limit: u32,
-    pub map_json: Value,
+    /// The selected map's `map.json`, typed (empty when none is selected).
+    pub map_doc: crate::data::MapDoc,
     pub error: Option<&'static str>, // string id (or plain text) shown under the player list
     /// The open lobby pull-down, if any (its list is drawn under the cell; a click elsewhere closes it).
     pub dropdown: Option<Cell>,
@@ -643,29 +645,28 @@ pub fn pretty(name: &str) -> String {
     name.trim_start_matches("Ship_").replace('_', " ")
 }
 
-pub(super) fn ships_of(map: &Value, player: usize) -> Vec<String> {
-    map["ships"].as_array().into_iter().flatten().filter(|s| s["player"].as_u64() == Some(player as u64)).filter_map(|s| s["type"].as_str().map(String::from)).collect()
+pub(super) fn ships_of(map: &MapDoc, player: usize) -> Vec<String> {
+    map.ships.iter().filter(|s| s.player == Some(player as u64)).filter_map(|s| s.kind.clone()).collect()
 }
 
 /// Lobby rows of a map. Historical maps (MustAssembleFleet false) keep their pre-placed fleets and fixed fleet types: the only
 /// choice is which side you take. Open maps start with you, one opponent and the other slots closed; fleet types come from the
 /// map's team list (locked) or are chosen by the player (maps without teams start with no fleet type).
-pub(super) fn new_slots(map: &Value) -> Vec<Slot> {
-    let open = map["assemble"].as_bool().unwrap_or(false);
-    let teams = map["teams"].as_array().cloned().unwrap_or_default();
-    let mut slots: Vec<Slot> = map["players"]
-        .as_array()
-        .into_iter()
-        .flatten()
+pub(super) fn new_slots(map: &MapDoc) -> Vec<Slot> {
+    let open = map.assemble.unwrap_or(false);
+    let teams = &map.teams;
+    let mut slots: Vec<Slot> = map
+        .players
+        .iter()
         .enumerate()
-        .filter(|(_, p)| p["playable"].as_bool().unwrap_or(false))
+        .filter(|(_, p)| p.playable.unwrap_or(false))
         .map(|(i, p)| {
-            let team = p["team"].as_i64().unwrap_or(-1) as i32;
-            let team_race = usize::try_from(team).ok().and_then(|t| teams.get(t)).map_or(Race::Unchosen, |t| Race::from_twt(t["race"].as_u64().unwrap_or(4)));
+            let team = p.team.unwrap_or(-1) as i32;
+            let team_race = usize::try_from(team).ok().and_then(|t| teams.get(t)).map_or(Race::Unchosen, |t| Race::from_twt(t.race.unwrap_or(4)));
             // Historical maps name each player's race, or leave it open (4) and the team's race stands.
-            let race = if open { team_race } else { Some(Race::from_twt(p["race"].as_u64().unwrap_or(4))).filter(|r| *r != Race::Unchosen).unwrap_or(team_race) };
+            let race = if open { team_race } else { Some(Race::from_twt(p.race.unwrap_or(4))).filter(|r| *r != Race::Unchosen).unwrap_or(team_race) };
             let fleet = if open { vec![] } else { ships_of(map, i) };
-            Slot { player: i, name: p["name"].as_str().unwrap_or("").trim().into(), kind: Kind::Computer, race, team, flag: 0, fleet, weapons: vec![], names: vec![], crew: vec![] }
+            Slot { player: i, name: p.name.as_deref().unwrap_or("").trim().into(), kind: Kind::Computer, race, team, flag: 0, fleet, weapons: vec![], names: vec![], crew: vec![] }
         })
         .collect();
     if let Some(h) = slots.first_mut() {
@@ -688,8 +689,8 @@ pub(super) fn new_slots(map: &Value) -> Vec<Slot> {
 
 impl Skirmish {
     pub(super) fn load_map(&mut self) {
-        self.map_json = self.maps.get(self.selected).and_then(|m| crate::data::map_json(&m.0)).unwrap_or(Value::Null);
-        self.slots = new_slots(&self.map_json);
+        self.map_doc = self.maps.get(self.selected).and_then(|m| MapDoc::load(&m.0)).unwrap_or_default();
+        self.slots = new_slots(&self.map_doc);
         self.error = None;
         (self.ship_pick, self.fleet_pick, self.scroll) = (0, 0, 0);
         (self.ship_chosen, self.view_slot) = (false, false);
@@ -724,7 +725,7 @@ impl Skirmish {
     /// Whether fleet types and teams are chosen by the players (free-for-all open maps); team maps lock both to the map's team list.
     pub fn free_teams(&self) -> bool {
         // The map's 'Is Alliance Change Allowed' (true on exactly the free-for-all maps); older imports fall back to 'no team list'.
-        self.open() && self.map_json["alliance_change"].as_bool().unwrap_or_else(|| self.map_json["teams"].as_array().is_none_or(|t| t.is_empty()))
+        self.open() && self.map_doc.alliance_change.unwrap_or(self.map_doc.teams.is_empty())
     }
     /// The entries of a pull-down, the current value first (as the original lists them). Empty = the cell is not editable.
     pub fn choices(&self, cell: Cell) -> Vec<Choice> {
@@ -878,7 +879,7 @@ impl Skirmish {
         }
     }
     pub fn open(&self) -> bool {
-        self.map_json["assemble"].as_bool().unwrap_or(false)
+        self.map_doc.assemble.unwrap_or(false)
     }
     pub fn human(&self) -> Option<&Slot> {
         self.slots.iter().find(|s| s.kind == Kind::Human)
@@ -955,16 +956,11 @@ impl Skirmish {
     /// A historical map's pre-placed ships of slot `s` (class, position, name) and their ids. The first ship becomes the command ship:
     /// the one the map flags as primary (its Setup Ship rule), else map order.
     fn placed_fleet(&self, s: &Slot, lib: &Library) -> (Vec<(String, Option<[f32; 3]>, Option<String>)>, Vec<Option<i64>>) {
-        let mut placed: Vec<&Value> = self.map_json["ships"].as_array().into_iter().flatten().filter(|o| o["player"].as_u64() == Some(s.player as u64)).collect();
-        placed.sort_by_key(|o| o["primary"].as_bool() != Some(true));
+        let mut placed: Vec<_> = self.map_doc.ships.iter().filter(|o| o.player == Some(s.player as u64)).collect();
+        placed.sort_by_key(|o| o.primary != Some(true));
         placed
             .into_iter()
-            .filter_map(|o| {
-                Some((
-                    (o["type"].as_str()?.to_string(), Some([0, 1, 2].map(|i| o["pos"][i].as_f64().unwrap_or(0.0) as f32)), o["name"].as_str().map(String::from)),
-                    o["id"].as_i64(),
-                ))
-            })
+            .filter_map(|o| Some(((o.kind.clone()?, Some([0, 1, 2].map(|i| o.pos.as_ref().and_then(|p| p.at(i)).unwrap_or(0.0) as f32)), o.name.clone()), o.id)))
             .filter(|(t, _)| lib.classes.iter().any(|c| c.name == t.0))
             .unzip()
     }

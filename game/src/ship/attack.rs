@@ -155,7 +155,7 @@ pub fn course_to(routine: Routine, pos: Vec3, heading: f32, foe: Vec3, gap: f32,
             }
             // The line of sight turned 90° toward the side the target bears on (to port when it is on the port bow, else to starboard):
             // the ship turns toward it and circles it on that side. Fixed in the world for the whole leg.
-            let port = crate::ship::angdiff((-d.x).atan2(-d.z), heading) > 0.0;
+            let port = crate::ship::angdiff(crate::geom::heading_of(d), heading) > 0.0;
             let v = if port { -right } else { right };
             if gap > leg_r {
                 return None; // a break-off ends at once above its range (a submerged submarine's: 0)
@@ -172,7 +172,7 @@ pub fn course_to(routine: Routine, pos: Vec3, heading: f32, foe: Vec3, gap: f32,
                 *breakoff = None;
             }
             if gap < STANDOFF_CLOSE * r {
-                let port = crate::ship::angdiff((-d.x).atan2(-d.z), heading) > 0.0;
+                let port = crate::ship::angdiff(crate::geom::heading_of(d), heading) > 0.0;
                 let v = if port { -right } else { right };
                 *breakoff = Some((now, v));
                 return Some(vec![pos + v * r]);
@@ -201,7 +201,7 @@ pub fn standoff_throttle(gap: f32, r: f32) -> Option<f32> {
 pub fn throttle(routine: Routine, key: crate::scenario::SpawnIndex, pos: Vec3, heading: f32, point: Vec3) -> Option<f32> {
     let d = point - pos;
     let arc = if routine == Routine::Ram { RAM_FULL_THROTTLE_ARC } else { FULL_THROTTLE_ARC };
-    if crate::ship::angdiff((-d.x).atan2(-d.z), heading).abs() <= arc {
+    if crate::ship::angdiff(crate::geom::heading_of(d), heading).abs() <= arc {
         return None;
     }
     // PROVISIONAL: a fixed per-ship draw from its spawn number, not the original's random generator.

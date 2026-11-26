@@ -11,7 +11,8 @@ import sys
 import tarfile
 from pathlib import Path
 
-REPO = Path(__file__).resolve().parents[1]
+from tools.paths import REPO
+
 SUFFIX = ".exe" if sys.platform == "win32" else ""
 # Files the frozen importer reads from the checkout (tools resolve them next to their own module, see export_voices).
 IMPORTER_DATA = [

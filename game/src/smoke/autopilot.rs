@@ -231,14 +231,14 @@ fn forward_stand(pos: Vec3, foe: Vec3, reach: f32) -> (Vec3, Option<f32>) {
     } else if d < hold * STAND_CLOSE {
         (pos + (pos - foe).normalize_or(Vec3::X) * hold, None)
     } else {
-        (pos, Some((-(foe.x - pos.x)).atan2(-(foe.z - pos.z))))
+        (pos, Some(crate::geom::heading_of(foe - pos)))
     }
 }
 
 /// A mount's rest direction as an angle off the bow, in the heading convention (0 = bow, -Z; positive turns about +Y).
 fn mount_angle(rot: Quat) -> f32 {
     let d = rot * Vec3::NEG_Z;
-    (-d.x).atan2(-d.z)
+    crate::geom::heading_of(d)
 }
 
 /// The heading that turns the gun nearest the bow (of `guns`, angles off the bow) onto `bow_on`, the heading that points the bow at the
@@ -657,7 +657,7 @@ fn autopilot(
             .iter()
             .find(|m| {
                 let local = m.rot.inverse() * (at - p.pos).with_y(0.0);
-                at.distance(p.pos) < m.range && (-local.x).atan2(-local.z).abs() <= m.arc / 2.0
+                at.distance(p.pos) < m.range && crate::geom::arc_covers(local, m.arc)
             })
             .map(|m| m.bank)
     };
@@ -708,7 +708,7 @@ fn autopilot(
         let d = at.distance(p.pos);
         let stopped = ships.iter().find(|s| s.primary).is_some_and(|s| s.ship.speed.abs() < 0.1);
         if covered.is_none() && (d <= range * LOB_REACH || (d < range && stopped)) {
-            face = Some((-(at.x - p.pos.x)).atan2(-(at.z - p.pos.z)));
+            face = Some(crate::geom::heading_of(at - p.pos));
         }
         Some(if face.is_some() || covered.is_some() { p.pos } else { at })
     } else if let Some(from) = wants.iter().find_map(|x| match x {
@@ -741,7 +741,7 @@ fn autopilot(
         target.0 = Some(e);
         target.1 = Some(local);
         if spot.distance(p.pos) < SPOT_REACHED {
-            face = Some(tower_face((-(at.x - p.pos.x)).atan2(-(at.z - p.pos.z)), &sight.guns));
+            face = Some(tower_face(crate::geom::heading_of(at - p.pos), &sight.guns));
         }
         Some(if face.is_some() { p.pos } else { spot })
     } else if let Some((e, at, local)) = tower {
@@ -760,7 +760,7 @@ fn autopilot(
         // Up to SPOT_REACHED beyond the hold distance counts: a hull pinned on the island just outside it never closed the gap.
         if (TOWER_MIN..=TOWER_HOLD + SPOT_REACHED).contains(&d) && (!backing_out || d >= TOWER_HOLD - 15.0) {
             // Heading 0 faces -Z, rotating about +Y; turned so a gun that can hit bases bears.
-            face = Some(tower_face((-(at.x - p.pos.x)).atan2(-(at.z - p.pos.z)), &sight.guns));
+            face = Some(tower_face(crate::geom::heading_of(at - p.pos), &sight.guns));
             // A hold that lands no hit (hull pinned on the island with the tower out of the gun's reach) moves round the tower.
             let damage = w.iter().find(|u| u.e == e).map_or(0.0, |u| u.damage);
             if hold_stalled(sc.time, damage, &mut st.tower_stall) {

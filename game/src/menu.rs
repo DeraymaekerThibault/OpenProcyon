@@ -199,7 +199,7 @@ impl InGame<'_> {
 }
 /// Whether the in-game menu paused the simulation (so closing it resumes; a battle paused by the console or the player stays paused).
 #[derive(Resource, Default)]
-pub struct PausedByMenu(bool);
+pub struct PausedByMenu(crate::panels::PauseClaim);
 /// What the retail screen files' button elements (`menu/<screen>.json`, by their `impl` name) do in this engine.
 #[derive(Clone)]
 pub enum RetailButton {
@@ -360,8 +360,7 @@ fn button_sounds(
 pub fn plugin(app: &mut App) {
     let maps = skirmish_maps();
     // `--menu lobby --map <id>` opens the lobby for that map.
-    let args: Vec<String> = std::env::args().collect();
-    let asked = args.windows(2).find(|w| w[0] == "--map").and_then(|w| maps.iter().position(|m| m.0 == w[1]));
+    let asked = crate::cli::value("--map").and_then(|id| maps.iter().position(|m| m.0 == id));
     // The original opens on the historical maps (the 'Historical Maps' box ticked).
     let selected = asked.or_else(|| maps.iter().position(|m| !m.2)).unwrap_or(0);
     let historical = !maps.get(selected).is_some_and(|m| m.2);
@@ -374,7 +373,7 @@ pub fn plugin(app: &mut App) {
         fleet_size: FLEET_SIZE.default as usize,
         draw: 0,
         victory_limit: VICTORY_LIMIT.default,
-        map_json: Value::Null,
+        map_doc: Default::default(),
         error: None,
         dropdown: None,
         name_open: false,
@@ -734,18 +733,19 @@ fn esc_menu(
     });
     if let Some(Some(page)) = scripted {
         ui.open();
-        (paused.0, *next) = (!vtime.is_paused(), NextState::Pending(Overlay::Open(page)));
-        vtime.pause();
+        *next = NextState::Pending(Overlay::Open(page));
+        paused.0.claim_afresh(&mut vtime);
     } else if keys.just_pressed(KeyCode::Escape) {
         let target = Overlay::after_esc(ig.page());
         match target {
             Overlay::Closed => close_overlay(&mut commands, &roots, &mut paused, &mut next, &mut vtime),
             Overlay::Open(_) => {
                 if ig.page().is_none() {
-                    paused.0 = !vtime.is_paused();
+                    paused.0.claim_afresh(&mut vtime);
+                } else {
+                    vtime.pause();
                 }
                 next.set(target);
-                vtime.pause();
             }
         }
     }
@@ -754,21 +754,21 @@ fn esc_menu(
 /// A decided skirmish plays on under the end line (`scenario::EndLine`) for `END_LINE_SECS`, then shows the Game Summary (missions end
 /// through their own rules).
 fn summary_on_end(
-    mission: Option<Res<crate::campaign::Mission>>,
+    script: crate::rules::active::ActiveScript,
     out: Res<crate::scenario::Outcome>,
     (mut paused, mut next): (ResMut<PausedByMenu>, ResMut<NextState<Overlay>>),
     mut vtime: ResMut<Time<Virtual>>,
     mut waited: Local<f32>,
 ) {
-    if *out == crate::scenario::Outcome::Playing || mission.is_some() {
+    if *out == crate::scenario::Outcome::Playing || script.is_mission() {
         *waited = 0.0;
         return;
     }
     let before = *waited;
     *waited += vtime.delta_secs();
     if before < crate::scenario::END_LINE_SECS && *waited >= crate::scenario::END_LINE_SECS {
-        (paused.0, *next) = (!vtime.is_paused(), NextState::Pending(Overlay::Open(Page::Summary)));
-        vtime.pause();
+        *next = NextState::Pending(Overlay::Open(Page::Summary));
+        paused.0.claim_afresh(&mut vtime);
     }
 }
 
@@ -776,9 +776,7 @@ fn close_overlay(commands: &mut Commands, roots: &Query<Entity, With<MenuRoot>>,
     for e in roots {
         commands.entity(e).despawn();
     }
-    if std::mem::take(&mut paused.0) {
-        vtime.unpause();
-    }
+    paused.0.release(vtime);
     next.set(Overlay::Closed);
 }
 

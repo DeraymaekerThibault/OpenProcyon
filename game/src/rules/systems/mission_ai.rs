@@ -107,7 +107,7 @@ pub(super) fn mission_ai(
             ms.stop_at_end = true;
             continue;
         }
-        if primary || h.destroyed || busy.contains(e) || held.contains(e) || pilot.is_some_and(|p| p.hold || p.destination.is_some()) {
+        if primary || h.destroyed || busy.contains(e) || held.contains(e) || pilot.is_some_and(crate::ship::FleetPilot::is_steering) {
             continue;
         }
         ship.throttle = None;
@@ -162,13 +162,11 @@ pub(super) fn mission_ai(
                 let slot = (lpos + Quat::from_rotation_y(lheading) * order.station.offset(out)).with_y(here.y);
                 let top = crate::ship::max_speed(&ship, class, h);
                 let to = slot - here;
-                let error = if to.length_squared() > 1.0 { crate::ship::angdiff((-to.x).atan2(-to.z), ship.heading) } else { 0.0 };
+                let error = crate::ship::follow_error(to, ship.heading);
                 let aim = crate::ship::steer_round(here, slot, lpos, class.radius + lib.classes[lclass].radius);
                 let wanted = crate::ship::follow_speed(true, to.length(), lspeed, top, error);
-                ship.waypoints = if to.length() > 3.0 { vec![aim] } else { vec![] };
-                ship.goal = Some(lheading);
-                ship.order = if wanted < 0.01 { EngineOrder::Stop } else { EngineOrder::Full };
-                ship.throttle = Some(if top > 0.001 { (wanted / top).clamp(0.0, 1.0) } else { 0.0 });
+                let helm = crate::ship::FollowHelm { top, max_share: 1.0, emergency_over_top: false };
+                crate::ship::follow_station(&mut ship, aim, to.length(), Some(lheading), wanted, helm);
                 ms.stop_at_end = false;
             } else {
                 // Nothing to follow (the group is gone): stand still until a ship of it shows up.
@@ -190,7 +188,7 @@ pub(super) fn mission_ai(
         if let (Some((foe, fp)), false) = (chase, ms.stance == Stance::Dummy) {
             let (goal, order, throttle) = if ms.ram && ordered.is_some() {
                 let d = fp - tf.translation;
-                ((-d.x).atan2(-d.z), EngineOrder::Emergency, crate::ship::attack::throttle(crate::ship::attack::Routine::Ram, key(e), tf.translation, ship.heading, fp))
+                (crate::geom::heading_of(d), EngineOrder::Emergency, crate::ship::attack::throttle(crate::ship::attack::Routine::Ram, key(e), tf.translation, ship.heading, fp))
             } else if let Some(away) = crate::ship::flee(&holes, tf.translation) {
                 (away, EngineOrder::Emergency, None)
             } else {
@@ -205,7 +203,7 @@ pub(super) fn mission_ai(
                         };
                         let course = crate::ship::attack::course(routine, tf.translation, ship.heading, at, gap, range[0], time.elapsed_secs(), breakoffs.entry(e).or_default());
                         let d = course[0] - tf.translation;
-                        ((-d.x).atan2(-d.z), EngineOrder::Emergency, crate::ship::attack::throttle(routine, key(e), tf.translation, ship.heading, course[0]))
+                        (crate::geom::heading_of(d), EngineOrder::Emergency, crate::ship::attack::throttle(routine, key(e), tf.translation, ship.heading, course[0]))
                     }
                     None => (ship.heading, EngineOrder::Stop, None),
                 }
@@ -226,9 +224,9 @@ pub(super) fn mission_ai(
                 let to_last = ship.waypoints.last().map_or(0.0, |p| p.distance(tf.translation));
                 if !(last && to_last < 2.0 * class.radius) {
                     let top = crate::ship::max_speed(&ship, class, h);
-                    let fraction = if top > 0.001 { (ship.speed.abs() / top).clamp(0.0, 1.0) } else { 0.0 };
+                    let fraction = crate::ship::speed_fraction(ship.speed, top);
                     let d = wp - tf.translation;
-                    let error = crate::ship::angdiff((-d.x).atan2(-d.z), ship.heading);
+                    let error = crate::ship::angdiff(crate::geom::heading_of(d), ship.heading);
                     ship.throttle = Some(crate::ship::path_end::throttle(fraction, error, to_last, class.radius, false));
                     continue;
                 }

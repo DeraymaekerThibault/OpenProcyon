@@ -77,7 +77,7 @@ fn wall_blocks_but_geometry_above_ship_does_not() {
 #[test]
 #[ignore = "needs imported assets"]
 fn nis_stops_helm_and_combat_motion_but_keeps_scripted_routes_and_resumes() {
-    let lib = crate::Library::load(crate::assets_dir());
+    let lib = crate::testutil::lib();
     let class = lib.index("Ship_Navy_Cutter");
     let [primary_health, combat_health, route_health, ally_health] = [0; 4].map(|_| crate::Health::new(&lib.classes[class]));
     let ship =
@@ -118,7 +118,7 @@ fn nis_stops_helm_and_combat_motion_but_keeps_scripted_routes_and_resumes() {
 #[test]
 #[ignore = "needs imported assets"]
 fn ecs_ship_contact_and_static_wall_do_not_pass_through() {
-    let mut lib = crate::Library::load(crate::assets_dir());
+    let mut lib = crate::testutil::lib();
     let class = lib.index("Ship_Navy_Cutter");
     assert_eq!(lib.classes[class].collision_bounds, [Vec3::new(-2.25, -1.5, -6.5), Vec3::new(2.25, 2.0, 7.0)]);
     lib.classes[class].collision_bounds = [Vec3::new(-1.0, -1.0, -3.0), Vec3::new(1.0, 1.0, 3.0)];
@@ -147,7 +147,7 @@ fn ecs_ship_contact_and_static_wall_do_not_pass_through() {
 }
 /// Closest approach to a marker behind a wall for a cutter on a move order; `player` makes it the human's own ship.
 fn wall_run(player: bool) -> f32 {
-    let mut lib = crate::Library::load(crate::assets_dir());
+    let mut lib = crate::testutil::lib();
     let class = lib.index("Ship_Navy_Cutter");
     lib.classes[class].collision_bounds = [Vec3::new(-1.0, -1.0, -3.0), Vec3::new(1.0, 1.0, 3.0)];
     let health = crate::Health::new(&lib.classes[class]);
@@ -197,7 +197,7 @@ fn the_humans_move_order_runs_straight_into_a_wall() {
 fn ai_ship_slows_for_an_island_in_its_way_creeps_round_it_and_picks_up_speed_again() {
     // Retail Frigate on Border Dispute: 6.6 u/s straight at the map-centre island, down to 1.6 u/s at 5 units, never stopped, back to cruise.
     // A wall stands in for the island; the captain keeps asking for the straight line, as `ship::ai` does every tick.
-    let lib = crate::Library::load(crate::assets_dir());
+    let lib = crate::testutil::lib();
     let class = lib.index("Ship_Procyon_Frigate");
     let health = crate::Health::new(&lib.classes[class]);
     let mut app = sail_app(lib, std::time::Duration::from_millis(33));
@@ -245,7 +245,7 @@ fn base_hover_hits_the_island_hull_but_not_the_water_near_its_dock_points() {
 #[test]
 #[ignore = "needs imported assets"]
 fn retail_island_mesh_blocks_a_ship_driven_through_its_centre() {
-    let lib = crate::Library::load(crate::assets_dir());
+    let lib = crate::testutil::lib();
     let class = lib.index("Ship_Navy_Cutter");
     let health = crate::Health::new(&lib.classes[class]);
     let shapes = Shapes::from_world(&mut World::new());
@@ -281,7 +281,7 @@ fn course_prefix_stops_before_a_wall() {
     assert!(!touches(bounds, &path[keep - 1], &scenery));
 }
 fn ship_rock_contact(mass: f32) -> (Vec3, Vec3, Vec3, f32) {
-    let mut lib = crate::Library::load(crate::assets_dir());
+    let mut lib = crate::testutil::lib();
     let class = lib.index("Ship_Navy_Cutter");
     lib.classes[class].phys.thrust = 0.0; // Isolate collision from engine acceleration/braking.
     lib.classes[class].collision_bounds = [Vec3::splat(-1.0), Vec3::splat(1.0)];
@@ -322,7 +322,7 @@ fn a_rock_contact_pushes_apart_by_mass_keeps_the_ships_speed_and_hurts_the_rock(
 #[ignore = "needs imported assets"]
 fn ship_contact_pushes_the_hulls_apart_and_keeps_both_speeds() {
     for other in ["Ship_Navy_Torpedo", "Ship_Navy_Tug"] {
-        let mut lib = crate::Library::load(crate::assets_dir());
+        let mut lib = crate::testutil::lib();
         let a = lib.index("Ship_Navy_Cutter");
         let b = lib.index(other);
         for index in [a, b] {
@@ -349,7 +349,7 @@ fn ship_contact_pushes_the_hulls_apart_and_keeps_both_speeds() {
 #[test]
 #[ignore = "needs imported assets"]
 fn a_tow_moves_the_pair_back_together_by_a_quarter_and_three_quarters() {
-    let lib = crate::Library::load(crate::assets_dir());
+    let lib = crate::testutil::lib();
     let class = lib.index("Ship_Navy_Cutter");
     let health = || crate::Health::new(&lib.classes[class]);
     let hull = crate::Ship { heading: 0.0, order: EngineOrder::Full, ..crate::Ship::new(class, crate::Side::Player) };
@@ -396,7 +396,7 @@ fn contact_damage_rate_is_per_0_033_s() {
 #[test]
 #[ignore = "needs imported assets"]
 fn a_ship_and_a_rock_respond_once_per_tick_with_one_ticks_rate() {
-    let mut lib = crate::Library::load(crate::assets_dir());
+    let mut lib = crate::testutil::lib();
     let class = lib.index("Ship_Navy_Cutter");
     lib.classes[class].phys.thrust = 0.0;
     lib.classes[class].collision_bounds = [Vec3::splat(-1.0), Vec3::splat(1.0)];
@@ -430,7 +430,7 @@ fn a_ship_and_a_rock_respond_once_per_tick_with_one_ticks_rate() {
 fn a_rock_broken_by_contact_is_credited_to_the_ship() {
     let mut credits = vec![];
     for hp in [1.0, f32::MAX] {
-        let mut lib = crate::Library::load(crate::assets_dir());
+        let mut lib = crate::testutil::lib();
         let class = lib.index("Ship_Navy_Cutter");
         lib.classes[class].phys.thrust = 0.0;
         lib.classes[class].collision_bounds = [Vec3::splat(-1.0), Vec3::splat(1.0)];
@@ -570,7 +570,7 @@ fn island_contact_reproduces_the_original_rest_positions() {
 #[test]
 #[ignore = "needs imported assets (data/collision.json with box trees)"]
 fn island_contact_through_the_game_scheduler() {
-    let lib = crate::Library::load(crate::assets_dir());
+    let lib = crate::testutil::lib();
     let shapes = Shapes::from_world(&mut World::new());
     // (ship, island, start, heading, expected rest), game axes
     let cases = [
@@ -585,7 +585,7 @@ fn island_contact_through_the_game_scheduler() {
         let mut app = App::new();
         let mut time = Time::<()>::default();
         time.advance_by(std::time::Duration::from_secs_f32(1.0 / 30.0));
-        app.insert_resource(time).insert_resource(crate::Library::load(crate::assets_dir())).add_systems(Update, sail);
+        app.insert_resource(time).insert_resource(crate::testutil::lib()).add_systems(Update, sail);
         app.world_mut().spawn(shapes.obstacle(kind, &Transform::from_xyz(ix, 0.0, -iy)).unwrap());
         let tf = game_pose(start[0], start[1], heading[0], heading[1]);
         let ship = crate::Ship { heading: tf.rotation.to_euler(EulerRot::YXZ).0, order: EngineOrder::Full, throttle: Some(0.0), ..crate::Ship::new(class, crate::Side::Player) };
@@ -624,7 +624,7 @@ fn a_ship_pair_is_pushed_apart_by_depth_times_cosine_along_the_horizontal_normal
 #[test]
 #[ignore = "needs imported assets"]
 fn dying_ship_sails_on_and_collides_with_nothing() {
-    let mut lib = crate::Library::load(crate::assets_dir());
+    let mut lib = crate::testutil::lib();
     let class = lib.index("Ship_Navy_Cutter");
     lib.classes[class].collision_bounds = [Vec3::new(-1.0, -1.0, -3.0), Vec3::new(1.0, 1.0, 3.0)];
     let mut app = sail_app(lib, std::time::Duration::from_millis(33));
@@ -654,7 +654,7 @@ fn dying_ship_sails_on_and_collides_with_nothing() {
 #[test]
 #[ignore = "needs imported assets"]
 fn a_new_ship_cannot_be_rammed_for_its_first_3_5_s() {
-    let mut lib = crate::Library::load(crate::assets_dir());
+    let mut lib = crate::testutil::lib();
     let a = lib.index("Ship_Navy_Cutter");
     let b = lib.index("Ship_Navy_Tug");
     for index in [a, b] {
@@ -720,7 +720,7 @@ fn avoiders_sail_alike_whatever_the_query_order() {
     #[derive(Component)]
     struct Moved;
     fn run(move_some: bool) -> (Vec<Entity>, Vec<(Vec3, f32, f32)>) {
-        let lib = crate::Library::load(crate::assets_dir());
+        let lib = crate::testutil::lib();
         let class = lib.index("Ship_Navy_Cutter");
         let healths: Vec<_> = (0..6).map(|_| crate::Health::new(&lib.classes[class])).collect();
         let mut app = sail_app(lib, std::time::Duration::from_millis(33));
@@ -730,7 +730,7 @@ fn avoiders_sail_alike_whatever_the_query_order() {
                 let a = i as f32 * std::f32::consts::TAU / 6.0;
                 let at = Vec3::new(a.cos(), 0.0, a.sin()) * 60.0;
                 let ship = crate::Ship {
-                    heading: (-at.x).atan2(-at.z) + std::f32::consts::PI,
+                    heading: crate::geom::heading_of(at) + std::f32::consts::PI,
                     speed: 8.0,
                     order: EngineOrder::Full,
                     waypoints: vec![-at],

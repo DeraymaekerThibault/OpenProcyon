@@ -11,7 +11,7 @@ import re
 import shutil
 from pathlib import Path
 
-from tools.jsonio import dump
+from tools.jsonio import write
 
 CREW_LINE = re.compile(
     r"[a-z]{2}(gunner|captain|firstmate|helmsman|engineer|rigger|spotter)\d"
@@ -34,7 +34,7 @@ def table(root, voicelines, races, dst=EVENTS):
             )
             if names:
                 ev[d.name] = names
-    Path(dst).write_text(dump(events, sort_keys=True), encoding="utf-8")
+    write(Path(dst), events, sort_keys=True)
     print(sum(len(v) for r in events.values() for v in r.values()), "event entries")
 
 

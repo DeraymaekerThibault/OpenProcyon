@@ -1,9 +1,7 @@
 use super::*;
 use serde_json::json;
 
-fn e(n: u32) -> Entity {
-    Entity::from_raw_u32(n).unwrap()
-}
+use crate::rules::fixtures::{script_with_media, unit as base_unit};
 fn script() -> Script {
     let data = json!({
         "player_start": {"name": "Hero"},
@@ -24,10 +22,10 @@ fn script() -> Script {
         "ships": []
     });
     let media = json!({"speech": {"INTRO_1": {"text": "Welcome aboard, captain. The raiders are waiting at the gate and we have very little time left to act."}, "NOTEXT": {}}});
-    Script::new(&data, media)
+    script_with_media(data, media)
 }
 fn unit(n: u32, id: i64, name: &str, owner: &str) -> Unit {
-    Unit { name: name.into(), owner: owner.into(), groups: vec![owner.into()], ..Unit::new(e(n), id, Vec3::ZERO) }
+    Unit { id, groups: vec![owner.into()], ..base_unit(n, name, owner) }
 }
 fn world() -> Vec<Unit> {
     vec![unit(1, 1, "Flagship", "Hero"), unit(2, 25, "Black Gull", "Raiders"), unit(3, 26, "Cutpurse", "Raiders")]

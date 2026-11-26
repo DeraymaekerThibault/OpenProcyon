@@ -4,7 +4,23 @@ use serde_json::Value;
 
 use super::*;
 
+/// A follow-path order for `units` on the path named by field `path_key`; 'Follow Mode' "loop" repeats it.
+pub(super) fn follow(units: Vec<Entity>, a: &Value, path_key: &str, closest: bool) -> Fx {
+    Fx::Path { units, path: s(a, path_key).into(), closest, looping: s(a, "Follow Mode") == "loop" }
+}
+
 impl Script {
+    /// Where point `idx` of the mission's point set `set` lies (world position), if the set has that point.
+    pub(in crate::rules) fn point_of(&self, set: &str, idx: usize) -> Option<Vec3> {
+        self.point_sets[set].get(idx).map(|p| game_to_bevy(&p["pos"]))
+    }
+    /// Sets one state of the objective task the action names (field "Objective Task") to the boolean in `key`.
+    fn set_task(&mut self, a: &Value, key: &str, set: impl FnOnce(&mut Task, bool)) {
+        let n = s(a, "Objective Task");
+        if let Some(t) = self.tasks.iter_mut().find(|t| t.name == n) {
+            set(t, b(a, key));
+        }
+    }
     pub(in crate::rules) fn act(&mut self, a: &Value, w: &[Unit], out: &mut Vec<Fx>, rule: &str) {
         let Some(ty) = RuleType::of(Role::Action, a) else {
             self.warn(&format!("action '{}' in rule '{rule}'", s(a, "Type")));
@@ -29,24 +45,9 @@ impl Script {
                 fade_out: f(a, "Fade Out Time ( secs )"),
                 vol: f(a, "New Volume ( 0 to 1 )"),
             }),
-            T::SetObjectiveTaskActiveState => {
-                let n = s(a, "Objective Task");
-                if let Some(t) = self.tasks.iter_mut().find(|t| t.name == n) {
-                    t.active = b(a, "Active State");
-                }
-            }
-            T::SetObjectiveTaskFailedState => {
-                let n = s(a, "Objective Task");
-                if let Some(t) = self.tasks.iter_mut().find(|t| t.name == n) {
-                    t.failed = b(a, "Failed State");
-                }
-            }
-            T::SetObjectiveTaskCompleteState => {
-                let n = s(a, "Objective Task");
-                if let Some(t) = self.tasks.iter_mut().find(|t| t.name == n) {
-                    t.complete = b(a, "Complete State");
-                }
-            }
+            T::SetObjectiveTaskActiveState => self.set_task(a, "Active State", |t, on| t.active = on),
+            T::SetObjectiveTaskFailedState => self.set_task(a, "Failed State", |t, on| t.failed = on),
+            T::SetObjectiveTaskCompleteState => self.set_task(a, "Complete State", |t, on| t.complete = on),
             T::SetCurrentObjectivePoint => {
                 let n = s(a, "Objective Point");
                 self.point = self.points.as_array().and_then(|p| p.iter().position(|x| x["Name"] == n));
@@ -58,7 +59,7 @@ impl Script {
                 self.map_text.insert(s(a, "Map Text Name").into(), b(a, "Visible On Starmap"));
             }
             T::GroupToFollowPath => {
-                out.push(Fx::Path { units: g("Group Name"), path: s(a, "Path Name").into(), closest: b(a, "Find Closest Point"), looping: s(a, "Follow Mode") == "loop" });
+                out.push(follow(g("Group Name"), a, "Path Name", b(a, "Find Closest Point")));
                 out.push(Fx::MeteorPath {
                     group: s(a, "Group Name").into(),
                     path: s(a, "Path Name").into(),
@@ -67,7 +68,7 @@ impl Script {
                 });
             }
             T::SetupSpaceAnimalFlock => {
-                out.push(Fx::Path { units: g("Group Name"), path: s(a, "Path Name").into(), closest: b(a, "Find Closest Point"), looping: s(a, "Follow Mode") == "loop" });
+                out.push(follow(g("Group Name"), a, "Path Name", b(a, "Find Closest Point")));
                 out.push(Fx::Velocity(g("Group Name"), f(a, "Velocity")));
             }
             T::SetupAsteroidBelt => out.push(Fx::Asteroids {
@@ -84,8 +85,8 @@ impl Script {
             // An attack order flown bow-on at emergency speed; the contact damage is collision.rs `Ram`.
             T::GroupAToRamGroupB => out.push(Fx::Ram(g("Group Name"), s(a, "Group Unit Target").into())),
             T::TeleportGroupUnit => {
-                if let Some(p) = self.point_sets[s(a, "Point Set Name")].get(0) {
-                    out.push(Fx::Teleport(g("Group/Unit Name"), game_to_bevy(&p["pos"])));
+                if let Some(dest) = self.point_of(s(a, "Point Set Name"), 0) {
+                    out.push(Fx::Teleport(g("Group/Unit Name"), dest));
                 }
             }
             T::DockShips => out.push(Fx::Dock(g("Docking Group"), g("Target to Dock to"))),
@@ -224,7 +225,7 @@ impl Script {
                 let units: Vec<Entity> = w.iter().filter(|u| u.id == id).map(|u| u.e).collect();
                 out.push(Fx::Stance(units.clone(), Stance::parse(s(a, "AI Stance"))));
                 if self.paths.get(s(a, "Ship Path")).is_some() {
-                    out.push(Fx::Path { units, path: s(a, "Ship Path").into(), closest: false, looping: s(a, "Follow Mode") == "loop" });
+                    out.push(follow(units, a, "Ship Path", false));
                 }
             }
             // Island setups are applied at spawn (campaign.rs: owner, combat strength); mission essential is the primary-alive loss rule.
@@ -236,8 +237,8 @@ impl Script {
             T::SetGroupUnitBorderZone => out.push(Fx::Border(g("Group/Unit Name"), Some(s(a, "Polygon Name").into()))),
             T::ClearGroupUnitBorderZone => out.push(Fx::Border(g("Group/Unit Name"), None)),
             T::SetGroupUnitBorderZoneReturnPoint => {
-                if let Some(p) = self.point_sets[s(a, "Pointset Name")].get(0) {
-                    out.push(Fx::ReturnPoint(g("Group/Unit Name"), game_to_bevy(&p["pos"])));
+                if let Some(dest) = self.point_of(s(a, "Pointset Name"), 0) {
+                    out.push(Fx::ReturnPoint(g("Group/Unit Name"), dest));
                 }
             }
             T::CrewSpeechToggleOnOff => self.crew_speech = b(a, "Crew Speech State State"),

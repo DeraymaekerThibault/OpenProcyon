@@ -131,7 +131,7 @@ mod rotation_tests {
             .init_asset::<StandardMaterial>()
             .init_asset::<AudioSource>()
             .init_asset::<crate::fx::EffectMaterial>()
-            .insert_resource(Library::load(crate::assets_dir()))
+            .insert_resource(crate::testutil::lib())
             .init_resource::<fx::FxLib>()
             .init_resource::<collision::Shapes>()
             .init_resource::<data::AsteroidDefs>()
@@ -330,4 +330,24 @@ fn a_battle_start_is_seen_once_per_system_and_snapshots_detail() {
     app.update();
     assert_eq!(app.world().resource::<News>().0, [true, false, true, false]);
     assert_eq!(*app.world().resource::<fx::DetailScale>(), fx::DetailScale(menu::detail_scale()));
+}
+
+/// Every battle start, a restart included, begins with fresh summary counts and without the last battle's lobby roster, skirmish
+/// end rules or nebula state: a restart does not re-enter the Battle screen and a mission sets none of these itself.
+#[test]
+fn a_battle_start_forgets_the_last_battles_summary_roster_end_rules_and_nebula_state() {
+    let mut world = World::new();
+    let mut stats = crate::stats::GameStats::default();
+    stats.players.insert("Hero".into(), crate::stats::Line { start: 3, ..default() });
+    world.insert_resource(stats);
+    world.insert_resource(crate::alliance::Roster::default());
+    world.insert_resource(crate::victory::Victory::scripted(vec![]));
+    world.insert_resource(crate::nebula::Storms(serde_json::json!([{ "name": "old" }])));
+    world.insert_resource(crate::nebula::InNebula([Entity::from_raw_u32(7).unwrap()].into_iter().collect()));
+    reset_sim(&mut world);
+    assert!(world.resource::<crate::stats::GameStats>().players.is_empty(), "a restart counts the new battle only");
+    assert!(!world.contains_resource::<crate::alliance::Roster>(), "a mission after a skirmish shows no player list");
+    assert!(!world.contains_resource::<crate::victory::Victory>());
+    assert!(!world.contains_resource::<crate::nebula::Storms>(), "a map without a nebula setup keeps none of the last one's");
+    assert!(world.resource::<crate::nebula::InNebula>().0.is_empty());
 }

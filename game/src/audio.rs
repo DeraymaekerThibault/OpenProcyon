@@ -194,23 +194,10 @@ fn ui_sounds(vtime: Res<Time<Virtual>>, mission: Option<Res<crate::campaign::Mis
 }
 
 /// Asset path of a sound by name (case-insensitive, no extension). Files live in `sound/<kind>/` or in a mission's `maps/<id>/speech/`
-/// and are found by scanning once, so mods may add sounds anywhere under those folders. Unknown names fall back to `sound/<name>.ogg`.
+/// and are found by scanning once (`data::AssetIndex`), so mods may add sounds anywhere under those folders. Unknown names fall back to `sound/<name>.ogg`.
 pub fn sound(name: &str) -> String {
     static INDEX: std::sync::OnceLock<std::collections::HashMap<String, String>> = std::sync::OnceLock::new();
-    let index = INDEX.get_or_init(|| {
-        let root = crate::assets_dir();
-        let mut files = vec![];
-        crate::modding::walk(&root.join("sound"), std::path::Path::new("sound"), &mut files);
-        for m in std::fs::read_dir(root.join("maps")).into_iter().flatten().flatten() {
-            let id = m.file_name();
-            crate::modding::walk(&m.path().join("speech"), &std::path::Path::new("maps").join(&id).join("speech"), &mut files);
-        }
-        files
-            .iter()
-            .filter(|p| p.extension().is_some_and(|e| e == "ogg"))
-            .filter_map(|p| Some((p.file_stem()?.to_str()?.to_lowercase(), p.to_string_lossy().replace('\\', "/"))))
-            .collect()
-    });
+    let index = INDEX.get_or_init(|| crate::data::AssetIndex::scan_sounds(crate::assets_dir()));
     let name = name.to_lowercase();
     index.get(&name).cloned().unwrap_or_else(|| format!("sound/{name}.ogg"))
 }
