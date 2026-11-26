@@ -136,10 +136,9 @@ impl Script {
                 }
             }
             T::SetAllianceBetweenPlayerAAndPlayerBToTRUEFALSE => {
-                let (x, y) = (Owner::from(base(s(a, "PLAYER A"))), Owner::from(base(s(a, "PLAYER B"))));
-                self.hostile.retain(|p| !((p.0 == x && p.1 == y) || (p.0 == y && p.1 == x)));
-                if !b(a, "SET ALLIANCE TO") {
-                    self.hostile.insert((x, y));
+                let sides = (self.alliances.side_of(base(s(a, "PLAYER A"))), self.alliances.side_of(base(s(a, "PLAYER B"))));
+                if let (Some(x), Some(y)) = sides {
+                    self.alliances.set(x, y, b(a, "SET ALLIANCE TO"));
                 }
             }
             T::TowShip => self.tow_specs.push((s(a, "Docking Group").into(), s(a, "Target to Tow").into())),

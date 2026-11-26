@@ -669,13 +669,7 @@ fn say(app: &mut App, lines: &[&str]) -> String {
     app.world().resource::<Console>().log.join("\n")
 }
 fn skirmish_script(data: serde_json::Value) -> SkirmishScript {
-    SkirmishScript {
-        script: Script::new(&data, serde_json::json!({})),
-        sides: [("Player0".to_string(), Side::Player)].into(),
-        paths: data["paths"].clone(),
-        environment: serde_json::Value::Null,
-        map_text: serde_json::Value::Null,
-    }
+    SkirmishScript { script: Script::new(&data, serde_json::json!({})), paths: data["paths"].clone(), environment: serde_json::Value::Null, map_text: serde_json::Value::Null }
 }
 
 #[test]

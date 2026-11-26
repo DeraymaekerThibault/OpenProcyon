@@ -907,14 +907,14 @@ impl Skirmish {
     pub(super) fn hostile(&self, a: &Slot, b: &Slot) -> bool {
         b.kind.live() && !(a.team >= 0 && a.team == b.team) && a.player != b.player
     }
-    /// The battle: one group per open slot. Allies (same team as you) fight on our side; every other team (or teamless slot) is
-    /// its own side, hostile to us and to the others (The Maw: Navy, Procyon and Pirates all fight each other).
+    /// The battle: one group per open slot, each its own side in the alliance table (the human's first); slots of one team start
+    /// allied (`scenario::spawn`), every other pair hostile (The Maw: Navy, Procyon and Pirates all fight each other).
     /// Historical maps use their pre-placed ships and positions; open maps use the assembled (or auto-built computer) fleets.
     pub fn plan(&self, lib: &Library) -> Vec<crate::Group> {
         let Some(h) = self.human() else { return vec![] };
         let open = self.open();
-        // Hostile sides in slot order: Enemy for the first hostile team, then Side(2), Side(3), ...
-        let mut foes: Vec<(i32, usize)> = vec![];
+        // The computer slots' sides in slot order: Enemy for the first, then Side(2), Side(3), ...
+        let mut computers = 0;
         self.slots
             .iter()
             .filter(|s| s.kind.live())
@@ -931,7 +931,12 @@ impl Skirmish {
                     let names = s.ship_names(lib);
                     (s.fleet.iter().zip(names).map(|(n, label)| (n.clone(), None, label)).collect(), vec![], None)
                 };
-                let side = if s.kind == Kind::Human || !self.hostile(h, s) { crate::Side::Player } else { foe_side(&mut foes, s) };
+                let side = if s.kind == Kind::Human {
+                    crate::Side::Player
+                } else {
+                    computers += 1;
+                    crate::Side(computers)
+                };
                 // A built computer fleet keeps its weapons and its named crew (retail computer ships carry named crew; their speed and sight follow the posts).
                 let (weapons, crew) = match computer_build {
                     Some(built) => built,
@@ -964,16 +969,6 @@ impl Skirmish {
             .filter(|(t, _)| lib.classes.iter().any(|c| c.name == t.0))
             .unzip()
     }
-}
-
-/// The hostile side of slot `s`: one side per hostile team (teamless slots each their own), numbered in the order first met.
-fn foe_side(foes: &mut Vec<(i32, usize)>, s: &Slot) -> crate::Side {
-    let key = if s.team >= 0 { (s.team, 0) } else { (-1, s.player) };
-    let i = foes.iter().position(|k| *k == key).unwrap_or_else(|| {
-        foes.push(key);
-        foes.len() - 1
-    });
-    crate::Side(1 + i as u8)
 }
 
 /// The skirmish list: every `maps/<id>/map.json` flagged `"skirmish": true` (campaign maps are not offered), sorted by id, with
@@ -1046,7 +1041,7 @@ pub fn flag_icon(race: Race, flag: u8) -> usize {
 
 #[cfg(test)]
 mod ai_weapon_tests {
-    use super::{Kind, Race, Slot, allowed_guns, foe_side, swap_pool};
+    use super::{allowed_guns, swap_pool};
     #[test]
     fn swap_pools_by_mount_size() {
         assert_eq!(swap_pool("Light Mount").len(), 4);
@@ -1063,14 +1058,5 @@ mod ai_weapon_tests {
         let list = serde_json::json!({"Gun_A": true, "Gun_B": false});
         assert_eq!(allowed_guns(&list), Some(["Gun_A".to_string()].into()));
         assert_eq!(allowed_guns(&serde_json::Value::Null), None);
-    }
-    fn slot(player: usize, team: i32) -> Slot {
-        Slot { player, name: String::new(), kind: Kind::Computer, race: Race::Unchosen, team, flag: 0, fleet: vec![], weapons: vec![], names: vec![], crew: vec![] }
-    }
-    #[test]
-    fn hostile_sides_number_by_team_in_the_order_met() {
-        let mut foes = vec![];
-        let sides: Vec<_> = [slot(1, 3), slot(2, -1), slot(3, 3), slot(4, -1), slot(2, -1)].iter().map(|s| foe_side(&mut foes, s).0).collect();
-        assert_eq!(sides, [1, 2, 1, 3, 2], "one side per team, each teamless slot on its own");
     }
 }

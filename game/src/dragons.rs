@@ -11,7 +11,7 @@ use crate::campaign::{Mission, MissionShip};
 use crate::combat::Health;
 use crate::environment::SpaceAnimal;
 use crate::rules::Stance;
-use crate::{Scenario, Ship, Side, game_to_bevy};
+use crate::{Scenario, Ship, game_to_bevy};
 
 #[derive(Component)]
 pub struct Dragon {
@@ -134,7 +134,7 @@ fn think(
     mut dragons: Query<(Entity, &mut Dragon, &mut SpaceAnimal, &Transform, &mut Visibility), Without<Ship>>,
     ships: Query<(Entity, &Transform, &Ship, &Health, Option<&MissionShip>, Has<crate::commands::Commander>)>,
     mut sfx: MessageWriter<crate::audio::Sfx>,
-    mut shoot: MessageWriter<crate::combat::Shoot>,
+    (mut shoot, table): (MessageWriter<crate::combat::Shoot>, crate::alliance::Hostility),
 ) {
     let (sc, def) = match (&mission, &skirmish) {
         (Some(m), _) => (&m.script, &m.data["environment"]["dragon"]),
@@ -190,7 +190,7 @@ fn think(
         let candidates = || ships.iter().filter(|s| !s.3.destroyed && s.4.is_none_or(|m| m.visible)).map(|s| (s.0, s.1.translation, s.2, s.4, s.5));
         let nearest = |pred: &dyn Fn(Option<&MissionShip>, bool) -> bool| crate::nearest(candidates().filter(|c| pred(c.3, c.4)), tf.translation, |c| c.1);
         if matches!(d.stance, Stance::Aggressive | Stance::Persistent | Stance::Neutral)
-            && let Some(t) = nearest(&|m, _| m.is_some_and(|m| sc.hostile(&animal.owner, &m.owner))).filter(|t| surface(t.1) <= sight)
+            && let Some(t) = nearest(&|m, _| m.is_some_and(|m| table.hostile_owners(&animal.owner, &m.owner))).filter(|t| surface(t.1) <= sight)
         {
             d.target = Some(t.0);
         }
@@ -254,7 +254,8 @@ fn think(
             let aim = t.1 + Vec3::Y * 2.0 - mouth;
             if tf.forward().dot(aim.with_y(0.0).normalize_or_zero()) > 0.5 {
                 d.cooldown = reload;
-                let side = if t.2.side == Side::Player { Side::Enemy } else { Side::Player };
+                // The breath fights for the dragon's player (hostile to every ship when it has none).
+                let side = table.side_of(&animal.owner).unwrap_or(crate::scenario::HOSTILE_TO_ALL);
                 shoot.write(crate::combat::Shoot {
                     bullet: bullet.clone(),
                     from: mouth,

@@ -77,15 +77,14 @@ fn gunners_shorten_reload() {
 
 #[test]
 fn damage_scales_with_side_and_difficulty() {
-    assert_eq!(side_damage_scale(Side::Player, Side::Enemy, 1, false), 2.0);
-    assert_eq!(side_damage_scale(Side::Enemy, Side::Player, 1, false), 0.5);
-    assert_eq!(side_damage_scale(Side::Enemy, Side::Player, 0, false), 0.25);
-    assert_eq!(side_damage_scale(Side::Player, Side::Enemy, 0, false), 3.0, "Easy is x3 out, not the inverse of x0.25 in");
-    assert_eq!(side_damage_scale(Side::Player, Side::Enemy, 2, false), 1.0);
-    assert_eq!(side_damage_scale(Side::Enemy, Side::Enemy, 0, false), 1.0);
-    assert_eq!(side_damage_scale(Side::Player, Side(2), 1, false), 2.0, "every computer team takes the difficulty factor");
-    assert_eq!(side_damage_scale(Side::Enemy, Side(2), 0, false), 1.0);
-    assert_eq!(side_damage_scale(Side::Player, Side::Enemy, 1, true), 1.0, "our base hits computer ships at x1 on Normal");
+    assert_eq!(side_damage_scale(true, false, 1, false), 2.0);
+    assert_eq!(side_damage_scale(false, true, 1, false), 0.5);
+    assert_eq!(side_damage_scale(false, true, 0, false), 0.25);
+    assert_eq!(side_damage_scale(true, false, 0, false), 3.0, "Easy is x3 out, not the inverse of x0.25 in");
+    assert_eq!(side_damage_scale(true, false, 2, false), 1.0);
+    assert_eq!(side_damage_scale(false, false, 0, false), 1.0, "computer on computer");
+    assert_eq!(side_damage_scale(true, true, 0, false), 1.0, "on an ally");
+    assert_eq!(side_damage_scale(true, false, 1, true), 1.0, "our base hits computer ships at x1 on Normal");
 }
 
 #[test]
@@ -890,11 +889,9 @@ fn computer_ships_use_their_own_crew_for_repair() {
     let lib = crate::testutil::lib();
     let c = lib.index("Ship_Pirate_Barque");
     let class = &lib.classes[c];
-    let ship = |side| Ship { heading: 0.0, ..Ship::new(c, side) };
     let slots = |skill: Skill, role: usize| {
-        let foe = ship(Side::Enemy);
         let boardable = Boardable::ship(&class.name, skill, true);
-        let generic = crate::crew_arms::fallback_posts(&foe, Some(&boardable), &class.name);
+        let generic = crate::crew_arms::fallback_posts(false, Some(&boardable), &class.name);
         damage::crew_slots(crate::scenario::SpawnIndex(0), class, generic.as_ref(), role, "engineering")
     };
     let (green, elite) = (slots(Skill::Green, 4), slots(Skill::Elite, 5));
@@ -902,7 +899,7 @@ fn computer_ships_use_their_own_crew_for_repair() {
     assert!(!elite.is_empty() && elite.iter().all(|v| (0.8..=1.0).contains(v)), "elite riggers {elite:?}");
     // The player's side keeps its own rule: no crew record, no generic crew.
     let boardable = Boardable::ship(&class.name, Skill::Elite, true);
-    assert!(crate::crew_arms::fallback_posts(&ship(Side::Player), Some(&boardable), &class.name).is_none());
+    assert!(crate::crew_arms::fallback_posts(true, Some(&boardable), &class.name).is_none());
     // A computer ship without a crew record carries rating-1 hands in every slot.
     let none = damage::crew_slots(crate::scenario::SpawnIndex(0), class, None, 4, "engineering");
     assert!(none.iter().all(|v| (*v - 0.1).abs() < 1e-6));

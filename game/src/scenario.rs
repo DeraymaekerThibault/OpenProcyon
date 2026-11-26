@@ -11,7 +11,7 @@ pub use lighting::{Lighting, MapLighting, apply_lighting, lighting_of};
 use outcome::end_line_id;
 pub use outcome::{END_LINE_SECS, EndLine, EndMessage, Outcome, RULE_PASS_SECS, RulePass, decide, force_outcome, outcome};
 pub use script::{scripted_kills, scripted_steps};
-pub use spawn::{HOSTILE_TO_ALL, MapObject, Namer, PlayerColor, faction, game_rotation, game_to_bevy, scenery_transform, spawn_scenario, spawn_ship};
+pub use spawn::{HOSTILE_TO_ALL, MapObject, Namer, PlayerColor, faction, game_rotation, game_to_bevy, lobby_alliances, scenery_transform, spawn_scenario, spawn_ship};
 #[cfg(test)]
 use spawn::{ambient_effect, setup_strengths};
 

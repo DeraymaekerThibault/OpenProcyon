@@ -167,15 +167,19 @@ pub(super) fn run(
     }
     // The script the battle runs, with what applying its effects needs: a campaign mission, a skirmish map's script, or neither.
     let in_mission = active.is_mission();
-    let (null, no_sides) = (serde_json::Value::Null, std::collections::HashMap::new());
-    let (script, paths, sides, caps, mission_id): (&mut Script, &serde_json::Value, _, _, _) = if let Some(p) = active.parts() {
+    let null = serde_json::Value::Null;
+    let (script, paths, caps, mission_id): (&mut Script, &serde_json::Value, _, _) = if let Some(p) = active.parts() {
         match p.mission_id {
-            Some(id) => (p.script, p.paths, p.sides, Caps::MISSION, id.to_string()),
-            None => (p.script, p.paths, p.sides, Caps::SKIRMISH_SCRIPT, String::new()),
+            Some(id) => (p.script, p.paths, Caps::MISSION, id.to_string()),
+            None => (p.script, p.paths, Caps::SKIRMISH_SCRIPT, String::new()),
         }
     } else {
-        (bare.0.get_or_insert_with(|| Script::new(&serde_json::json!({"rules": []}), serde_json::Value::Null)), &null, Some(&no_sides), Caps::BARE, String::new())
+        (bare.0.get_or_insert_with(|| Script::new(&serde_json::json!({"rules": []}), serde_json::Value::Null)), &null, Caps::BARE, String::new())
     };
+    // The console's alliance commands edit the battle's table, as the rules' 'Set alliance' does.
+    if let Some(t) = extra.alliances.as_deref_mut() {
+        script.lend(t);
+    }
     let lines = std::mem::take(&mut console.pending);
     // `Extra` holds the read side of `Cheats` (the points gate in `update`), so changes go through the command queue.
     let mut god = extra.cheats.as_ref().is_some_and(|c| c.god);
@@ -250,8 +254,11 @@ pub(super) fn run(
         }
         apply_view(&outcome.view, &mut console, &mut dev, settings.as_deref_mut());
         each_ship(&mut ships, outcome.repair, |s| crate::docking::repair(&lib, &s.ship, &mut s.health, true));
-        let mut env = extra.fx.env(script, paths, &lib, Some(&mut orbit), sides);
+        let mut env = extra.fx.env(script, paths, &lib, Some(&mut orbit), in_mission);
         apply::apply(fx, &mut env, &mut commands, &mut ships, &mut animals);
+    }
+    if let Some(t) = extra.alliances.as_deref_mut() {
+        script.lend(t);
     }
 }
 

@@ -217,6 +217,7 @@ fn ai(
     targets: Option<Res<crate::ship::CaptainTargets>>,
     mut ships: Query<(Entity, &mut Cloak, &Ship, &Transform, &Health, Has<crate::commands::Commander>, Option<&ScanFactor>)>,
     others: Query<(Entity, &Ship, &Transform, &Health)>,
+    table: crate::alliance::Hostility,
 ) {
     for (e, mut c, ship, tf, health, primary, scan) in &mut ships {
         c.ai_in -= time.delta_secs();
@@ -228,7 +229,9 @@ fn ai(
         let scan_range = class.sight * scan.map_or(1.0, |s| s.0);
         let hostile: Vec<Entity> = others
             .iter()
-            .filter(|(o, s, otf, oh)| *o != e && s.side != ship.side && !oh.destroyed && !lib.classes[s.class].is_lifeboat && otf.translation.distance(tf.translation) < scan_range)
+            .filter(|(o, s, otf, oh)| {
+                *o != e && table.hostile(s.side, ship.side) && !oh.destroyed && !lib.classes[s.class].is_lifeboat && otf.translation.distance(tf.translation) < scan_range
+            })
             .map(|(o, ..)| o)
             .collect();
         let targeted = targets.as_deref().is_some_and(|t| hostile.iter().any(|h| t.of(*h) == Some(e)));

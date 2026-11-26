@@ -598,7 +598,7 @@ fn update_contacts(
     mission: Option<Res<crate::campaign::Mission>>,
     player: Single<&Transform, With<PlayerShip>>,
     others: Query<(Entity, &Ship, &Health, &Transform, Option<&crate::campaign::MissionShip>), Without<PlayerShip>>,
-    sensors: Res<crate::environment::Sensors>,
+    (sensors, table): (Res<crate::environment::Sensors>, crate::alliance::Hostility),
     mut q: Query<(&Contact, &mut Node, &mut Visibility)>,
 ) {
     let Some(radar) = radar else { return };
@@ -611,7 +611,7 @@ fn update_contacts(
         others
             .iter()
             .filter(|_| on)
-            .filter(|(e, sh, h, _, ms)| (sh.side == crate::Side::Player) == friendly && !h.destroyed && ms.is_none_or(|m| m.visible) && sensors.player_sees(*e, mission.as_deref()))
+            .filter(|(e, sh, h, _, ms)| table.with_human(sh.side) == friendly && !h.destroyed && ms.is_none_or(|m| m.visible) && sensors.player_sees(*e, mission.as_deref()))
             .map(|(_, _, _, tf, _)| {
                 let l = inv * (tf.translation - player.translation);
                 Vec2::new(l.x, -l.z) / RADAR_RANGE

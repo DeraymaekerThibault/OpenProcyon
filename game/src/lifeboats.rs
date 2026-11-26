@@ -70,7 +70,7 @@ fn lifeboats(
     mut lost: MessageReader<ShipLost>,
     (abandoned, new_abandoned): (Query<(), With<Abandoned>>, Query<Entity, Added<Abandoned>>),
     mut sfx: MessageWriter<crate::audio::Sfx>,
-    mission: Option<ResMut<Mission>>,
+    (mission, mut table): (Option<ResMut<Mission>>, Option<ResMut<crate::alliance::Alliances>>),
     dying: Query<(&Ship, &Transform, Option<&MissionShip>), Without<Lifeboat>>,
     boats: Query<(Entity, &Ship, &Transform, &Lifeboat, Option<&MissionShip>)>,
     // Not retail: an abandoned hull (`OP Abandon Ship`) has nobody aboard to take a boat in, its own or anyone's.
@@ -106,7 +106,8 @@ fn lifeboats(
         present.retain(|p| p.0 != Some(boat));
         sfx.write(crate::audio::Sfx::ui(PICKUP_SOUND));
         if let Some(m) = mission.as_mut() {
-            m.script.lifeboat_saved(cm.map_or("", |m| m.owner.as_str()), &owner(l, bm));
+            let collector = cm.map_or("", |m| m.owner.as_str());
+            m.script.with_table(table.as_deref_mut(), |s| s.lifeboat_saved(collector, &owner(l, bm)));
         }
     }
     if let Some(m) = mission.as_mut() {

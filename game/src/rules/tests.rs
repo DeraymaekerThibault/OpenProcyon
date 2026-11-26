@@ -1194,7 +1194,7 @@ fn kill_kinds_alliances_and_hold_fire_are_typed_and_asset_free() {
     assert_eq!(KillKind::parse("Asteroid"), KillKind::Asteroid);
     assert_eq!(KillKind::parse("Ship"), KillKind::Ship);
     assert_eq!(KillKind::parse("anything else"), KillKind::Ship, "only Asteroid counts rocks, as before");
-    let mut s = Script::new(&serde_json::json!({"rules": []}), serde_json::Value::Null);
+    let mut s = Script::new(&serde_json::json!({"rules": [], "players": ["Reds", "Blues"]}), serde_json::Value::Null);
     let mut out = vec![];
     let alliance = |on: &str| serde_json::json!({"Type": "Set alliance between PlayerA and PlayerB to TRUE/FALSE", "PLAYER A": "Reds", "PLAYER B": "Blues", "SET ALLIANCE TO": on});
     s.act(&alliance("FALSE"), &[], &mut out, "t");
@@ -1217,6 +1217,22 @@ fn kill_kinds_alliances_and_hold_fire_are_typed_and_asset_free() {
     assert_eq!(s.team_of("Blues"), Some("Pirates"));
     assert_eq!(s.captured.len(), 1);
     assert_eq!(s.destroyed[0].0, "Blues");
+}
+
+/// 'Set alliance' edits the battle's table (the one the ECS lends the script) in the step that fires it: a later rule of the same step
+/// and the rest of the battle, once the table is handed back, both see the new alliance.
+#[test]
+fn set_alliance_edits_the_battle_table_in_the_same_step() {
+    let set = serde_json::json!({"Type": "Set alliance between PlayerA and PlayerB to TRUE/FALSE", "PLAYER A": "Reds", "PLAYER B": "Blues", "SET ALLIANCE TO": "TRUE"});
+    let data = serde_json::json!({"players": ["Reds", "Blues"], "rules": [{"name": "ally", "conditions": [], "actions": [set]}]});
+    let mut sc = Script::new(&data, serde_json::Value::Null);
+    let mut table = std::mem::take(&mut sc.alliances);
+    let (reds, blues) = (table.side_of("Reds").unwrap(), table.side_of("Blues").unwrap());
+    assert!(table.hostile(reds, blues));
+    sc.lend(&mut table);
+    sc.step(&[], 0.1, false);
+    sc.lend(&mut table);
+    assert!(table.allied(reds, blues) && table.allied(blues, reds), "the battle's table holds the new alliance after one step");
 }
 
 /// docs/re/campaign.md: a stopped timer tests false for every comparison; Equal To means "at least".

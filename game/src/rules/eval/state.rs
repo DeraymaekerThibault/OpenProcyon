@@ -84,7 +84,9 @@ pub struct Script {
     /// unknown name leaves the point as it was (decoded).
     pub(in crate::rules) team_objectives: HashMap<String, (String, Vec<String>)>,
     pub(in crate::rules) hold_fire: HashSet<Owner>,
-    pub(in crate::rules) hostile: HashSet<(Owner, Owner)>,
+    /// The battle's alliance table while the script steps (the ECS lends it the `alliances::Alliances` resource: `lend`); a script
+    /// built outside a battle (tests, `--check-mission`) keeps the one its data starts with.
+    pub alliances: crate::alliance::Alliances,
     pub(in crate::rules) player: String,
     pub(in crate::rules) tows: Vec<(Entity, Entity)>,
     pub(in crate::rules) tow_specs: Vec<(String, String)>,
@@ -232,8 +234,25 @@ impl Script {
         let c = self.media["speech"][self.speaking.as_ref()?.0.as_str()]["color"].as_array()?;
         Some(std::array::from_fn(|i| c.get(i).and_then(|v| v.as_f64()).unwrap_or(1.0) as f32))
     }
+    /// Swaps the battle's alliance table in (or back out): the rule update lends it for the step, so 'Set alliance' takes effect in
+    /// the same tick for the rules and right after it for everything else.
+    pub fn lend(&mut self, table: &mut crate::alliance::Alliances) {
+        std::mem::swap(&mut self.alliances, table);
+    }
+    /// `f` with the battle's table lent in (none: the script's own).
+    pub fn with_table<R>(&mut self, mut table: Option<&mut crate::alliance::Alliances>, f: impl FnOnce(&mut Script) -> R) -> R {
+        if let Some(t) = table.as_deref_mut() {
+            self.lend(t);
+        }
+        let r = f(self);
+        if let Some(t) = table {
+            self.lend(t);
+        }
+        r
+    }
+    /// Players `a` and `b` are at war (by name; a name that is no player is never hostile).
     pub fn hostile(&self, a: &str, bb: &str) -> bool {
-        a != bb && (self.hostile.contains(&(a.into(), bb.into())) || self.hostile.contains(&(bb.into(), a.into())))
+        self.alliances.hostile_owners(a, bb)
     }
     /// The human player's group name.
     pub fn player(&self) -> &str {
@@ -322,8 +341,9 @@ impl Script {
     /// 'Procs', its ironclads belong to the allied 'Procs2').
     pub fn record_capture(&mut self, by: &str, victim: &str, unit: Entity, base: bool) {
         if base {
-            let credit: Vec<Owner> =
-                std::iter::once(Owner::from(by)).chain(self.players.iter().filter(|p| *p != by && *p != victim && !self.hostile(p, by)).map(|p| Owner::from(p.as_str()))).collect();
+            let credit: Vec<Owner> = std::iter::once(Owner::from(by))
+                .chain(self.players.iter().filter(|p| *p != by && *p != victim && self.alliances.players_allied(p, by)).map(|p| Owner::from(p.as_str())))
+                .collect();
             for p in credit {
                 *self.base_captures.entry((p, victim.into())).or_default() += 1;
             }
@@ -368,7 +388,7 @@ impl Script {
     }
     /// Whether two players are allied (a player is allied with itself; names that are no player, e.g. 'NO PLAYER', are not).
     pub fn allied(&self, a: &str, b: &str) -> bool {
-        a == b || (self.players.iter().any(|p| p == a) && self.players.iter().any(|p| p == b) && !self.hostile(a, b))
+        self.alliances.players_allied(a, b)
     }
     /// A ship of `collector` picked up a lifeboat of `owner` (lifeboats.rs). Counts it, and the local player collecting a boat of a
     /// player it is not allied with scores victory points, as the original does (the same counter as 'Add Victory Points').

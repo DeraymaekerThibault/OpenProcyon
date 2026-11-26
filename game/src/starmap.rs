@@ -19,7 +19,7 @@ use crate::audio::Sfx;
 use crate::combat::Health;
 use crate::panels::RadarButton;
 use crate::panels::UiClick;
-use crate::{PlayerShip, Ship, Side};
+use crate::{PlayerShip, Ship};
 
 /// The open star map; despawning it closes the map. Views build their art under it.
 #[derive(Component)]
@@ -137,7 +137,7 @@ fn describe(
     mission: Option<Res<crate::campaign::Mission>>,
     ships: Query<(Entity, &Ship, &Health, &Transform, Option<&crate::campaign::MissionShip>, Has<PlayerShip>)>,
     animals: Query<(Entity, &Transform), (With<crate::environment::SpaceAnimal>, Without<Ship>)>,
-    sensors: Res<crate::environment::Sensors>,
+    (sensors, table): (Res<crate::environment::Sensors>, crate::alliance::Hostility),
     active: crate::rules::active::ActiveScript,
     fleets: Res<crate::ship::Fleets>,
 ) {
@@ -153,7 +153,7 @@ fn describe(
         if is_player {
             icon(MapIconKind::PlayerShip, transform);
         } else if !health.destroyed && mission_ship.is_none_or(|m| m.visible) && sensors.player_sees(entity, mission.as_deref()) {
-            icon(if ship.side == Side::Player { MapIconKind::AlliedShip } else { MapIconKind::EnemyShip }, transform);
+            icon(if table.with_human(ship.side) { MapIconKind::AlliedShip } else { MapIconKind::EnemyShip }, transform);
         }
     }
     for (entity, transform) in &animals {

@@ -65,8 +65,9 @@ pub fn outcome(
     all: Query<(Entity, &Health, &Ship, &Transform, Option<&ship::FleetMember>, Option<&MapObject>), Without<crate::lifeboats::Lifeboat>>,
     mut sunk: Local<Vec<(Entity, victory::ShipState)>>,
     bases: Query<(&campaign::MissionBase, &combat::ArmedBase, &Health, Option<(&combat::BaseSide, &combat::BaseOrigin)>)>,
+    table: crate::alliance::Hostility,
 ) {
-    let enemies = || ships.iter().filter(|(_, s)| s.side != Side::Player).map(|(h, _)| h);
+    let enemies = || ships.iter().filter(|(_, s)| !table.with_human(s.side)).map(|(h, _)| h);
     // missions end through their own rules; a decided battle stays decided (the end flow despawns ships, which must not turn a
     // victory into a defeat)
     if campaign::is_mission(cfg.map.as_deref()) || *out != Outcome::Playing {
@@ -106,7 +107,7 @@ pub fn outcome(
         let damage: Vec<(i64, f32)> = bases.iter().map(|(b, a, h, _)| (b.id, combat::base_mission_damage(&lib.classes[a.class], h))).collect();
         let captured: Vec<i64> = bases.iter().filter(|b| b.3.is_some_and(|(side, origin)| side.0 != origin.0)).map(|b| b.0.id).collect();
         let points = rules.3.as_ref().map(|s| s.points()).unwrap_or_default();
-        let snap = victory::Snapshot { ships: &states, bases: &damage, captured: &captured, points: &points };
+        let snap = victory::Snapshot { ships: &states, bases: &damage, captured: &captured, points: &points, table: &table };
         // The map's end rules first, then a script that decides its own game (`"victory": "script"`, rules::skirmish): an End Game,
         // Team X Wins or Remaining Team Wins rule, or a team's required objectives.
         let decided = victory.decide_with_message(&snap).or_else(|| rules.3.as_ref().and_then(|s| s.script.end.as_ref()).map(|end| victory.decide_end(&snap, end)));
@@ -114,7 +115,7 @@ pub fn outcome(
         decided.map_or(Outcome::Playing, |d| d.0)
     } else if player.single().is_err() || player.single().is_ok_and(|h| h.destroyed) {
         Outcome::Defeat
-    } else if enemies().count() + gone.iter().filter(|g| g.side != Side::Player).count() > 0 && enemies().all(|h| h.destroyed) {
+    } else if enemies().count() + gone.iter().filter(|g| !table.with_human(g.side)).count() > 0 && enemies().all(|h| h.destroyed) {
         Outcome::Victory
     } else {
         Outcome::Playing

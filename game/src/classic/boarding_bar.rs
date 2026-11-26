@@ -7,7 +7,7 @@ use crate::boarding::{Boardable, Boarding, friendly_share};
 use crate::campaign::Mission;
 use crate::panels::hud_scale;
 use crate::sprites::HudData;
-use crate::{Ship, Side};
+use crate::Ship;
 
 const BAR_VISIBLE: f32 = 250.0; // PROVISIONAL: eyeballed against footage
 const BAR_SIZE: Vec2 = Vec2::new(171.0, 40.0);
@@ -35,7 +35,7 @@ fn board_bars(
     camera: Single<(&Camera, &GlobalTransform)>,
     mission: Option<Res<Mission>>,
     fights: Query<(Entity, &Boarding)>,
-    things: Query<(&Transform, &Boardable, Option<&Ship>)>,
+    (things, table): (Query<(&Transform, &Boardable, Option<&Ship>)>, crate::alliance::Hostility),
     mut bars: Query<(Entity, &BoardBar, &mut Node, &mut Visibility, &Children)>,
     mut fills: Query<(&BarFill, &mut Node), Without<BoardBar>>,
 ) {
@@ -47,7 +47,7 @@ fn board_bars(
     }
     let scale = hud_scale(&window);
     let (camera, camera_transform) = *camera;
-    let friendly = |e: Entity| things.get(e).ok().and_then(|thing| thing.2).is_some_and(|ship| ship.side == Side::Player);
+    let friendly = |e: Entity| things.get(e).ok().and_then(|thing| thing.2).is_some_and(|ship| table.with_human(ship.side));
     for (boarder, fight) in fights.iter().filter(|fight| fight.1.live()) {
         let target = fight.target();
         let Ok([(_, boarder_crew, _), (target_transform, target_crew, _)]) = things.get_many([boarder, target]) else { continue };

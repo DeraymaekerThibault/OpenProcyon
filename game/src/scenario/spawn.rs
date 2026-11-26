@@ -194,6 +194,8 @@ pub fn spawn_scenario(commands: &mut Commands, assets: &AssetServer, lib: &Libra
         commands.entity(m).insert(Scenario);
     }
     let ours: Vec<String> = std::iter::once(cfg.player.clone()).chain(cfg.allies.iter().cloned()).collect();
+    // Each battle starts with its own alliance table (the mission's or the lobby's replace this one).
+    commands.insert_resource(alliance::Alliances::default());
     if let Some(map) = &map {
         let bases = spawn_map_objects(commands, assets, fxl, shapes, asteroids, map);
         nebula::spawn(commands, assets, fxl, map);
@@ -211,6 +213,17 @@ pub fn spawn_scenario(commands: &mut Commands, assets: &AssetServer, lib: &Libra
     }
     commands.insert_resource(Target::default());
     commands.insert_resource(Outcome::Playing);
+}
+
+/// The alliance table of a lobby's battle: each group is its own side, allied with the groups of its lobby team.
+pub fn lobby_alliances(groups: &[crate::Group]) -> alliance::Alliances {
+    let mut table = alliance::Alliances::default();
+    for (a, b) in groups.iter().flat_map(|a| groups.iter().map(move |b| (a, b))) {
+        if a.team >= 0 && a.team == b.team {
+            table.offer(a.side, b.side, true);
+        }
+    }
+    table
 }
 
 /// A skirmish map's battle: the fleets of its players at their start points, the victory rules, the map script, mines, animals and bases.
@@ -335,6 +348,7 @@ fn spawn_skirmish(
     }
     let mut namer = Namer::new();
     let mut roster = alliance::Roster { changeable: map["alliance_change"].as_bool().unwrap_or(false), ..default() };
+    let mut alliances = lobby_alliances(&groups);
     for g in &groups {
         let Some(p) = players.get(g.player) else { continue };
         let f = game_to_bevy(&p["forward"]);
@@ -350,8 +364,9 @@ fn spawn_skirmish(
                 .as_array()
                 .filter(|c| c.len() >= 3)
                 .map_or(Color::WHITE, |c| Color::srgb(c[0].as_f64().unwrap_or(1.0) as f32, c[1].as_f64().unwrap_or(1.0) as f32, c[2].as_f64().unwrap_or(1.0) as f32));
-            roster.rows.push(alliance::Row::new(owner.clone(), name.clone(), *flag, colour, g.side == Side::Player));
+            roster.rows.push(alliance::Row::new(owner.clone(), name.clone(), *flag, colour, g.side));
         }
+        alliances.add_player(&owner, g.side);
         if g.human {
             let owner = owner.clone();
             commands.queue(move |w: &mut World| {
@@ -407,10 +422,17 @@ fn spawn_skirmish(
     // The map's own end rules, when we model all of them (else the plain "no enemy ships left" outcome stays).
     let map_teams = map["teams"].as_array().cloned().unwrap_or_default();
     let teams: Vec<(String, Vec<Side>)> = if map_teams.is_empty() {
-        let mut sides: Vec<Side> = groups.iter().map(|g| g.side).collect();
-        sides.sort_by_key(|s| s.0);
-        sides.dedup();
-        sides.into_iter().map(|s| (format!("side{}", s.0), vec![s])).collect()
+        // Without map teams: one per lobby team (a slot on no team is its own).
+        let mut teams: Vec<(String, Vec<Side>)> = vec![];
+        for g in &groups {
+            let name = if g.team >= 0 { format!("team{}", g.team) } else { format!("side{}", g.side.0) };
+            match teams.iter_mut().find(|t| t.0 == name) {
+                Some(t) if !t.1.contains(&g.side) => t.1.push(g.side),
+                Some(_) => {}
+                None => teams.push((name, vec![g.side])),
+            }
+        }
+        teams
     } else {
         map_teams
             .iter()
@@ -427,19 +449,17 @@ fn spawn_skirmish(
         None if scripted => commands.insert_resource(victory::Victory::scripted(teams)),
         None => commands.remove_resource::<victory::Victory>(),
     }
-    // The map player -> side table and team rosters the script needs (a base player such as 'pirate base' fights for the fleet of
-    // its type, as the bases below do).
-    let sides: std::collections::HashMap<String, Side> = players
-        .iter()
-        .enumerate()
-        .filter_map(|(i, p)| {
-            let team = p["team"].as_i64().unwrap_or(-1) as i32;
-            let name = p["name"].as_str()?;
-            let side = groups.iter().find(|g| g.player == i).or_else(|| groups.iter().find(|g| team >= 0 && g.team == team)).map(|g| g.side);
-            let side = side.or_else(|| faction(name).and_then(|f| groups.iter().find(|g| g.race == f)).map(|g| g.side))?;
-            Some((name.to_string(), side))
-        })
-        .collect();
+    // Every map player in the alliance table (a base player such as 'pirate base' fights for the fleet of its type, as the bases
+    // below do), for the script's owner changes and alliance actions.
+    for (i, p) in players.iter().enumerate() {
+        let team = p["team"].as_i64().unwrap_or(-1) as i32;
+        let Some(name) = p["name"].as_str() else { continue };
+        let side = groups.iter().find(|g| g.player == i).or_else(|| groups.iter().find(|g| team >= 0 && g.team == team)).map(|g| g.side);
+        if let Some(side) = side.or_else(|| faction(name).and_then(|f| groups.iter().find(|g| g.race == f)).map(|g| g.side)) {
+            alliances.add_player(name, side);
+        }
+    }
+    commands.insert_resource(alliances);
     let rosters = map_teams
         .iter()
         .enumerate()
@@ -448,7 +468,7 @@ fn spawn_skirmish(
             (t["name_id"].as_str().unwrap_or_default().to_string(), names)
         })
         .collect();
-    match script_json.as_ref().map(|data| crate::rules::skirmish::SkirmishScript::load(&map_id, data, rosters, sides)) {
+    match script_json.as_ref().map(|data| crate::rules::skirmish::SkirmishScript::load(&map_id, data, rosters)) {
         Some(s) => commands.insert_resource(s),
         None => {
             if campaign::start_requested() {

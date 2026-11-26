@@ -50,7 +50,7 @@ pub(super) fn ai_boarding(
         // else (skirmish enemies) the player's ship.
         let target = match ms {
             Some(m) => m.target,
-            None => pilot.and_then(|p| p.target).or_else(|| captains.as_deref().and_then(|c| c.of(e))).or_else(|| me.filter(|_| ship.side != Side::Player)),
+            None => pilot.and_then(|p| p.target).or_else(|| captains.as_deref().and_then(|c| c.of(e))).or_else(|| me.filter(|_| !boarders.table().with_human(ship.side))),
         };
         let strong = own.strength.attack > AI_MIN_ATTACK;
         if let Some(t) = target.filter(|t| boarders.hostile(e, *t))

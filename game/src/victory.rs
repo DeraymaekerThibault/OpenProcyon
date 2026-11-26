@@ -84,6 +84,8 @@ pub struct Snapshot<'a> {
     /// Ids of the bases a boarding party took.
     pub captured: &'a [i64],
     pub points: &'a [(String, i32)],
+    /// The battle's alliance table: mutual allies count as one team.
+    pub table: &'a crate::alliance::Alliances,
 }
 
 impl Victory {
@@ -124,7 +126,27 @@ impl Victory {
 
     /// The name of the human's team.
     fn ours(&self) -> String {
-        self.teams.iter().find(|(_, sides)| sides.contains(&Side::Player)).map_or_else(|| format!("side {}", Side::Player.0), |t| t.0.clone())
+        self.team_of(Side::Player)
+    }
+    /// The map team of `side` (a side on no team counts as its own).
+    fn team_of(&self, side: Side) -> String {
+        self.teams.iter().find(|t| t.1.contains(&side)).map_or_else(|| format!("side {}", side.0), |t| t.0.clone())
+    }
+    /// The teams of the ships afloat, mutual allies (`Snapshot::table`) counted as one (under the human's team name when it is one of them).
+    fn alive_teams(&self, snap: &Snapshot) -> Vec<String> {
+        let mut sides: Vec<Side> = snap.ships.iter().filter(|a| a.alive).map(|a| a.side).collect();
+        sides.sort_by_key(|s| s.0);
+        sides.dedup();
+        let (ours, mut names): (String, Vec<String>) = (self.ours(), sides.iter().map(|s| self.team_of(*s)).collect());
+        for (i, j) in (0..sides.len()).flat_map(|i| (0..sides.len()).map(move |j| (i, j))) {
+            if names[i] != names[j] && snap.table.allied(sides[i], sides[j]) {
+                let (keep, drop) = if names[j] == ours { (names[j].clone(), names[i].clone()) } else { (names[i].clone(), names[j].clone()) };
+                names.iter_mut().filter(|n| **n == drop).for_each(|n| n.clone_from(&keep));
+            }
+        }
+        names.sort();
+        names.dedup();
+        names
     }
 
     /// The human's outcome once the map's script has ended the game (`Script::end`): the team that wins is the one it names, the
@@ -135,18 +157,8 @@ impl Victory {
         let human_wins = match &end.kind {
             EndKind::Team(team) => *team == ours,
             EndKind::Loser(team) => *team != ours,
-            // The map teams with ships afloat (a side on no team counts as its own); mutual allies are one team.
-            EndKind::Winner => {
-                let mut teams: Vec<String> = snap
-                    .ships
-                    .iter()
-                    .filter(|a| a.alive)
-                    .map(|a| self.teams.iter().find(|t| t.1.contains(&a.side)).map_or_else(|| format!("side {}", a.side.0), |t| t.0.clone()))
-                    .collect();
-                teams.sort();
-                teams.dedup();
-                teams == [ours]
-            }
+            // The map teams with ships afloat; mutual allies are one team.
+            EndKind::Winner => self.alive_teams(snap) == [ours],
         };
         if human_wins { (Outcome::Victory, end.winner_message.clone()) } else { (Outcome::Defeat, end.loser_message.clone()) }
     }
@@ -168,11 +180,8 @@ impl Victory {
             s
         };
         let team_has_ships = |name: &str| self.teams.iter().any(|(n, sides)| n == name && sides.iter().any(|s| alive_sides.contains(&s.0)));
-        // The map teams with ships afloat (a side on no team counts as its own); mutual allies are one team.
-        let mut alive_teams: Vec<String> =
-            alive_sides.iter().map(|s| self.teams.iter().find(|t| t.1.iter().any(|x| x.0 == *s)).map_or_else(|| format!("side {s}"), |t| t.0.clone())).collect();
-        alive_teams.sort();
-        alive_teams.dedup();
+        // The map teams with ships afloat; mutual allies are one team.
+        let alive_teams = self.alive_teams(snap);
         let human_alive = snap.ships.iter().any(|a| a.alive && a.human);
         let of = |objects: &[i64]| snap.ships.iter().filter(|s| s.id.is_some_and(|i| objects.contains(&i))).collect::<Vec<_>>();
         for rule in &self.rules {
@@ -206,7 +215,7 @@ impl Victory {
             }
             // The winners: the named team's players (sunk or not); with no team named, the survivors when they are one team, and
             // all their allies (a sunk human whose allies cleared the field wins: retail Border Dispute read VICTORY!), else nobody.
-            let ours = self.teams.iter().find(|(_, sides)| sides.contains(&Side::Player)).map_or_else(|| format!("side {}", Side::Player.0), |t| t.0.clone());
+            let ours = self.ours();
             let human_wins = match &rule.winner {
                 Some(team) => *team == ours,
                 None => alive_teams == [ours],

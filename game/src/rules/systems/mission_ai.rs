@@ -25,7 +25,7 @@ pub(super) fn mission_ai(
     holes: Query<(&Transform, &crate::blackhole::Pull), Without<Ship>>,
     storms: (Option<Res<crate::nebula::Storms>>, Option<Res<crate::nebula::StormShift>>),
     (guns, time, mut breakoffs): (Query<&crate::combat::GunStates>, Res<Time>, Local<std::collections::HashMap<Entity, crate::ship::attack::Breakoff>>),
-    (spawn_order, mut start): (Query<&crate::scenario::SpawnIndex>, crate::scenario::BattleStart),
+    (spawn_order, mut start, table): (Query<&crate::scenario::SpawnIndex>, crate::scenario::BattleStart, crate::alliance::Hostility),
 ) {
     if start.is_new() {
         breakoffs.clear();
@@ -55,10 +55,10 @@ pub(super) fn mission_ai(
         let Some(me) = line.iter().find(|l| l.1 == e) else { return 0 };
         line.iter().take_while(|l| l.1 != e).filter(|l| (&l.2, l.3, l.4) == (&me.2, me.3, me.4)).count()
     };
-    let player_owner = ships.iter().find(|s| s.5).map_or_else(|| sc.player().into(), |s| s.4.owner.clone());
     for (e, mut ship, tf, h, mut ms, primary, pilot, abandoned) in &mut ships {
         let is_boat = boats.contains(e);
-        let side = if !is_boat && sc.hostile(&ms.owner, &player_owner) { Side::Enemy } else { Side::Player };
+        // Each ship fights for its owner's side in the alliance table (an owner change moves it); a lifeboat for the human's.
+        let side = if is_boat { Side::Player } else { table.side_or_neutral(&ms.owner) };
         if ship.side != side {
             ship.side = side;
         }
@@ -131,7 +131,7 @@ pub(super) fn mission_ai(
         let ordered = explicit.or_else(|| {
             near(&snap[..n_ships], &|s| ms.attack.iter().any(|g| matches(s, g)), false).or_else(|| near(&snap[n_ships..], &|s| ms.attack.iter().any(|g| matches(s, g)), false))
         });
-        let hostile = near(&snap[..n_ships], &|s| sc.hostile(&ms.owner, &s.owner), true);
+        let hostile = near(&snap[..n_ships], &|s| table.hostile_owners(&ms.owner, &s.owner), true);
         let want = if hold {
             None
         } else if let Some(o) = ordered {

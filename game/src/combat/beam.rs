@@ -111,7 +111,7 @@ pub(super) fn burn(
     lib: Res<Library>,
     fxl: Res<FxLib>,
     mut rng: ResMut<SimRng>,
-    difficulty: Res<crate::scenario::Difficulty>,
+    (difficulty, table): (Res<crate::scenario::Difficulty>, crate::alliance::Hostility),
     (mut sfx, mut hits, mut scars): (MessageWriter<Sfx>, MessageWriter<Hit>, MessageWriter<crate::decals::Scar>),
     // Not retail: an abandoned hull (`OP Abandon Ship`) stops its beams like a sunk one (`fire` no longer runs their cycle).
     mut shooters: Query<(Entity, &Transform, &Ship, &mut GunStates, Has<crate::lifeboats::Abandoned>)>,
@@ -133,7 +133,7 @@ pub(super) fn burn(
             }
             let (from, dir) = muzzle_ray(tf, mount, gun, state.yaw, state.pitch);
             let range = gun.range[2];
-            let found = nearest_ship_hit(&ships, &lib, |_, side| side == ship.side, from, from + dir * range);
+            let found = nearest_ship_hit(&ships, &lib, |_, side| table.allied(side, ship.side), from, from + dir * range);
             let victim = victim_power(&state.beam, def, dt, found.map(|f| f.0));
             if !track(&mut state.beam, def, dt, found.map(|(e, _, _, at)| (e, from.distance(at))), range) {
                 continue;
@@ -162,8 +162,9 @@ pub(super) fn burn(
                 lost_target: false,
             };
             let material = Some(crate::combat::material_key(&lib.classes[victim_ship.class].sections[k].material));
-            let target = ShipTarget { entity: se, transform: stf, side: victim_ship.side, class: &lib.classes[victim_ship.class], invuln: mission.map_or(0.0, |m| m.invuln) };
-            hit_ship(&mut commands, &fxl, &mut rng, (&mut sfx, &mut hits, &mut scars), bd, &shell, target, &mut hp, &mut fires, k, at, victim, difficulty.0);
+            let scale = side_damage_scale(table.with_human(ship.side), table.with_human(victim_ship.side), difficulty.0, false);
+            let target = ShipTarget { entity: se, transform: stf, class: &lib.classes[victim_ship.class], invuln: mission.map_or(0.0, |m| m.invuln) };
+            hit_ship(&mut commands, &fxl, &mut rng, (&mut sfx, &mut hits, &mut scars), bd, &shell, target, &mut hp, &mut fires, k, at, victim, scale);
             hit_fx(&mut commands, &fxl, bd, at, shell.vel, Some((se, stf)), Surface { body: Some(se), normal: None, material });
         }
     }

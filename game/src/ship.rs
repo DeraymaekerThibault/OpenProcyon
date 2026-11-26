@@ -65,8 +65,8 @@ pub const STOP_SNAP: f32 = 1.0;
 pub const MAX_ROLL: f32 = 0.25;
 pub const ROLL_RATE: f32 = 0.06;
 
-/// The ship's team: 0 = the human's team, others are computer teams hostile to it and to each other (skirmish maps with three
-/// teams, free-for-all). Ships of different sides fight; `Side::Enemy` is the first (and outside skirmish the only) hostile team.
+/// The player a ship fights for: its index in the battle's alliance table (`alliance::Alliances`), 0 the human's. Whether two
+/// sides fight is the table's answer alone; `Side::Enemy` is the first computer player.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct Side(pub u8);
 
@@ -324,7 +324,7 @@ pub fn ai(
     (lib, fleets): (Res<combat::Library>, Res<Fleets>),
     bases: Query<(Entity, &Transform, &combat::BaseSide, &Health, &combat::ArmedBase)>,
     scripted: Query<&campaign::MissionShip>,
-    (dying, cloaks): (Query<(), With<combat::Sinking>>, Query<&crate::cloak::Cloak>),
+    (dying, cloaks, table): (Query<(), With<combat::Sinking>>, Query<&crate::cloak::Cloak>, crate::alliance::Hostility),
 ) {
     if start.is_new() {
         (*explore, *breakoffs, *clocks) = Default::default();
@@ -375,13 +375,13 @@ pub fn ai(
         let explicit = pilot.and_then(|p| p.target);
         let candidates: Vec<(Entity, f32)> = snap
             .iter()
-            .filter(|f| f.2 != s.side && f.3 && (explicit == Some(f.0) || sensors.in_sight(e, f.0, None)) && explicit.is_none_or(|e| e == f.0))
+            .filter(|f| table.hostile(f.2, s.side) && f.3 && (explicit == Some(f.0) || sensors.in_sight(e, f.0, None)) && explicit.is_none_or(|e| e == f.0))
             .map(|f| (f.0, f.1.distance(tf.translation)))
             .collect();
         // Aggressive computer captains also weigh the nearest hostile base, at any range in skirmish (the nearer of the two wins).
         // Armed volcano islands fire on everyone but are no base to go for (retail Diablo Strait: the computer came for our ships).
         let island = |b: &combat::ArmedBase| lib.classes[b.class].name.starts_with("Island_");
-        let hostile_base = |b: &(Entity, &Transform, &combat::BaseSide, &Health, &combat::ArmedBase)| b.2.0 != s.side && !b.3.destroyed && !island(b.4);
+        let hostile_base = |b: &(Entity, &Transform, &combat::BaseSide, &Health, &combat::ArmedBase)| table.hostile(b.2.0, s.side) && !b.3.destroyed && !island(b.4);
         let mut candidates = candidates;
         if !human
             && explicit.is_none()
@@ -389,13 +389,13 @@ pub fn ai(
         {
             candidates.push((b.0, b.1.translation.distance(tf.translation)));
         }
-        let valid = |t: Entity| snap.iter().any(|f| f.0 == t && f.2 != s.side && f.3) || bases.get(t).is_ok_and(|b| hostile_base(&b));
+        let valid = |t: Entity| snap.iter().any(|f| f.0 == t && table.hostile(f.2, s.side) && f.3) || bases.get(t).is_ok_and(|b| hostile_base(&b));
         let mut chosen = choose_target(targets.0.get(&e).map(|t| (t.0, t.1)), &candidates, valid);
         // Nothing found: a fleet mate's target, else an allied ship's (same side, another fleet).
         if chosen.is_none() && !human && explicit.is_none() {
             let fleet = member.map(|m| m.0.as_str());
             let adopt = |same_fleet: bool| {
-                snap.iter().filter(|f| f.0 != e && f.3 && f.2 == s.side && (f.5.as_deref() == fleet) == same_fleet).find_map(|f| targets.of(f.0).filter(|t| valid(*t)))
+                snap.iter().filter(|f| f.0 != e && f.3 && table.allied(f.2, s.side) && (f.5.as_deref() == fleet) == same_fleet).find_map(|f| targets.of(f.0).filter(|t| valid(*t)))
             };
             chosen = adopt(true).or_else(|| adopt(false)).map(|t| (t, false));
         }
@@ -554,10 +554,10 @@ pub fn approach_speed(speed: f32, target: f32, rate: f32, dt: f32) -> f32 {
 pub struct FleetMember(pub crate::names::Owner, pub usize);
 
 /// Whether a ship is the human's own: on the player's side and, when fleets are tracked, in the local player's fleet (or in none).
-/// Allied computer fleets share `Side::Player` and are NOT human. This is the "waits for orders / human scoring" question
-/// (captain AI, fire and ram damage scaling, the battle report). Not the same question as `Side`-only difficulty scaling of shells
-/// and blasts (`combat::shells::side_damage_scale`), nor collision's `humans` (it also counts the `Human` marker). MAINTAINER
-/// QUESTION: shells and blasts scale by `Side`, fire and ramming by this ownership test; the original's rule is unconfirmed.
+/// Allied computer fleets are NOT human. This is the "waits for orders / human scoring" question (captain AI, fire and ram damage
+/// scaling, the battle report). Not the same question as the alliance-table difficulty scaling of shells and blasts
+/// (`combat::shells::side_damage_scale`), nor collision's `humans` (it also counts the `Human` marker). MAINTAINER QUESTION:
+/// shells and blasts scale by alliance, fire and ramming by this ownership test; the original's rule is unconfirmed.
 pub fn is_human_ship(side: Side, member: Option<&FleetMember>, fleets: Option<&Fleets>) -> bool {
     side == Side::Player && member.is_none_or(|m| fleets.is_none_or(|f| m.0 == f.local))
 }
@@ -774,7 +774,7 @@ fn captain_target_valid(world: &World, actor: Entity, target: Entity) -> bool {
         && world.get::<Health>(target).is_none_or(|h| !h.destroyed)
         && world.get::<combat::Asteroid>(target).is_none_or(|a| a.hp > 0.0)
         && world.get::<environment::SpaceAnimal>(target).is_none_or(|a| a.visible)
-        && world.get::<Ship>(actor).zip(world.get::<Ship>(target)).is_none_or(|(a, b)| crate::alliance::hostility::by_side(a.side, b.side))
+        && world.get::<Ship>(actor).zip(world.get::<Ship>(target)).is_none_or(|(a, b)| crate::alliance::table(world).hostile(a.side, b.side))
 }
 
 /// Reconcile live ownership, retaining roster order. PROVISIONAL loss fallback: first living member;

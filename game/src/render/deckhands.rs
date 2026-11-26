@@ -42,10 +42,10 @@ use bevy::shader::ShaderRef;
 use serde_json::Value;
 
 use super::{Look, num, rgb};
+use crate::Ship;
 use crate::combat::xorshift_unit as rand;
 use crate::combat::{GunStates, Health, Library};
 use crate::scenario::Outcome;
-use crate::{Ship, Side};
 
 /// The fragment shader; the mod ships it.
 pub const SHADER: &str = "shaders/deckhands.wesl";
@@ -946,7 +946,7 @@ fn drive(
     mut commands: Commands,
     kit: Option<Res<Kit>>,
     time: Res<Time>,
-    outcome: Option<Res<Outcome>>,
+    (outcome, table): (Option<Res<Outcome>>, crate::alliance::Hostility),
     camera: Option<Single<&GlobalTransform, (With<Camera3d>, With<crate::MainCamera>)>>,
     frames: Query<&GlobalTransform>,
     mut ships: Query<(Option<&Ship>, Option<&Health>, Option<&GunStates>, &mut Crew)>,
@@ -974,7 +974,7 @@ fn drive(
             crew.alarm = ALARM;
         }
         crew.alarm = (crew.alarm - dt).max(0.0);
-        let cheer = won && ship.is_none_or(|s| s.side == Side::Player);
+        let cheer = won && ship.is_none_or(|s| table.with_human(s.side));
 
         // the headcount follows the hull: a share stays standing till the end, all fall when the ship goes
         let alive_count = crew.hands.len() - crew.fallen;

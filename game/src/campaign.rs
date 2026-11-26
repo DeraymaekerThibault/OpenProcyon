@@ -565,11 +565,14 @@ pub fn spawn(commands: &mut Commands, assets: &AssetServer, lib: &Library, fxl: 
         let forward = crate::scenario::game_rotation(&s["rot"]) * Vec3::NEG_Z;
         let heading = crate::geom::heading_of(forward);
         let owner: crate::names::Owner = s["group"].as_str().unwrap_or("").into();
-        let e = crate::spawn_ship(commands, assets, lib, fxl, s["type"].as_str().unwrap(), Side::Player, pos, heading, None);
+        // Each ship fights for its owner's side in the alliance table (a lifeboat for the human's; mission_ai follows owner changes).
+        let boat = lib.classes.iter().any(|c| c.is_lifeboat && Some(c.name.as_str()) == s["type"].as_str());
+        let side = if boat { Side::Player } else { mission.script.alliances.side_or_neutral(&owner) };
+        let e = crate::spawn_ship(commands, assets, lib, fxl, s["type"].as_str().unwrap(), side, pos, heading, None);
         commands.entity(e).insert(crate::ship::FleetMember(owner.clone(), slot));
         commands.entity(e).insert(MissionShip::placed(id, s["name"].as_str().unwrap_or_default().into(), owner));
         // A pre-placed lifeboat (mission 4) is a real one, found by the class flag; it is not part of any fleet roster.
-        if lib.classes.iter().any(|c| c.is_lifeboat && Some(c.name.as_str()) == s["type"].as_str()) {
+        if boat {
             commands.entity(e).insert(crate::lifeboats::Lifeboat { owner: s["group"].as_str().unwrap_or("").into() }).remove::<crate::ship::FleetMember>();
         }
         // Setup Ship: 'Crew Skill Level' and 'Boardable' (ships without one cannot be boarded).
@@ -587,6 +590,9 @@ pub fn spawn(commands: &mut Commands, assets: &AssetServer, lib: &Library, fxl: 
     crate::environment::spawn(commands, assets, &mission.data, false);
     // Not retail: the campaign counters the mission before this one in the mod's campaign handed on.
     let id = mission.id.clone();
+    // The battle's alliance table starts as the mission's (its allied player pairs); the rule update lends it back to the script.
+    let mut mission = mission;
+    commands.insert_resource(std::mem::take(&mut mission.script.alliances));
     commands.insert_resource(mission);
     commands.queue(move |w: &mut World| {
         let values = w.get_resource::<CampaignValues>().map(|c| c.incoming(&id)).unwrap_or_default();

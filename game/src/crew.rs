@@ -12,7 +12,7 @@ use serde_json::Value;
 use crate::combat::{Health, Library};
 use crate::menu::Screen;
 use crate::scenario::Outcome;
-use crate::{PlayerShip, Ship, Side};
+use crate::{PlayerShip, Ship};
 
 const COOLDOWN: f32 = 15.0;
 
@@ -197,6 +197,7 @@ pub fn plugin(app: &mut App) {
 #[derive(bevy::ecs::system::SystemParam)]
 struct Surroundings<'w, 's> {
     mission: Option<ResMut<'w, crate::campaign::Mission>>,
+    table: crate::alliance::Hostility<'w>,
     sensors: Res<'w, crate::environment::Sensors>,
     holes: Query<'w, 's, &'static GlobalTransform, With<crate::blackhole::BlackHole>>,
     rocks: Query<'w, 's, (&'static Transform, &'static crate::combat::Asteroid), Without<PlayerShip>>,
@@ -307,7 +308,7 @@ fn callouts(
     let mut races = vec![];
     for (e, _, s, h) in &ships {
         match s.side {
-            _ if s.side != Side::Player => {
+            _ if !world.table.with_human(s.side) => {
                 enemies.push((e.to_bits(), world.sensors.player_sees(e, world.mission.as_deref()), h.destroyed));
                 let race = lib.classes[s.class].race.to_lowercase();
                 races.push((e.to_bits(), ["pirate", "navy", "procyon", "civilian"].into_iter().find(|r| race.contains(r)).unwrap_or("")));

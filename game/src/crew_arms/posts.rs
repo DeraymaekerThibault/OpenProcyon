@@ -87,10 +87,10 @@ pub fn generic_posts(skill: crate::boarding::Skill, caps: &[u32; 8]) -> CrewPost
     CrewPosts(std::array::from_fn(|r| vec![id.to_string(); caps[r] as usize]))
 }
 
-/// The crew a ship fights with when it has no posts of its own: a ship off the player's side carries its level's generic crew.
-/// `None` for the player's side (default hands, or the campaign roster, which the caller knows).
-pub fn fallback_posts(ship: &crate::Ship, boarding: Option<&crate::boarding::Boardable>, class_name: &str) -> Option<CrewPosts> {
-    if ship.side == crate::Side::Player {
+/// The crew a ship fights with when it has no posts of its own: a ship off the player's side of the alliance table (`ours` false)
+/// carries its level's generic crew. `None` for the player's side (default hands, or the campaign roster, which the caller knows).
+pub fn fallback_posts(ours: bool, boarding: Option<&crate::boarding::Boardable>, class_name: &str) -> Option<CrewPosts> {
+    if ours {
         return None;
     }
     Some(generic_posts(boarding?.skill, &crate::boarding::counts(class_name)))

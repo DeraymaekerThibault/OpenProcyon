@@ -304,8 +304,12 @@ fn historical_map_keeps_preplaced_fleets_and_fixed_fleet_types() {
     assert_eq!((navy[0].0.as_str(), navy[0].2.as_deref()), ("Ship_Navy_ManOWar", Some("RLS Indefatigable")), "historical ships keep their set names");
     sk.slots[0].kind = Kind::Computer;
     sk.slots[2].kind = Kind::Human;
-    let sides: Vec<_> = sk.plan(&lib).iter().map(|g| (g.player, g.side, g.human, !g.ships.is_empty() && g.ships.iter().all(|s| s.1.is_some()))).collect();
-    assert_eq!(sides, [(0, crate::Side::Enemy, false, true), (1, crate::Side::Player, false, true), (2, crate::Side::Player, true, true), (3, crate::Side::Player, false, true)]);
+    let plan = sk.plan(&lib);
+    let sides: Vec<_> = plan.iter().map(|g| (g.player, g.side, g.human, !g.ships.is_empty() && g.ships.iter().all(|s| s.1.is_some()))).collect();
+    assert_eq!(sides, [(0, crate::Side(1), false, true), (1, crate::Side(2), false, true), (2, crate::Side::Player, true, true), (3, crate::Side(3), false, true)]);
+    let table = crate::scenario::lobby_alliances(&plan);
+    let with_us: Vec<bool> = plan.iter().map(|g| table.with_human(g.side)).collect();
+    assert_eq!(with_us, [false, true, true, true], "each slot is its own side; the lobby team is allied at launch");
 }
 #[test]
 #[ignore = "needs imported assets"]

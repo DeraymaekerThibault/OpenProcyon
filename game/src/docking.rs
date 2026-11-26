@@ -853,12 +853,12 @@ fn section_under_dock_lost(layers: &[Option<String>], sections: &[crate::data::S
 fn markers(
     mut commands: Commands,
     fxl: Option<Res<FxLib>>,
-    mission: Option<Res<Mission>>,
+    table: crate::alliance::Hostility,
     mut q: Query<(Entity, &Transform, &mut Dockable, Option<&Health>, Option<&MissionBase>, Option<&crate::combat::BaseSide>)>,
 ) {
     let Some(fxl) = fxl else { return };
     for (e, tf, mut dk, h, base, side) in &mut q {
-        let on = dk.open() && !h.is_some_and(|h| h.destroyed) && !hostile_base(mission.as_deref(), base, side);
+        let on = dk.open() && !h.is_some_and(|h| h.destroyed) && !hostile_base(&table, base, side);
         if on && dk.markers.is_empty() {
             dk.markers = (0..dk.points.len())
                 .filter_map(|i| {
@@ -898,7 +898,8 @@ fn ai_repair_dock(
     mut msg: MessageWriter<DockMsg>,
     sensors: Option<Res<crate::environment::Sensors>>,
     ships: Query<(Entity, &Ship, &Health, &Transform, Option<&crate::campaign::MissionShip>, Option<&Docker>), Without<crate::commands::Commander>>,
-    docks: Query<(Entity, &Transform, &Dockable, Option<&Ship>, Option<&crate::campaign::MissionShip>, Option<&MissionBase>)>,
+    docks: Query<(Entity, &Transform, &Dockable, Option<&Ship>, Option<&MissionBase>, Option<&crate::combat::BaseSide>)>,
+    table: crate::alliance::Hostility,
 ) {
     let script = mission.as_deref().map(|m| &m.script);
     for (e, ship, h, tf, ms, docking) in &ships {
@@ -913,10 +914,9 @@ fn ai_repair_dock(
         if h.destroyed || !computer || !needs_repair(&lib, ship, h) {
             continue;
         }
-        let friendly = |dship: Option<&Ship>, downer: Option<&str>| crate::alliance::hostility::friendly_dock(script, ms.map(|m| m.owner.as_str()), ship.side, dship, downer);
-        let candidates = docks
-            .iter()
-            .filter(|(d, _, dk, dship, dms, base)| *d != e && dk.open() && dk.repairs && friendly(*dship, dms.map(|m| m.owner.as_str()).or(base.map(|b| b.owner.as_str()))));
+        // A dock of a ship or base the table does not call hostile.
+        let friendly = |dship: Option<&Ship>, base, side| dship.map(|d| d.side).or_else(|| table.base_side(base, side)).is_none_or(|d| table.allied(ship.side, d));
+        let candidates = docks.iter().filter(|(d, _, dk, dship, base, side)| *d != e && dk.open() && dk.repairs && friendly(*dship, *base, *side));
         let reach = if script.is_some() { lib.classes[ship.class].sight } else { f32::INFINITY };
         let candidates = candidates.filter(|d| d.1.translation.distance(tf.translation) <= reach);
         let sphere = |e: Entity, tf: &Transform| sensors.as_ref().and_then(|s| s.sphere(e)).unwrap_or((tf.translation, 0.0));
@@ -942,24 +942,31 @@ pub struct Dockees<'w, 's> {
     lib: Res<'w, Library>,
     sensors: Res<'w, crate::environment::Sensors>,
     mission: Option<Res<'w, Mission>>,
+    table: crate::alliance::Hostility<'w>,
 }
-/// A base is hostile by mission rules, or in a skirmish (no mission rules) when its side is not the player's.
-fn hostile_base(mission: Option<&Mission>, base: Option<&MissionBase>, side: Option<&crate::combat::BaseSide>) -> bool {
-    crate::alliance::hostility::base(mission, base, side)
+/// A base hostile to the human in the alliance table.
+fn hostile_base(table: &crate::alliance::Alliances, base: Option<&MissionBase>, side: Option<&crate::combat::BaseSide>) -> bool {
+    base.is_some() && table.base_side(base, side).is_some_and(|s| !table.with_human(s))
 }
 impl Dockees<'_, '_> {
+    /// The battle's alliance table.
+    pub fn table(&self) -> &crate::alliance::Alliances {
+        &self.table
+    }
     fn base_hostile(&self, e: Entity, base: Option<&MissionBase>) -> bool {
-        hostile_base(self.mission.as_deref(), base, self.sides.get(e).ok())
+        hostile_base(&self.table, base, self.sides.get(e).ok())
     }
     pub fn can_dock(&self, actor: Entity, dockee: Entity) -> bool {
         let Ok((_, _, d, ship, base)) = self.q.get(dockee) else { return false };
-        d.open() && !self.base_hostile(dockee, base) && ship.is_none_or(|s| s.side == Side::Player) && self.sensors.in_sight(actor, dockee, self.mission.as_deref())
+        d.open() && !self.base_hostile(dockee, base) && ship.is_none_or(|s| self.table.with_human(s.side)) && self.sensors.in_sight(actor, dockee, self.mission.as_deref())
     }
     /// Dockable ally under the ray, with whether the selected ship's group has sight (no separate dock range).
     pub fn under(&self, ray: Ray3d, actor: Entity) -> Option<(Entity, bool)> {
         self.q
             .iter()
-            .filter(|(e, _, _, ship, base)| ship.is_none_or(|s| s.side == Side::Player) && !self.base_hostile(*e, *base) && self.sensors.player_sees(*e, self.mission.as_deref()))
+            .filter(|(e, _, _, ship, base)| {
+                ship.is_none_or(|s| self.table.with_human(s.side)) && !self.base_hostile(*e, *base) && self.sensors.player_sees(*e, self.mission.as_deref())
+            })
             .filter_map(|(e, tf, d, ship, _)| {
                 // Islands hover on their collision hull: dock points sit far offshore, so a dock-point sphere swallowed nearby waypoint clicks.
                 let t = match (ship, self.hulls.get(e)) {

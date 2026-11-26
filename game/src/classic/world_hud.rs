@@ -260,13 +260,13 @@ fn spawn_reticle(mut commands: Commands, assets: Res<AssetServer>, hud: Res<HudD
 
 /// Name-ribbon tint: the mission's banner type if set, else the colour of the map player that owns the ship (retail: the roster
 /// colour, e.g. slot 1 green), else red for our side and blue for the others.
-fn banner_tint(side: crate::Side, ms: Option<&crate::campaign::MissionShip>, owner: Option<&crate::scenario::PlayerColor>) -> Color {
+fn banner_tint(ours: bool, ms: Option<&crate::campaign::MissionShip>, owner: Option<&crate::scenario::PlayerColor>) -> Color {
     match ms.map_or("", |m| m.banner.as_str()) {
         b if b.contains("Black") => Color::srgb(0.12, 0.12, 0.12),
         b if b.contains("Blue") => Color::srgb(0.1, 0.25, 0.95),
         b if b.contains("Red") => Color::srgb(0.9, 0.08, 0.08),
         _ if owner.is_some() => owner.map_or(Color::WHITE, |c| c.0),
-        _ if side == crate::Side::Player => Color::srgb(0.9, 0.08, 0.08),
+        _ if ours => Color::srgb(0.9, 0.08, 0.08),
         _ => Color::srgb(0.1, 0.25, 0.95),
     }
 }
@@ -298,13 +298,14 @@ fn spawn_labels(
     fonts: Res<Fonts>,
     lib: Res<Library>,
     ships: Query<(Entity, &Ship, Option<&crate::campaign::MissionShip>, Option<&crate::ShipName>, Option<&crate::scenario::PlayerColor>), Without<Labeled>>,
+    table: crate::alliance::Hostility,
 ) {
     let Some(font) = fonts.0.get("Immi14") else { return };
     for (e, ship, mission, named, owner) in &ships {
         commands.entity(e).insert(Labeled);
         let Some(mut img) = slice(&assets, "ribbon", hud.skin, "nocursor") else { continue };
         // Reference video: thin white ribbon (ShipNameBackdrop_*_WhiteBanner) tinted red for our side, blue for the others.
-        let tint = banner_tint(ship.side, mission, owner);
+        let tint = banner_tint(table.with_human(ship.side), mission, owner);
         let part = |side: &str| size_of(&hud, &format!("ShipNameBackdrop_{side}_WhiteBanner"));
         let (Some(l), Some(c), Some(r)) = (part("Left"), part("Center"), part("Right")) else { continue };
         let text = mission
@@ -345,7 +346,7 @@ fn place_labels(
     marks: Res<crate::panels::WorldMarks>,
     ships: Query<(&GlobalTransform, &Health, &Ship, Option<&crate::campaign::MissionShip>, Option<&crate::scenario::PlayerColor>)>,
     animals: Query<(&GlobalTransform, &crate::environment::SpaceAnimal)>,
-    lib: Res<Library>,
+    (lib, table): (Res<Library>, crate::alliance::Hostility),
     toggles: Res<Toggles>,
     mut labels: Query<(Entity, &mut Label, &mut Node, &mut Visibility, Option<&Children>), Without<Reticle>>,
     mut imgs: Query<&mut ImageNode, Without<Reticle>>,
@@ -366,7 +367,7 @@ fn place_labels(
             Some(p) if label.alpha > 0.0 && marks.banners.contains(&label.ship) => {
                 let a = label.alpha;
                 // The first three children are the ribbon pieces; the rules' banner type ('Banner BlueTeam' ...) picks their tint.
-                let tint = banner_tint(sh.side, ms, owner);
+                let tint = banner_tint(table.with_human(sh.side), ms, owner);
                 for (n, k) in kids.into_iter().flatten().enumerate() {
                     if let Ok(mut i) = imgs.get_mut(*k) {
                         if n < 3 {
@@ -456,9 +457,9 @@ mod banner_tests {
     #[test]
     fn a_ships_banner_wears_its_map_players_colour_unless_the_rules_name_one() {
         let green = crate::scenario::PlayerColor(Color::srgb(0.0, 0.5, 0.0));
-        assert_eq!(banner_tint(crate::Side::Player, None, Some(&green)), green.0);
-        assert_eq!(banner_tint(crate::Side::Enemy, None, None), Color::srgb(0.1, 0.25, 0.95), "without a player colour: the old red/blue");
+        assert_eq!(banner_tint(true, None, Some(&green)), green.0);
+        assert_eq!(banner_tint(false, None, None), Color::srgb(0.1, 0.25, 0.95), "without a player colour: the old red/blue");
         let ms = crate::campaign::MissionShip { banner: "Banner BlueTeam".into(), ..default() };
-        assert_eq!(banner_tint(crate::Side::Player, Some(&ms), Some(&green)), Color::srgb(0.1, 0.25, 0.95), "the script's banner type wins");
+        assert_eq!(banner_tint(true, Some(&ms), Some(&green)), Color::srgb(0.1, 0.25, 0.95), "the script's banner type wins");
     }
 }

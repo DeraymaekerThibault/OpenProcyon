@@ -217,19 +217,13 @@ pub fn plugin(app: &mut App) {
         .add_systems(Update, (dev_board, cancel_grapple_order, status, ropes).chain().before(crate::input).in_set(crate::battle::BattleActive));
 }
 
-/// Whether two objects are hostile: by the mission's alliance table (owners), else by skirmish side.
-fn hostile_pair(mission: Option<&Mission>, a: (Option<&str>, Option<Side>), b: (Option<&str>, Option<Side>)) -> bool {
-    crate::alliance::hostility::pair(mission, a, b)
+/// Whether two objects (by their sides, none for a thing without one) are hostile in the alliance table.
+fn hostile_pair(table: &crate::alliance::Alliances, a: Option<Side>, b: Option<Side>) -> bool {
+    a.zip(b).is_some_and(|(a, b)| table.hostile(a, b))
 }
-/// Whether two ships are allied (same side or allied players) and not hostile; the line-of-fire hold treats such ships as friends.
-pub(crate) fn allied_pair(mission: Option<&Mission>, a: (Option<&str>, Option<Side>), b: (Option<&str>, Option<Side>)) -> bool {
-    if let (Some(m), Some(x), Some(y)) = (mission, a.0, b.0) {
-        return m.script.allied(x, y);
-    }
-    matches!((a.1, b.1), (Some(x), Some(y)) if x == y)
-}
-fn owner_of<'a>(ms: Option<&'a MissionShip>, mb: Option<&'a MissionBase>) -> Option<&'a str> {
-    ms.map(|m| m.owner.as_str()).or_else(|| mb.map(|m| m.owner.as_str()))
+/// The side of a ship, else of a base (`Alliances::base_side`).
+fn thing_side(table: &crate::alliance::Alliances, ship: Option<&Ship>, base: Option<&MissionBase>, side: Option<&crate::combat::BaseSide>) -> Option<Side> {
+    ship.map(|s| s.side).or_else(|| table.base_side(base, side))
 }
 
 /// Dev hook `--script board`: the player grapples the nearest enemy and boards it as soon as the menu would allow (smoke test, screenshots).
@@ -245,7 +239,7 @@ fn dev_board(
         return;
     }
     let Ok(me) = me.single() else { return };
-    let Some((foe, ..)) = foes.iter().filter(|f| f.2.side == Side::Enemy).nearest_to(me.translation, |a| a.1.translation) else {
+    let Some((foe, ..)) = foes.iter().filter(|f| f.2.side != Side::Player).nearest_to(me.translation, |a| a.1.translation) else {
         return;
     };
     match *step {

@@ -52,6 +52,8 @@ struct Extra<'w, 's> {
     voices: Query<'w, 's, Entity, With<crate::briefing::Voice>>,
     /// Cheats used in this battle: its victory points are not recorded (`console::Cheats`).
     cheats: Option<Res<'w, console::Cheats>>,
+    /// The battle's alliance table, lent to the script while it runs.
+    alliances: Option<ResMut<'w, crate::alliance::Alliances>>,
     /// `--script dock` skipped the briefing already.
     dock_smoke_skipped: Local<'s, bool>,
 }
@@ -224,6 +226,10 @@ fn update(
 ) {
     let Some(mut mission) = mission else { return };
     let mission = &mut *mission;
+    // The script holds the battle's alliance table while it runs: its captures, 'Set alliance' and effects read the same table.
+    if let Some(t) = extra.alliances.as_deref_mut() {
+        mission.script.lend(t);
+    }
     let input = std::mem::take(&mut *input);
     // Tutorials and mods' custom missions run the same interpreter but do not count toward the retail campaign.
     if crate::campaign::is_campaign(&mission.id) && !extra.cheats.as_ref().is_some_and(|c| c.used) {
@@ -272,8 +278,11 @@ fn update(
     if let Some(file) = voice {
         apply::spawn_voice(&mut commands, &assets, &file);
     }
-    let mut env = extra.fx.env(&mut mission.script, &mission.data["paths"], &lib, Some(&mut orbit), None);
+    let mut env = extra.fx.env(&mut mission.script, &mission.data["paths"], &lib, Some(&mut orbit), true);
     apply::apply(fxs, &mut env, &mut commands, &mut ships, &mut animals);
+    if let Some(t) = extra.alliances.as_deref_mut() {
+        mission.script.lend(t);
+    }
     if let Some(values) = mission.script.campaign_commit()
         && let Some(handed_on) = extra.campaign_values.as_mut()
     {
