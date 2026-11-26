@@ -187,6 +187,7 @@ mod tests {
         let mut app = App::new();
         app.add_plugins(hidden_plugin(false));
         assert!(app.world().get_resource::<WinitSettings>().is_none(), "a normal run keeps bevy_winit's default");
+        let mut app = App::new();
         app.add_plugins(hidden_plugin(true));
         let settings = app.world().resource::<WinitSettings>();
         assert_eq!((settings.focused_mode, settings.unfocused_mode), (UpdateMode::Continuous, UpdateMode::Continuous));
