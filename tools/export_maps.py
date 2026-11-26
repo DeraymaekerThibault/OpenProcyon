@@ -1,7 +1,7 @@
 """Export World/*.twt skirmish maps -> assets/maps/<id>.json + index.json, scenery/skybox GLBs, map backdrops, music.
 
 Per map: English name/description (Strings/English_GameStrings.txt), MustAssembleFleet, players (name, team, start point,
-forward vector, FormationType), skybox mesh, music track (first 'Play Music Track'), backdrop texture, and the static
+forward vector, FormationType), allied player pairs (`alliances`), skybox mesh, music track (first 'Play Music Track'), backdrop texture, and the static
 objects (islands, asteroids, bases) whose WOT names a Mesh Scene. Positions stay in game axes (x starboard, y fwd, z up).
 
 usage: python -m tools.export_maps <game_root> <assets_dir>
@@ -129,6 +129,14 @@ def parse_twt(text):
                     color=f.get("Color"),
                 )
             )
+    # PlayerAllianceInfoVector: allied player-index pairs (by player name); every other pair of players starts hostile.
+    names = [p["name"] for p in m["players"]]
+    m["alliances"] = [
+        [names[f["Player0"]], names[f["Player1"]]]
+        for b in blocks(nodes, "PlayerAllianceInfoVector - Element")
+        for f in [fields(b["children"])]
+        if max(f["Player0"], f["Player1"]) < len(names)  # mods leave dangling players
+    ]
     for a in actions:
         if a.get("Type") == "*State Init* Setup Ship":
             m["ship_names"][a["World Object ID"]] = (

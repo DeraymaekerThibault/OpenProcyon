@@ -215,13 +215,35 @@ pub fn spawn_scenario(commands: &mut Commands, assets: &AssetServer, lib: &Libra
     commands.insert_resource(Outcome::Playing);
 }
 
-/// The alliance table of a lobby's battle: each group is its own side, allied with the groups of its lobby team.
-pub fn lobby_alliances(groups: &[crate::Group]) -> alliance::Alliances {
+/// The alliance table a skirmish starts with (PROVISIONAL). At load every map player is allied only with itself (and with NO PLAYER,
+/// everyone's ally): a played slot holds its group's side; one nobody plays gets a side of its own when the map lists its allied pairs
+/// (`alliances`), else (older imports) its team's or its fleet type's group's. The map's pairs are then allied, and at launch every
+/// pair of groups in the battle is set from the lobby: allied when on one team, hostile otherwise.
+pub fn battle_alliances(groups: &[crate::Group], players: &[serde_json::Value], pairs: Option<&serde_json::Value>) -> alliance::Alliances {
     let mut table = alliance::Alliances::default();
-    for (a, b) in groups.iter().flat_map(|a| groups.iter().map(move |b| (a, b))) {
-        if a.team >= 0 && a.team == b.team {
-            table.offer(a.side, b.side, true);
+    let mut next = groups.iter().map(|g| g.side.0 + 1).max().unwrap_or(0);
+    for (i, p) in players.iter().enumerate() {
+        let Some(name) = p["name"].as_str() else { continue };
+        let team = p["team"].as_i64().unwrap_or(-1) as i32;
+        let side = match (groups.iter().find(|g| g.player == i), pairs) {
+            (Some(g), _) => Some(g.side),
+            (None, Some(_)) => {
+                next += 1;
+                Some(Side(next - 1))
+            }
+            (None, None) => groups.iter().find(|g| team >= 0 && g.team == team).or_else(|| faction(name).and_then(|f| groups.iter().find(|g| g.race == f))).map(|g| g.side),
+        };
+        if let Some(side) = side {
+            table.add_player(name, side);
         }
+    }
+    for pair in pairs.and_then(|p| p.as_array()).into_iter().flatten() {
+        if let (Some(a), Some(b)) = (pair[0].as_str().and_then(|a| table.side_of(a)), pair[1].as_str().and_then(|b| table.side_of(b))) {
+            table.set(a, b, true);
+        }
+    }
+    for (a, b) in groups.iter().flat_map(|a| groups.iter().map(move |b| (a, b))).filter(|(a, b)| a.side != b.side) {
+        table.set(a.side, b.side, a.team >= 0 && a.team == b.team);
     }
     table
 }
@@ -312,7 +334,7 @@ fn spawn_skirmish(
     }
     let mut namer = Namer::new();
     let mut roster = alliance::Roster { changeable: map["alliance_change"].as_bool().unwrap_or(false), ..default() };
-    let mut alliances = lobby_alliances(&groups);
+    let mut alliances = battle_alliances(&groups, &players, map.get("alliances"));
     for g in &groups {
         let Some(p) = players.get(g.player) else { continue };
         let f = game_to_bevy(&p["forward"]);
@@ -409,16 +431,6 @@ fn spawn_skirmish(
         Some(v) => commands.insert_resource(v),
         None if scripted => commands.insert_resource(victory::Victory::scripted(teams)),
         None => commands.remove_resource::<victory::Victory>(),
-    }
-    // Every map player in the alliance table (a base player such as 'pirate base' fights for the fleet of its type, as the bases
-    // below do), for the script's owner changes and alliance actions.
-    for (i, p) in players.iter().enumerate() {
-        let team = p["team"].as_i64().unwrap_or(-1) as i32;
-        let Some(name) = p["name"].as_str() else { continue };
-        let side = groups.iter().find(|g| g.player == i).or_else(|| groups.iter().find(|g| team >= 0 && g.team == team)).map(|g| g.side);
-        if let Some(side) = side.or_else(|| faction(name).and_then(|f| groups.iter().find(|g| g.race == f)).map(|g| g.side)) {
-            alliances.add_player(name, side);
-        }
     }
     commands.insert_resource(alliances);
     let rosters = map_teams

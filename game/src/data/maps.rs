@@ -104,6 +104,10 @@ pub struct MapDoc {
     #[serde(default, deserialize_with = "lenient_list")]
     #[schemars(with = "Vec<PlayerDoc>")]
     pub players: Vec<PlayerDoc>,
+    /// Allied player pairs of a skirmish map, by player name (`[[a, b], ...]`, the missions' shape); every other pair starts
+    /// hostile. Absent in older imports. Read by the skirmish setup (`scenario::spawn`) through the JSON value.
+    #[serde(default, deserialize_with = "crate::data::lenient")]
+    pub alliances: Option<Vec<[String; 2]>>,
     /// Teams of a skirmish map, indexed by a player's `team`.
     #[serde(default, deserialize_with = "lenient_list")]
     #[schemars(with = "Vec<TeamDoc>")]
@@ -541,7 +545,7 @@ mod tests {
             "$schema": "map.schema.json", "id": "arena", "name": "Arena", "description": "A test arena.", "skirmish": true, "assemble": false,
             "sky": "skybox_99_Layer1", "music": "Track", "backdrop": "Pic", "world_half": 1500.5,
             "lighting": {"ambient": [0, 0, 0, 1], "roof_direction": [0.0, 1.0, -1.0], "floor": [0.4, 0.45, 0.8, 1.0], "roof": [1, 1, 1, 1]},
-            "alliance_change": true, "islands_make_sounds": true, "name_id": "IDGS_X", "desc_id": "IDGS_Y",
+            "alliance_change": true, "islands_make_sounds": true, "name_id": "IDGS_X", "desc_id": "IDGS_Y", "alliances": [["A", "B"]],
             "players": [
                 {"name": "A", "team": 0, "start": [0, 0, 0], "forward": [0, 1, 0], "formation": 2, "playable": true, "race": 0, "color": [1, 0, 0, 1]},
                 {"name": "B", "team": 1, "start": [10, 0, 0], "forward": [0, -1, 0], "formation": 0, "playable": false, "race": 2, "color": null}
@@ -569,6 +573,7 @@ mod tests {
         let d = MapDoc::from_value(&sample());
         assert_eq!((d.name_or_empty(), d.description_or_empty(), d.id.as_deref()), ("Arena", "A test arena.", Some("arena")));
         assert_eq!((d.skirmish, d.assemble, d.alliance_change, d.islands_make_sounds), (Some(true), Some(false), Some(true), Some(true)));
+        assert_eq!(d.alliances, Some(vec![["A".to_string(), "B".to_string()]]));
         assert_eq!((d.sky.as_deref(), d.music.as_deref(), d.half()), (Some("skybox_99_Layer1"), Some("Track"), 1500.5));
         assert!(d.wants_backdrop() && d.schema.is_some() && d.name_id.is_some() && d.desc_id.is_some());
         let l = d.lighting.as_ref().unwrap();
@@ -752,6 +757,7 @@ mod tests {
             "lighting",
             "world_half",
             "alliance_change",
+            "alliances",
             "islands_make_sounds",
             "name_id",
             "desc_id",

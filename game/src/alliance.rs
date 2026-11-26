@@ -298,7 +298,7 @@ mod tests {
     #[test]
     fn the_lobby_team_starts_allied() {
         let group = |side, team| crate::Group { player: side as usize, side: Side(side), team, ..default() };
-        let t = crate::scenario::lobby_alliances(&[group(0, 1), group(1, 1), group(2, 2), group(3, -1), group(4, -1)]);
+        let t = crate::scenario::battle_alliances(&[group(0, 1), group(1, 1), group(2, 2), group(3, -1), group(4, -1)], &[], None);
         assert!(t.allied(Side(0), Side(1)), "same lobby team");
         assert!(t.hostile(Side(0), Side(2)) && t.hostile(Side(1), Side(2)), "another team");
         assert!(t.hostile(Side(3), Side(4)), "slots on no team are each their own");
@@ -336,5 +336,22 @@ mod tests {
         }
         let base = crate::campaign::MissionBase { id: 9, owner: "player 9".into() };
         assert_eq!(t.base_side(Some(&base), None), Some(other));
+    }
+
+    /// A skirmish's table: the map's allied pairs hold for slots nobody plays (each its own side), and the lobby's teams decide every
+    /// pair of slots in play, whatever the map says; a map without pairs (an older import) works as before.
+    #[test]
+    fn the_maps_pairs_ally_unplayed_slots_and_the_lobby_decides_the_played_ones() {
+        let group = |player, side, team| crate::Group { player, side: Side(side), team, ..default() };
+        let players: Vec<serde_json::Value> = ["A", "B", "C", "D"].iter().map(|n| serde_json::json!({"name": n, "team": 5})).collect();
+        let pairs = serde_json::json!([["A", "C"], ["A", "B"], ["C", "D"]]);
+        let t = crate::scenario::battle_alliances(&[group(0, 0, 0), group(1, 1, 1)], &players, Some(&pairs));
+        let side = |n: &str| t.side_of(n).unwrap();
+        assert!(side("C") != side("D") && side("C").0 >= 2, "each unplayed slot its own side");
+        assert!(t.allied(side("A"), side("C")) && t.allied(side("C"), side("D")), "the map's pairs");
+        assert!(t.hostile(side("A"), side("B")), "played slots: the lobby's teams, not the map");
+        assert!(t.hostile(side("B"), side("C")) && t.allied(side("C"), NEUTRAL), "the rest: only with itself and with no one");
+        let old = crate::scenario::battle_alliances(&[group(0, 0, 0), group(1, 1, 5)], &players, None);
+        assert_eq!(old.side_of("C"), Some(Side(1)), "without pairs: its team's group, as before");
     }
 }
