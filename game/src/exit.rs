@@ -25,6 +25,18 @@ pub fn request(world: &mut World, code: u8) {
     world.write_message(app_exit(code));
 }
 
+/// Logs `run end: frame N` (the frames the app ran, loading included) once, on the frame a system asks to stop. The tools read
+/// it for the frame rate of a run (tools/rungame.py).
+pub fn plugin(app: &mut App) {
+    app.add_systems(Last, log_run_end);
+}
+
+fn log_run_end(mut exits: MessageReader<AppExit>, frames: Option<Res<bevy::diagnostic::FrameCount>>, mut logged: Local<bool>) {
+    if exits.read().next().is_some() && !std::mem::replace(&mut *logged, true) {
+        info!("run end: frame {}", frames.map_or(0, |f| f.0));
+    }
+}
+
 /// The process exit code of a finished app.
 pub fn status(result: &AppExit) -> i32 {
     match result {

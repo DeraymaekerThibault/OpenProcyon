@@ -17,7 +17,8 @@ class CheckGateTests(unittest.TestCase):
             root = Path(tmp)
             (root / "tools").mkdir()
             (root / "game").mkdir()
-            shutil.copyfile(ROOT / "tools/check.sh", root / "tools/check.sh")
+            for script in ("check.sh", "python-env.sh"):
+                shutil.copyfile(ROOT / "tools" / script, root / "tools" / script)
             if (
                 changed is not None
             ):  # a repository with one commit plus the given untracked files

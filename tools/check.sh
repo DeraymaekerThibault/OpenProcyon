@@ -20,10 +20,7 @@ for a in "$@"; do
   esac
 done
 cd "$(dirname "$0")/.."
-# The checkout's virtualenv first (bin/ on Linux and macOS, Scripts/ on Windows, where python3 may be the Store stub).
-for bin in .venv/bin .venv/Scripts; do [ -d "$bin" ] && PATH="$PWD/$bin:$PATH"; done
-# python3 when it runs (not the Windows Store stub, not absent: the Windows venv only has `python`), else python.
-py=python3; "$py" -c '' >/dev/null 2>&1 || py=python
+root=$PWD; . tools/python-env.sh  # the checkout's virtualenv first, then `py`
 command -v ruff >/dev/null || { echo "ruff not found: pip install -r requirements-dev.txt" >&2; exit 1; }
 # Cargo turns incremental builds off when CI is set; locally (also under agents that set CI) the tiers rely on them.
 [ -n "${GITHUB_ACTIONS:-}" ] || unset CI

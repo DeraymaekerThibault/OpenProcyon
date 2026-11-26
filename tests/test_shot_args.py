@@ -17,7 +17,7 @@ ROOT = Path(__file__).resolve().parent.parent
     "shot.sh and the stand-in game are shebang scripts, which Windows cannot execute directly (WinError 193)",
 )
 class ShotArgumentTests(unittest.TestCase):
-    def run_shot(self, *args):
+    def run_shot(self, *args, extra_env=None):
         with tempfile.TemporaryDirectory() as tmp:
             tmp = Path(tmp).resolve()
             record = tmp / "args.txt"
@@ -28,6 +28,7 @@ class ShotArgumentTests(unittest.TestCase):
                 "import os, sys\n"
                 "from PIL import Image\n"
                 f"open({str(record)!r}, 'w').write('\\n'.join(sys.argv[1:]) + '\\n' + os.getcwd())\n"
+                f"open({str(record) + '.env'!r}, 'w').write(os.environ.get('PROCYON_TRACE', '-') + '\\n' + os.environ.get('PROCYON_COMMANDS', '-'))\n"
                 "Image.new('RGB', (8, 8), (200, 100, 50)).save(sys.argv[2], 'PNG')\n"
             )
             fake.chmod(0o755)
@@ -37,6 +38,7 @@ class ShotArgumentTests(unittest.TestCase):
                 PROCYON_BIN=str(fake),
                 PROCYON_ASSETS=str(tmp),
                 DISPLAY=":fake",
+                **(extra_env or {}),
             )
             result = subprocess.run(
                 [str(ROOT / "tools/shot.sh"), "out.png", *args],
@@ -47,6 +49,7 @@ class ShotArgumentTests(unittest.TestCase):
             )
             self.assertEqual(result.returncode, 0, result.stderr)
             lines = record.read_text().split("\n")
+            self.env_seen = (tmp / "args.txt.env").read_text().split("\n")
             return tmp, lines[:-1], Path(lines[-1])
 
     def test_relative_mod_paths_resolve_against_the_callers_directory(self):
@@ -68,6 +71,20 @@ class ShotArgumentTests(unittest.TestCase):
                 "/abs/m3",
             ],
         )
+
+    def test_relative_trace_and_command_log_paths_become_absolute(self):
+        tmp, _, _ = self.run_shot(
+            "--shot-frame",
+            "1",
+            extra_env={"PROCYON_TRACE": "local/t1.csv", "PROCYON_COMMANDS": "c.jsonl"},
+        )
+        self.assertEqual(
+            self.env_seen, [str(tmp / "work/local/t1.csv"), str(tmp / "work/c.jsonl")]
+        )
+
+    def test_absolute_and_unset_trace_paths_stay_as_they_are(self):
+        self.run_shot("--shot-frame", "1", extra_env={"PROCYON_TRACE": "/abs/t.csv"})
+        self.assertEqual(self.env_seen, ["/abs/t.csv", "-"])
 
     def test_other_arguments_pass_unchanged(self):
         _, got, _ = self.run_shot(

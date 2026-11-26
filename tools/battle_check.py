@@ -7,7 +7,7 @@ Each scenario runs the game (Cargo profile `fast` unless --profile) with PROCYON
 one `battle report {json}` line when one side is gone or the time is up. The expectations below are whole-battle invariants (the computer engages, nobody grinds on
 an island, nothing panics): they catch regressions where one feature quietly changes another (armed volcanoes taken for bases,
 map-script tags hiding the captain's target). Runs take ~10-40 s each; logs go to local/battle_check/<name>.log.
-Needs imported assets and a display, or Xvfb + Mesa like tools/shot.sh."""
+Needs imported assets; the run mode (window or software) comes from PROCYON_RUN (tools/rungame.py)."""
 
 import argparse
 import json
@@ -24,8 +24,8 @@ from tools import gamelog
 from tools.paths import REPO
 from tools.rungame import (
     build_game,
-    display_wrapper,
     game_env,
+    launch_plan,
     run_logged,
     silent_data_home,
 )
@@ -282,9 +282,13 @@ def main():
     game = build_game(args.profile)
     out = REPO / "local/battle_check"
     out.mkdir(parents=True, exist_ok=True)
-    wrap = display_wrapper()
     # Software Vulkan is CPU-bound: half the cores is the most that pays off.
     jobs = max(1, min(args.jobs or (os.cpu_count() or 2) // 2, len(chosen)))
+    try:
+        launch = launch_plan(jobs=jobs)
+    except ValueError as e:
+        sys.exit(f"battle_check: {e}")
+    print(f"battle_check: run mode {launch.mode} (PROCYON_RUN)")
     if jobs > 1:
         print(
             f"battle_check: {jobs} jobs; stutter is not judged (load-sensitive: use --jobs 1 for that)"
@@ -355,16 +359,23 @@ def main():
             silent_data_home(xdg)
             env = game_env(
                 xdg,
-                wrap,
+                launch,
                 **{
                     "PROCYON_OVERLAY": str(Path(xdg) / "overlay"),
                     "PROCYON_REPORT": str(seconds),
                     **env_extra,
                 },
             )
-            cmd = [*wrap, str(game), *game_args, "--speed", str(args.speed), *extra]
+            cmd = [
+                *launch.prefix,
+                str(game),
+                *game_args,
+                "--speed",
+                str(args.speed),
+                *extra,
+            ]
             # Wall-clock cap for a hung run (below ~10 fps the game runs slower than asked; a fixed-step run needs one frame per tick); a timeout reports no battle.
-            run_logged(cmd, log, env, seconds * (4 if extra else 1) + 120)
+            run_logged(cmd, log, env, seconds * (4 if extra else 1) + 120, launch.mode)
         return gamelog.read(log, r"panicked at|battle report")
 
     start = time.monotonic()
