@@ -515,7 +515,7 @@ pub fn spawn(commands: &mut Commands, assets: &AssetServer, lib: &Library, fxl: 
             }
             continue;
         };
-        commands.entity(*e).insert(MissionBase { id: o["id"].as_i64().unwrap_or(-1), owner });
+        commands.entity(*e).insert(MissionBase { id: o["id"].as_i64().unwrap_or(-1), owner: owner.clone() });
         // Bases are boarded only once a rule sets them Boardable (their 'Combat Strength' is what the boarders must wear down).
         commands.entity(*e).insert(crate::boarding::Boardable::base(o["type"].as_str().unwrap_or_default(), combat, false));
         // Island gun towers: a `Base_*` class with mounts makes the base a shooter and a target (combat::base_fire).
@@ -527,6 +527,7 @@ pub fn spawn(commands: &mut Commands, assets: &AssetServer, lib: &Library, fxl: 
                 states,
                 crate::combat::DamageFx::new(&lib.classes[class]),
                 gunnery,
+                crate::combat::BaseFlag::new(&owner),
             ));
         }
     }

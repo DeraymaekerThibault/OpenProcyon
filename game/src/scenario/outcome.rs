@@ -70,7 +70,7 @@ pub fn outcome(
     ),
     all: Query<(Entity, &Health, &Ship, &Transform, Option<&ship::FleetMember>, Option<&MapObject>), Without<crate::lifeboats::Lifeboat>>,
     mut sunk: Local<Vec<(Entity, victory::ShipState)>>,
-    bases: Query<(&campaign::MissionBase, &combat::ArmedBase, &Health, Option<(&combat::BaseSide, &combat::BaseOrigin)>)>,
+    bases: Query<(&campaign::MissionBase, &combat::ArmedBase, &Health, Option<&combat::BaseFlag>)>,
     table: crate::alliance::Hostility,
 ) {
     let enemies = || ships.iter().filter(|(_, s)| !table.with_human(s.side)).map(|(h, _)| h);
@@ -119,7 +119,7 @@ pub fn outcome(
         // The map's own rules decide: a base falling, the human fleet or every ship lost.
         let states: Vec<victory::ShipState> = all.iter().map(state).chain(gone.iter().cloned()).collect();
         let damage: Vec<(i64, f32)> = bases.iter().map(|(b, a, h, _)| (b.id, combat::base_mission_damage(&lib.classes[a.class], h))).collect();
-        let captured: Vec<i64> = bases.iter().filter(|b| b.3.is_some_and(|(side, origin)| side.0 != origin.0)).map(|b| b.0.id).collect();
+        let captured: Vec<i64> = bases.iter().filter(|b| b.3.is_some_and(|f| f.shows != f.start)).map(|b| b.0.id).collect();
         let points = rules.3.as_ref().map(|s| s.points()).unwrap_or_default();
         let snap = victory::Snapshot { ships: &states, bases: &damage, captured: &captured, points: &points, table: &table };
         // The map's end rules first, then a script that decides its own game (`"victory": "script"`, rules::skirmish): an End Game,

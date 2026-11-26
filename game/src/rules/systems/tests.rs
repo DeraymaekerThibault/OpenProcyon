@@ -872,3 +872,34 @@ fn a_script_nis_that_never_aims_the_camera_leaves_the_chase_camera_running() {
     mission.script.cam.focus_unit = Some("Player0 Group".into());
     assert!(!crate::rules::nis_camera_idle(Some(&mission)), "a focus makes the NIS camera the script's");
 }
+
+/// 'Set Group/Unit Owner' on a base in a named group changes its owner at once, in a skirmish as in a mission: its side follows the
+/// owner (its guns take the new owner's foes from the next update), and its flag still shows the old owner. Asset-free.
+#[test]
+fn set_owner_moves_a_bases_side_but_not_its_flag_in_skirmish_and_mission() {
+    let data = serde_json::json!({
+        "players": ["Reds", "Blues"], "groups": {"Camp": [2]},
+        "rules": [{"name": "hand over", "conditions": [], "actions": [{"Type": "Set Group/Unit Owner", "Group/Unit Name": "Camp", "New Owner": "Reds"}]}],
+    });
+    let check = |mut app: App, base: Entity| {
+        let mut table = crate::alliance::Alliances::default();
+        table.add_player("Reds", Side(1));
+        table.add_player("Blues", Side(2));
+        app.insert_resource(table);
+        app.world_mut().entity_mut(base).insert(crate::combat::BaseFlag::new("Blues"));
+        app.update();
+        let (owner, flag) = (app.world().get::<MissionBase>(base).unwrap().owner.clone(), app.world().get::<crate::combat::BaseFlag>(base).unwrap().shows.clone());
+        let table = app.world().resource::<crate::alliance::Alliances>();
+        let side = table.base_side(app.world().get::<MissionBase>(base), app.world().get::<crate::combat::BaseSide>(base));
+        assert_eq!((owner.as_str(), side), ("Reds", Some(Side(1))), "the new owner, and its side");
+        assert!(table.hostile(side.unwrap(), Side(2)) && !table.hostile(side.unwrap(), Side(1)), "it now fights the new owner's foes");
+        assert_eq!(flag, "Blues", "a rule does not repaint the flag");
+    };
+    let (app, _, base) = skirmish_rules_app(data.clone());
+    check(app, base);
+    let mission = Mission { id: "synthetic".into(), script: Script::new(&data, serde_json::json!({})), data, opening: None };
+    let mut app = rules_app(mission);
+    app.insert_resource(Library { classes: vec![crate::fixed_tests::synthetic_class()], guns: default(), bullets: default(), names: default(), clips: default() });
+    let base = app.world_mut().spawn((MissionBase { id: 2, owner: "Blues".into() }, Transform::default())).id();
+    check(app, base);
+}

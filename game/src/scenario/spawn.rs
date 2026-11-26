@@ -432,7 +432,7 @@ fn spawn_skirmish(
         None if scripted => commands.insert_resource(victory::Victory::scripted(teams)),
         None => commands.remove_resource::<victory::Victory>(),
     }
-    commands.insert_resource(alliances.clone());
+    commands.insert_resource(alliances);
     let rosters = map_teams
         .iter()
         .enumerate()
@@ -458,7 +458,7 @@ fn spawn_skirmish(
     }
     // The map script's Setup Island 'Combat Strength' is what boarders must wear down (retail: it seeds the base's strength).
     let setups = script_json.as_ref().map(setup_islands).unwrap_or_default();
-    spawn_bases(commands, assets, lib, bases, &players, &alliances, &setups);
+    spawn_bases(commands, assets, lib, bases, &players, &setups);
 }
 
 /// The mines a map places (`mines`: `[{type, id, pos}]`), resting where the map put them until a script hands them to a player.
@@ -470,8 +470,8 @@ fn spawn_mines(commands: &mut Commands, map: &serde_json::Value) {
 }
 
 /// Armed bases and islands of a skirmish map, with guns, damage and boarding state. A tower or camp belongs to the map object's
-/// player, unless the map script's Setup Island names another, and fights for that owner's side in the alliance table (`table`);
-/// later a capture moves it. One of NO PLAYER never fires. Armed islands (the volcanoes) belong to nobody: they fire on every ship
+/// player, unless the map script's Setup Island names another, and fights for that owner's side in the alliance table; a capture
+/// or a rule's owner change moves it. One of NO PLAYER never fires. Armed islands (the volcanoes) belong to nobody: they fire on every ship
 /// and cannot be boarded. The armed asteroids (Convoy Raid's belong to the pirate base's player) are owned like a base. PROVISIONAL.
 fn spawn_bases(
     commands: &mut Commands,
@@ -479,7 +479,6 @@ fn spawn_bases(
     lib: &Library,
     bases: &[(Entity, serde_json::Value)],
     players: &[serde_json::Value],
-    table: &alliance::Alliances,
     setups: &std::collections::HashMap<i64, (Option<String>, Option<i32>)>,
 ) {
     for (e, o) in bases {
@@ -499,20 +498,21 @@ fn spawn_bases(
         let id = o["id"].as_i64().unwrap_or(-1);
         let setup = setups.get(&id);
         let owner = base_owner(o, players, setup);
-        let side = if island { HOSTILE_TO_ALL } else { table.side_or_neutral(&owner) };
         let states = combat::spawn_guns(commands, assets, lib, *e, class);
         commands.entity(*e).insert((
-            campaign::MissionBase { id, owner: if island { String::new() } else { owner } },
             combat::ArmedBase { class },
             combat::DamageFx::new(&lib.classes[class]),
-            combat::BaseSide(side),
-            combat::BaseOrigin(side),
+            combat::BaseFlag::new(&owner),
             combat::Health::new(&lib.classes[class]),
             states,
         ));
         if island {
-            // An island no setup rule touches shoots with perfect aim (docs/re/volcanoes.md).
+            // An island no setup rule touches shoots with perfect aim (docs/re/volcanoes.md); it is nobody's, its side fixed.
+            commands.entity(*e).insert((campaign::MissionBase { id, owner: String::new() }, combat::BaseSide(HOSTILE_TO_ALL)));
             commands.entity(*e).insert(combat::IslandGunnery { accuracy: 0.0, silent: false, neutral: false });
+        } else {
+            // A base fights for its owner's side, which follows the owner: a capture or a rule's owner change moves it.
+            commands.entity(*e).insert(campaign::MissionBase { id, owner });
         }
         if !island {
             commands.entity(*e).insert(boarding::Boardable::base(&lib.classes[class].name, setup.and_then(|s| s.1).filter(|s| *s > 0).unwrap_or(SKIRMISH_BASE_STRENGTH), true));

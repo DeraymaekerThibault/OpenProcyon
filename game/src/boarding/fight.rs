@@ -281,13 +281,13 @@ pub(super) fn settled(
     mut rng: ResMut<SimRng>,
     mut sfx: MessageWriter<Sfx>,
     mut captured: MessageWriter<Captured>,
-    mut things: Query<(Option<&mut Ship>, Option<&mut MissionShip>, Option<&mut MissionBase>, &mut Boardable, Option<&mut crate::combat::BaseSide>)>,
+    mut things: Query<(Option<&mut Ship>, Option<&mut MissionShip>, Option<&mut MissionBase>, &mut Boardable, Option<&mut crate::combat::BaseFlag>)>,
     (members, spawn_order): (Query<&crate::ship::FleetMember>, Query<&crate::scenario::SpawnIndex>),
     grapples: Query<(Entity, &Grapple)>,
     mut mission: Option<ResMut<Mission>>,
 ) {
     for s in msgs.read() {
-        let Ok([(bship, bms, _, bflag, _), (tship, tms, tbase, mut tflag, tside)]) = things.get_many_mut([s.boarder, s.target]) else { continue };
+        let Ok([(bship, bms, _, bflag, _), (tship, tms, tbase, mut tflag, tbanner)]) = things.get_many_mut([s.boarder, s.target]) else { continue };
         let side_of = |ship: &Option<Mut<Ship>>| ship.as_ref().map(|x| x.side);
         let (ours, theirs, is_ship) = (
             side_of(&bship) == Some(Side::Player),
@@ -303,7 +303,9 @@ pub(super) fn settled(
                         .or_else(|| mb.as_ref().map(|m| m.owner.as_str().into()))
                         .unwrap_or_else(|| if side_of(ship) == Some(Side::Player) { "Player".into() } else { "Enemy".into() })
                 };
-                let (by, victim) = (owner(&bms, &None, &bship), owner(&tms, &tbase, &tship));
+                // A captor without a rules name (a skirmish fleet without a map script) captures under its fleet's owner.
+                let by = members.get(s.boarder).ok().filter(|_| bms.is_none()).map_or_else(|| owner(&bms, &None, &bship), |m| m.0.clone());
+                let victim = owner(&tms, &tbase, &tship);
                 info!("boarding: {} captured {}", by, victim);
                 captured.write(Captured { by: by.clone(), victim: victim.to_string(), unit: s.target });
                 if let Some(mut m) = tms {
@@ -311,12 +313,12 @@ pub(super) fn settled(
                     m.ordered = None;
                     m.attack.clear();
                 }
+                // A base changes owner, and so sides, guns included; a capture also repaints its flag.
                 if let Some(mut b) = tbase {
                     b.owner = by.to_string();
                 }
-                // A skirmish base changes sides with its guns and its place in the end rules.
-                if let (Some(mut bs), Some(side)) = (tside, side_of(&bship)) {
-                    bs.0 = side;
+                if let Some(mut banner) = tbanner {
+                    banner.shows = by.to_string();
                 }
                 if let (Ok(member), true) = (members.get(s.boarder), is_ship) {
                     let mut member = member.clone();
