@@ -1080,3 +1080,27 @@ fn a_base_of_an_owner_outside_the_battle_is_a_target_one_of_no_owner_is_not() {
     assert_eq!(t, Some(base), "outside the battle: hostile, attacked");
     assert_eq!(target_of("NO PLAYER").0, None, "no owner: everyone's ally");
 }
+
+/// Mission 3's hold-still case: Aggressive mission ships with nothing in scan range search instead of holding, whether their order
+/// names a ship that is not hostile, their script path has ended, or a stopped ship keeps stale points of one.
+#[test]
+fn an_aggressive_mission_ship_with_nothing_in_reach_explores_instead_of_holding() {
+    let mut w = captain_world(true);
+    let friend = captain_ship(&mut w, Side::Enemy, Vec3::X * 4000.0);
+    let ship = |w: &mut World, ordered: Option<Entity>, waypoints: Vec<Vec3>, order| {
+        let e = captain_ship(w, Side::Enemy, Vec3::ZERO);
+        w.entity_mut(e).insert(campaign::MissionShip { ordered, ..campaign::MissionShip::placed(1, "p".into(), "Pirates".into()) });
+        let mut s = w.get_mut::<Ship>(e).unwrap();
+        (s.waypoints, s.order) = (waypoints, order);
+        e
+    };
+    let ordered_on_friend = ship(&mut w, Some(friend), vec![], EngineOrder::Stop);
+    let path_ended = ship(&mut w, None, vec![], EngineOrder::Full);
+    let stale = ship(&mut w, None, vec![Vec3::X * 50.0], EngineOrder::Stop);
+    think(&mut w);
+    for e in [ordered_on_friend, path_ended, stale] {
+        let s = w.get::<Ship>(e).unwrap();
+        assert_eq!((s.order, s.waypoints.len()), (EngineOrder::Emergency, 1), "{e}: it searches");
+        assert_eq!(w.resource::<CaptainTargets>().of(e), None);
+    }
+}

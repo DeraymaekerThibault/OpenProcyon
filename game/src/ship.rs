@@ -454,6 +454,8 @@ pub fn ai(
         let stance = scripted.get(e).map_or(crate::rules::Stance::Aggressive, |m| m.stance);
         let aggressive = stance == crate::rules::Stance::Aggressive;
         let mut chosen = choose_target(targets.0.get(&e).map(|t| (t.0, t.1, t.3)), explicit, stance_pick(stance, campaign, &options), valid);
+        // An order whose target is gone or not hostile is dropped: the ship then picks, adopts or explores as one without orders.
+        let explicit = explicit.filter(|t| valid(*t));
         // Nothing found: an Aggressive ship takes a fleet mate's target, else an allied ship's (same side, another fleet).
         if chosen.is_none() && aggressive && explicit.is_none() {
             let fleet = member.map(|m| m.0.as_str());
@@ -497,8 +499,9 @@ pub fn ai(
         let explore_now = |s: &mut Ship, explore: &mut Explore| {
             (s.waypoints, s.goal, s.order) = (vec![explore.goal(&cfg, e, key, tf.translation, class.sight)], None, EngineOrder::Emergency);
         };
-        // A course the captain did not set itself: a script's path or one the player drew.
-        let path = s.waypoints.last().is_some_and(|p| courses.get(&e) != Some(p));
+        // A course the captain did not set itself and the ship is still under way on: a script's path or one the player drew. An
+        // ended path (no waypoints left) or leftover points of a stopped ship are none.
+        let path = s.order != EngineOrder::Stop && s.waypoints.last().is_some_and(|p| courses.get(&e) != Some(p));
         // A Persistent ship on a path keeps to it and fires at its target without turning to it; once it has done so with a target
         // held it keeps doing so until the target is gone, and holds its position when the path ends. Without a path it attacks
         // like the others. A formation comes first (the fleet's, above). PROVISIONAL.

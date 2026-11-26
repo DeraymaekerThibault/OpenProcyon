@@ -377,7 +377,8 @@ Static analysis of the original's captain AI, written as rules. Nothing in it de
   the retail saved games have it). Remake (PROVISIONAL, read, not observed): one captain (`ship::ai`) runs skirmish and mission ships. The
   flag belongs to the target: the captain's own pick can be overridden, a target an order names (Attack, help-attack, Board, Grapple,
   Dock, Tow, the script's attack, ram, dock, tow, board and grapple actions, a chosen repair dock) cannot and is kept until lost.
-  Aggressive takes the nearest hostile ship or dragon in scan range, else a base as above, else a friend's target, else explores, and
+  Aggressive takes the nearest hostile ship or dragon in scan range, else a base as above, else a friend's target, else explores (an
+  order on a target that is gone or not hostile counts as none, and an ended path or a stopped ship's leftover points as no path), and
   with no working gun rams; Persistent, Defensive and Neutral only answer a hostile in scan range that targets them, Defensive and
   Neutral stop with no target unless on a course or in formation, and a Dummy does nothing. A Persistent ship on a path fires from it
   and holds position when it ends. A player's Attack or "fire when possible" makes a ship Aggressive; a ship nothing gives a stance
