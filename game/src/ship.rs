@@ -409,7 +409,9 @@ pub fn ai(
         // (PROVISIONAL); the command ship only in demo (--shot) runs, as an autopilot. A ship that was just sunk has left its fleet and is
         // computer-run, whoever steered it (docs/re/effects.md "Death drive").
         let sinking = dying.contains(e);
-        let demo = me && cfg.shot.is_some() && cfg.script.as_deref() != Some("fleet");
+        // The demo autopilot is a skirmish's only: in a mission (its cutscenes included) the human's ship is never the captain's, as
+        // before the captain ran there.
+        let demo = me && !campaign && cfg.shot.is_some() && cfg.script.as_deref() != Some("fleet");
         let human = !sinking && !demo && (is_human_ship(s.side, member, Some(&fleets)) || scripted.get(e).is_ok_and(|m| m.human));
         let script = scripted.get(e).ok().map(|m| (m.ordered, m.ram, m.follow.is_some()));
         if busy.contains(e) || scripted.get(e).is_ok_and(left_to_script) {

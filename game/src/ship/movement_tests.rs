@@ -1104,3 +1104,19 @@ fn an_aggressive_mission_ship_with_nothing_in_reach_explores_instead_of_holding(
         assert_eq!(w.resource::<CaptainTargets>().of(e), None);
     }
 }
+
+/// hunt-m3: in a screenshot run of a mission the human's command ship is not the demo autopilot, so nothing steers it while a cutscene
+/// plays (it keeps the order the rules gave it).
+#[test]
+fn the_captain_never_steers_the_humans_ship_in_a_mission_cutscene() {
+    let mut w = captain_world(true);
+    w.resource_mut::<crate::Config>().shot = Some("local/x.png".into());
+    w.resource_mut::<campaign::Mission>().script.nis = true;
+    let me = captain_ship(&mut w, Side::Player, Vec3::ZERO);
+    w.entity_mut(me).insert(crate::commands::Commander(crate::commands::PlayerId(0)));
+    let _foe = captain_ship(&mut w, Side::Enemy, Vec3::X * 50.0);
+    think(&mut w);
+    let s = w.get::<Ship>(me).unwrap();
+    assert_eq!((s.order, s.waypoints.len(), s.goal), (EngineOrder::Stop, 0, None), "no helm change during the cutscene");
+    assert_eq!(w.resource::<CaptainTargets>().of(me), None);
+}
