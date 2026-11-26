@@ -1136,3 +1136,33 @@ fn the_captain_never_steers_the_humans_ship_in_a_mission_cutscene() {
     assert_eq!((s.order, s.waypoints.len(), s.goal), (EngineOrder::Stop, 0, None), "no helm change during the cutscene");
     assert_eq!(w.resource::<CaptainTargets>().of(me), None);
 }
+
+/// Retaliation: a Defensive ship answers an attacker that holds it as its target (before any shot), when it is visible, hostile and
+/// within scan range; not one out of scan range, nor a fully cloaked one.
+#[test]
+fn a_defensive_ship_answers_a_visible_attacker_in_scan_range_that_targets_it() {
+    let answer = |attacker_at: Vec3, cloaked: bool| {
+        let mut w = captain_world(false);
+        let attacker = captain_ship(&mut w, Side::Player, attacker_at);
+        let me = captain_ship(&mut w, Side::Enemy, Vec3::ZERO);
+        w.entity_mut(me).insert(campaign::MissionShip { stance: crate::rules::Stance::Defensive, ..campaign::MissionShip::placed(1, "d".into(), "o".into()) });
+        w.entity_mut(attacker).insert((FleetPilot { target: Some(me), ..default() }, crate::commands::Commander(crate::commands::PlayerId(0))));
+        if cloaked {
+            w.entity_mut(attacker).insert(crate::cloak::Cloak::new(true));
+        }
+        think(&mut w);
+        (w.resource::<CaptainTargets>().of(me), attacker)
+    };
+    let (t, attacker) = answer(Vec3::X * 50.0, false);
+    assert_eq!(t, Some(attacker), "it targets me: answered, no shot needed");
+    assert_eq!(answer(Vec3::X * 3000.0, false).0, None, "out of scan range");
+    assert_eq!(answer(Vec3::X * 50.0, true).0, None, "fully cloaked: not visible");
+}
+
+/// The re-scan: a target that can be overridden is scanned for again after 6 s, and when the scan finds nothing the old one stays.
+#[test]
+fn a_rescan_that_finds_nothing_keeps_the_old_target() {
+    let a = Entity::from_raw_u32(1).unwrap();
+    assert_eq!(choose_target(Some((a, 6.5, true)), None, None, |_| true), Some((a, false, true)), "kept, its age starting again");
+    assert_eq!(choose_target(Some((a, 6.5, true)), None, None, |t| t != a), None, "unless it is lost");
+}

@@ -304,17 +304,20 @@ impl CaptainTargets {
 /// help-attack, Board, Grapple, Dock or Tow order, the script's Attack Group, Ram, Dock, Tow, Board or Grapple actions, a chosen
 /// repair dock) is taken at once and cannot be overridden; the captain's own pick can. A `held` target (entity, age, can) that is
 /// still `valid` (alive and hostile: the original follows a held target anywhere) is kept until lost, and one that can be overridden
-/// only until it is `RESELECT_SECS` old; else the captain's own `pick` (`stance_pick`). Returns the target, whether it was kept,
-/// and its flag.
+/// only until it is `RESELECT_SECS` old; then the captain scans again (`pick`, `stance_pick`), and when that finds nothing it keeps the
+/// old target, scanning again after another `RESELECT_SECS` (PROVISIONAL). Returns the target, whether it was kept (age running on;
+/// otherwise its age starts again), and its flag.
 fn choose_target(held: Option<(Entity, f32, bool)>, explicit: Option<Entity>, pick: Option<Entity>, valid: impl Fn(Entity) -> bool) -> Option<(Entity, bool, bool)> {
     if let Some(x) = explicit.filter(|x| valid(*x)) {
         return Some((x, held.is_some_and(|h| h.0 == x), false));
     }
-    held.filter(|h| (!h.2 || h.1 < RESELECT_SECS) && valid(h.0)).map(|h| (h.0, true, h.2)).or_else(|| pick.map(|c| (c, false, true)))
+    let held = held.filter(|h| valid(h.0));
+    held.filter(|h| !h.2 || h.1 < RESELECT_SECS).map(|h| (h.0, true, h.2)).or_else(|| pick.map(|c| (c, false, true))).or_else(|| held.map(|h| (h.0, false, h.2)))
 }
 
 /// A hostile a captain could pick: a ship, a dragon or a base, its distance, whether it is within the captain's scan range, and
-/// whether its own target is the captain's ship.
+/// whether it attacks the captain's ship: it is visible and holds that ship as its current target (whether it has fired is not
+/// asked, so a Defensive ship may answer before any shot; volcanoes, lobs at a ground point and mines never count). PROVISIONAL.
 #[derive(Clone, Copy)]
 pub(crate) struct Seen {
     pub e: Entity,
@@ -388,13 +391,14 @@ pub fn ai(
     let left_to_script = |m: &campaign::MissionShip| !m.visible || m.stance == crate::rules::Stance::Dummy;
     let holes = hole_list(&holes, storms.0.as_deref(), storms.1.as_deref());
     let now = time.elapsed_secs();
-    // (entity, position, side, afloat, radius, fleet, the aim point seen from a position, its ordered or aimed target)
-    type Snap = (Entity, Vec3, Side, bool, f32, Option<crate::names::Owner>, (Transform, usize, Vec<f32>), Option<Entity>);
+    // (entity, position, side, afloat, radius, fleet, the aim point seen from a position, its ordered or aimed target, visible)
+    type Snap = (Entity, Vec3, Side, bool, f32, Option<crate::names::Owner>, (Transform, usize, Vec<f32>), Option<Entity>, bool);
     let snap: Vec<Snap> = ships
         .iter()
         .map(|(e, t, s, h, me, p, m, _)| {
             let aimed = p.and_then(|p| p.target).or(aim.as_ref().filter(|_| me).and_then(|a| a.0));
-            (e, t.translation, s.side, !h.destroyed, lib.classes[s.class].radius, m.map(|m| m.0.clone()), (*t, s.class, h.sections.clone()), aimed)
+            let visible = !scripted.get(e).is_ok_and(|m| !m.visible) && !cloaks.get(e).is_ok_and(|c| c.state == crate::cloak::State::Full);
+            (e, t.translation, s.side, !h.destroyed, lib.classes[s.class].radius, m.map(|m| m.0.clone()), (*t, s.class, h.sections.clone()), aimed, visible)
         })
         .collect();
     breakoffs.retain(|e, _| snap.iter().any(|f| f.0 == *e));
@@ -447,7 +451,7 @@ pub fn ai(
         let rock = |t: Entity| rocks.get(t).ok().filter(|r| r.1.hp > 0.0); // a rock the script ordered attacked ('attack Asteroid Belt')
         let seen = |at: Vec3, t, base, targets_me| Seen { e: t, dist: at.distance(tf.translation), base, in_scan: sensors.in_sight(e, t, None), targets_me };
         let mut options: Vec<Seen> =
-            snap.iter().filter(|f| f.0 != e && table.hostile(f.2, s.side) && f.3).map(|f| seen(f.1, f.0, false, targets.of(f.0) == Some(e) || f.7 == Some(e))).collect();
+            snap.iter().filter(|f| f.0 != e && table.hostile(f.2, s.side) && f.3).map(|f| seen(f.1, f.0, false, f.8 && (targets.of(f.0) == Some(e) || f.7 == Some(e)))).collect();
         options.extend(dragons.iter().filter(|d| dragon(d.0).is_some()).map(|d| seen(d.1.translation, d.0, false, d.3.target() == Some(e))));
         options.extend(bases.iter().filter(|b| hostile_base(b)).map(|b| seen(b.1.translation, b.0, true, false)));
         let valid = |t: Entity| {
