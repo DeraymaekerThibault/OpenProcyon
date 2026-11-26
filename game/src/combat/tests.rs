@@ -334,8 +334,10 @@ fn a_volcano_lobs_one_aimed_shell_at_a_time() {
         app.update();
     }
     let shells: Vec<Option<Vec3>> = app.world_mut().query::<&Shell>().iter(app.world()).map(|s| s.aim).collect();
-    assert_eq!(shells.len(), 1, "six mounts take turns: one shell per cycle");
-    assert!(shells[0].is_some(), "a lob shell bursts at its aim height, not through the sea");
+    // Each volcano fires at every ship near it, whatever its side (the old expectation of one shell let the Player-side volcano spare
+    // the player's ship); its six mounts take turns, one shell per cycle each.
+    assert_eq!(shells.len(), 2, "each of the two volcanoes: one shell per cycle");
+    assert!(shells.iter().all(Option::is_some), "a lob shell bursts at its aim height, not through the sea");
 }
 
 #[test]

@@ -207,7 +207,13 @@ impl Alliances {
     pub fn offered(&self, a: Side, b: Side) -> bool {
         a == b || self.offers.contains(&(a, b))
     }
+    /// Two sides allied both ways (a side with itself; NO PLAYER's with every side). A volcano's side (`HOSTILE_TO_ALL`) is nobody's
+    /// ally, NO PLAYER's included: it fires at every ship near it, whatever the owner (PROVISIONAL).
     pub fn allied(&self, a: Side, b: Side) -> bool {
+        let volcano = crate::scenario::HOSTILE_TO_ALL;
+        if a != b && (a == volcano || b == volcano) {
+            return false;
+        }
         a == NEUTRAL || b == NEUTRAL || (self.offered(a, b) && self.offered(b, a))
     }
     pub fn hostile(&self, a: Side, b: Side) -> bool {
@@ -335,7 +341,7 @@ mod tests {
         t.add_player("Hero", Side::Player);
         let nobody = t.side_or_neutral("NO PLAYER");
         let camp = crate::campaign::MissionBase { id: 1, owner: "NO PLAYER".into() };
-        for s in [Side::Player, Side(1), crate::scenario::HOSTILE_TO_ALL] {
+        for s in [Side::Player, Side(1)] {
             assert!(t.allied(nobody, s) && !t.targetable(s, nobody, false), "never a captain's target");
         }
         assert_eq!(t.base_side(Some(&camp), None), Some(nobody), "its base is a friendly dock");
@@ -391,5 +397,14 @@ mod tests {
         assert_eq!(t.side_or_neutral("player 8"), sides[8], "the same name keeps its side");
         assert!(t.hostile(sides[8], sides[9]) && t.hostile(sides[9], sides[8]));
         assert!(Alliances::default().side_or_neutral("player 9") == Side(OUTSIDERS.start), "a new battle's table starts afresh");
+    }
+
+    /// A volcano fires at every ship near it, a ship of NO PLAYER's included, in every mode.
+    #[test]
+    fn a_volcano_is_everyones_foe_no_player_included() {
+        let (t, volcano) = (Alliances::default(), crate::scenario::HOSTILE_TO_ALL);
+        for s in [Side::Player, Side(1), NEUTRAL, Side(200)] {
+            assert!(t.hostile(volcano, s) && t.hostile(s, volcano), "{s:?}");
+        }
     }
 }
