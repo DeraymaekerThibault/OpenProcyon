@@ -87,7 +87,11 @@ fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> Fragment
     // fading out toward the pull radius; with a whirlpool they dive past the lip and fade into the dark throat, else gone at the core
     let gone = select(core * 0.9, core * 0.35, ribbon.shape.z > 0.0);
     let edge = (1.0 - smoothstep(0.75 * radius, radius, rho)) * smoothstep(gone, gone + core * 0.25, rho);
+    // the trail's own fade (vertex colour a); a strip without vertex colours is simply fully lit
+    var fade = 1.0;
+@if(VERTEX_COLORS)
+    fade = in.color.a;
     var out: FragmentOutput;
-    out.color = vec4<f32>(col * streak * gain * edge * in.color.a * ribbon.shape.y, 1.0);
+    out.color = vec4<f32>(col * streak * gain * edge * fade * ribbon.shape.y, 1.0);
     return out;
 }

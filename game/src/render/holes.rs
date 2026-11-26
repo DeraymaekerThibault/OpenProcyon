@@ -59,6 +59,8 @@ pub struct BlackHoles {
     pub throat: f32,
     /// Colour of the whirlpool's outer water, faint at the pull radius (linear).
     pub rim: Vec3,
+    /// The hole as a ray-marched volume instead of a flat disc: (thickness of the gas at the rim as a share of the radius, ray steps).
+    pub volume: Option<(f32, f32)>,
 }
 
 /// How far down (0..1 of the depth) the whirlpool's funnel is at `share` of the pull radius: a gravity well, nearly flat at the
@@ -146,6 +148,7 @@ pub fn parse(v: &Value) -> Option<BlackHoles> {
             depth: num(&v["funnel"]["depth"], 0.0).clamp(0.0, 3.0),
             throat: num(&v["funnel"]["throat"], 0.06).clamp(0.01, 0.5),
             rim: rgb(&v["funnel"]["rim"]).unwrap_or(Vec3::new(0.3, 0.18, 0.65)).max(Vec3::ZERO),
+            volume: v["volume"].is_object().then(|| (num(&v["volume"]["thickness"], 0.14).clamp(0.02, 0.5), num(&v["volume"]["steps"], 32.0).clamp(8.0, 96.0))),
         }
     })
 }
@@ -202,8 +205,8 @@ pub type HoleMaterial = ExtendedMaterial<StandardMaterial, HoleGlow>;
 
 pub fn plugin(app: &mut App, look: &Look) {
     if look.black_holes.is_some() {
-        app.add_plugins((MaterialPlugin::<HoleMaterial>::default(), MaterialPlugin::<RibbonMaterial>::default()))
-            .add_systems(Update, (spawn_discs, update_discs, flash_on_swallow, ribbon_gain, restyle_ribbons, update_ribbons).chain());
+        app.add_plugins((MaterialPlugin::<HoleMaterial>::default(), MaterialPlugin::<HoleVolumeMaterial>::default(), MaterialPlugin::<RibbonMaterial>::default()))
+            .add_systems(Update, (spawn_discs, spawn_volumes, update_discs, update_volumes, flash_on_swallow, ribbon_gain, restyle_ribbons, update_ribbons).chain());
     }
 }
 
@@ -345,6 +348,9 @@ fn spawn_discs(
     mut materials: ResMut<Assets<HoleMaterial>>,
 ) {
     let (Some(b), Some(noise)) = (&look.black_holes, noise) else { return };
+    if b.volume.is_some() {
+        return;
+    }
     for (e, pull, at) in &holes {
         let base = StandardMaterial { unlit: true, cull_mode: None, double_sided: true, alpha_mode: AlphaMode::Premultiplied, ..default() };
         let material = materials.add(HoleMaterial { base, extension: HoleGlow { u: b.uniform(at.translation(), pull, 0.0), frame: default(), noise: noise.0.clone() } });
@@ -408,6 +414,112 @@ fn flash_on_swallow(new: Query<&GlobalTransform, Added<Swallowed>>, holes: Query
                 disc.flash = 1.0;
             }
         }
+    }
+}
+
+pub const VOLUME_SHADER: &str = "shaders/blackhole_volume.wesl";
+
+/// The hole as a volume (`volume` in the `black_holes` block): the gas is ray-marched inside a box round the hole like the storm
+/// clouds (`nebulae.rs`, `shaders/blackhole_volume.wesl`), with a solid black ball for the pit and a rim of light round it. It has
+/// the uniform of the flat disc (`HoleUniform`), with the box's half height (world units) in `funnel.x`, the step count in `funnel.y` and the gas's half thickness at the rim in `funnel.z`.
+#[derive(Asset, AsBindGroup, TypePath, Clone, Default)]
+pub struct HoleVolumeGas {
+    #[uniform(100)]
+    pub u: HoleUniform,
+    /// The frame data (`frame.rs`) at `@binding(99)`.
+    #[storage(99, read_only)]
+    pub frame: super::frame::FrameBinding,
+    /// The baked noise (`volnoise.rs`).
+    #[texture(101, dimension = "3d")]
+    #[sampler(102)]
+    pub noise: Handle<Image>,
+}
+
+impl MaterialExtension for HoleVolumeGas {
+    fn fragment_shader() -> ShaderRef {
+        VOLUME_SHADER.into()
+    }
+    fn specialize(
+        _: &MaterialExtensionPipeline,
+        descriptor: &mut RenderPipelineDescriptor,
+        _: &MeshVertexBufferLayoutRef,
+        _: MaterialExtensionKey<Self>,
+    ) -> Result<(), SpecializedMeshPipelineError> {
+        // the shader ends its own rays at the scene's depth (and at the ball), so the box's back faces take no depth test and write none
+        if let Some(depth) = descriptor.depth_stencil.as_mut() {
+            depth.depth_write_enabled = Some(false);
+            depth.depth_compare = Some(bevy::render::render_resource::CompareFunction::Always);
+        }
+        Ok(())
+    }
+}
+
+pub type HoleVolumeMaterial = ExtendedMaterial<StandardMaterial, HoleVolumeGas>;
+
+impl BlackHoles {
+    fn volume_uniform(&self, centre: Vec3, pull: &Pull, flash: f32) -> HoleUniform {
+        let (thickness, steps) = self.volume.unwrap_or((0.14, 32.0));
+        let mut u = self.uniform(centre, pull, flash);
+        u.funnel = Vec4::new(box_half_height(thickness, pull), steps, thickness * pull.radius, 0.0);
+        u
+    }
+}
+
+/// The box's half height: the gas's thickness at the rim, never less than the black ball.
+fn box_half_height(thickness: f32, pull: &Pull) -> f32 {
+    (thickness * pull.radius).max(pull.core() * 1.1)
+}
+
+/// Gives every hole of a profile with `volume` its gas box, once (in place of the flat disc).
+fn spawn_volumes(
+    mut commands: Commands,
+    look: Res<Look>,
+    noise: Option<Res<NoiseVolume>>,
+    holes: Query<(Entity, &Pull, &GlobalTransform), (With<BlackHole>, Without<HoleLook>)>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<HoleVolumeMaterial>>,
+) {
+    let (Some(b), Some(noise)) = (&look.black_holes, noise) else { return };
+    let Some((thickness, _)) = b.volume else { return };
+    for (e, pull, at) in &holes {
+        // back faces only: the camera may be inside the box, and the shader marches the ray from there
+        let base =
+            StandardMaterial { unlit: true, cull_mode: Some(bevy::render::render_resource::Face::Front), double_sided: false, alpha_mode: AlphaMode::Premultiplied, ..default() };
+        let material =
+            materials.add(HoleVolumeMaterial { base, extension: HoleVolumeGas { u: b.volume_uniform(at.translation(), pull, 0.0), frame: default(), noise: noise.0.clone() } });
+        let size = Vec3::new(2.0 * pull.radius, 2.0 * box_half_height(thickness, pull), 2.0 * pull.radius) * 1.02;
+        commands.entity(e).insert(HoleLook).with_child((
+            HoleDisc { flash: 0.0, shown: 0.0 },
+            Mesh3d(meshes.add(Cuboid::new(1.0, 1.0, 1.0))),
+            MeshMaterial3d(material),
+            Transform::from_scale(size),
+            Visibility::Visible,
+            bevy::camera::visibility::NoFrustumCulling,
+            bevy::light::NotShadowCaster,
+            bevy::light::NotShadowReceiver,
+        ));
+    }
+}
+
+/// Moves the flash on and follows the hole, like `update_discs`.
+fn update_volumes(
+    look: Res<Look>,
+    time: Res<Time>,
+    holes: Query<(Ref<GlobalTransform>, &Pull)>,
+    mut boxes: Query<(&ChildOf, &mut HoleDisc, &MeshMaterial3d<HoleVolumeMaterial>)>,
+    mut materials: ResMut<Assets<HoleVolumeMaterial>>,
+) {
+    let Some(b) = &look.black_holes else { return };
+    for (parent, mut disc, mat) in &mut boxes {
+        let Ok((at, pull)) = holes.get(parent.parent()) else { continue };
+        disc.flash = (disc.flash - time.delta_secs() / FLASH_SECONDS).max(0.0);
+        let flash = disc.flash * disc.flash;
+        if flash == disc.shown && !at.is_changed() {
+            continue;
+        }
+        let Some(mut m) = materials.get_mut(&mat.0) else { continue };
+        m.extension.u = b.volume_uniform(at.translation(), pull, flash);
+        disc.shown = flash;
     }
 }
 
