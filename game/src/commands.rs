@@ -330,9 +330,10 @@ fn apply_menu(world: &mut World, kind: &Kind) {
         }
         Kind::Cloak { ship, on } => {
             let side = world.get::<Ship>(ship).map(|s| s.side);
+            let table = world.get_resource::<crate::alliance::Alliances>().cloned().unwrap_or_default();
             if let (Some(mut c), Some(side)) = (world.get_mut::<crate::cloak::Cloak>(ship), side) {
                 if on {
-                    c.start(side);
+                    c.start(side, &table);
                 } else {
                     c.stop();
                 }

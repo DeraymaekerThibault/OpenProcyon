@@ -445,11 +445,12 @@ pub(in crate::rules) fn apply(
                         // starts in the ordered state. PROVISIONAL: that last case is the remake's.
                         commands.queue(move |w: &mut World| {
                             let side = w.get::<Ship>(e).map(|s| s.side);
+                            let table = w.get_resource::<crate::alliance::Alliances>().cloned().unwrap_or_default();
                             match (w.get_mut::<crate::cloak::Cloak>(e), side) {
                                 (Some(mut c), Some(side)) => {
                                     c.ai_modify = ai_override;
                                     if on {
-                                        c.start(side);
+                                        c.start(side, &table);
                                     } else {
                                         c.stop();
                                     }

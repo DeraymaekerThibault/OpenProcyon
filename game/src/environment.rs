@@ -11,7 +11,7 @@ struct SensorObject {
     sight: Option<f32>,
     group: String,
     shown: bool,
-    /// The teams that still see this ship while it is fully cloaked (None: not fully cloaked).
+    /// The teams that still see this ship while it is fully cloaked, its knowers' allies included (None: not fully cloaked).
     cloak: Option<Vec<crate::Side>>,
     /// The ship's team (bases and scenery: none that any cloak knows).
     side: crate::Side,
@@ -171,7 +171,12 @@ pub fn refresh_sensors(
         ),
         (Without<Ship>, Or<(With<crate::combat::ArmedBase>, With<crate::collision::Obstacle>, With<SpaceAnimal>, With<crate::combat::Asteroid>, With<crate::docking::Dockable>)>),
     >,
+    table: crate::alliance::Hostility,
 ) {
+    // Allies share cloak knowledge: a ship is known to every side the table allies with one in its list, read afresh each tick.
+    let mut sides: Vec<crate::Side> = ships.iter().map(|s| s.2.side).collect();
+    sides.sort_by_key(|s| s.0);
+    sides.dedup();
     sensors.objects.clear();
     sensors.primary = None;
     for (e, tf, ship, health, ms, fleet, cloak, primary, scan) in &ships {
@@ -185,7 +190,7 @@ pub fn refresh_sensors(
                 sight: (!class.is_lifeboat).then_some(class.sight * scan.map_or(1.0, |f| f.0)),
                 group: fleet.map(|f| f.0.as_str()).or_else(|| ms.map(|m| m.owner.as_str())).unwrap_or("").into(),
                 shown: !health.destroyed && ms.is_none_or(|m| m.visible),
-                cloak: cloak.filter(|c| c.state == crate::cloak::State::Full).map(|c| c.knows.clone()),
+                cloak: cloak.filter(|c| c.state == crate::cloak::State::Full).map(|c| sides.iter().copied().filter(|s| c.known_to(*s, &table)).collect()),
                 side: ship.side,
                 scenery: false,
             },
