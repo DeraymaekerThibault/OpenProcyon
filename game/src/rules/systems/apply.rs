@@ -272,7 +272,7 @@ pub(in crate::rules) fn apply(
                     warn!("OP Place Mines: no bullet '{bullet}'");
                     continue;
                 }
-                let side = (!owner.is_empty()).then(|| env.script.alliances.side_or_neutral(&owner));
+                let side = Some(env.script.alliances.side_or_neutral(&owner));
                 for p in env.script.point_sets[&set].as_array().into_iter().flatten() {
                     let mine = crate::combat::MapMine { id: -1, bullet: bullet.clone(), owner: owner.clone(), side };
                     commands.spawn((Scenario, mine, Transform::from_translation(game_to_bevy(&p["pos"]))));
@@ -310,7 +310,7 @@ pub(in crate::rules) fn apply(
                 }
                 // Not retail: a placed mine fights for the side its new owner has in the alliance table.
                 let side = env.script.alliances.side_of(&o);
-                let mine_side = side.or_else(|| env.campaign.then_some(crate::alliance::NEUTRAL));
+                let mine_side = Some(side.unwrap_or(crate::alliance::NEUTRAL));
                 for e in u {
                     if let Ok((_, mut base, ..)) = env.bases.get_mut(e) {
                         base.owner = o.clone();

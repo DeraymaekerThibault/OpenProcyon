@@ -408,9 +408,11 @@ pub(super) fn fire(
         .collect();
     let rocks: Vec<AimTarget> = objects
         .iter()
-        .filter(|(_, _, a, base, side)| {
-            a.is_none_or(|a| a.visible && !table.with_human(table.side_or_neutral(&a.owner)))
-                && base.is_none_or(|(_, _, b)| table.base_side(Some(b), *side).is_some_and(|s| !table.with_human(s)))
+        .filter(|(e, _, a, base, side)| {
+            // The human may also aim at a thing of no player by hand.
+            let by_hand = target.0 == Some(*e);
+            a.is_none_or(|a| a.visible && table.targetable(Side::Player, table.side_or_neutral(&a.owner), by_hand))
+                && base.is_none_or(|(_, _, b)| table.base_side(Some(b), *side).is_some_and(|s| table.targetable(Side::Player, s, by_hand)))
         })
         .filter_map(|(entity, transform, animal, base, _)| {
             let position = match base {
@@ -458,7 +460,7 @@ pub(super) fn fire(
             match ship.side {
                 Side::Player => seen
                     .iter()
-                    .find(|c| primary && Some(c.entity) == target.0 && !c.with_human && c.visible)
+                    .find(|c| primary && Some(c.entity) == target.0 && table.targetable(ship.side, c.side, true) && c.visible)
                     .or_else(|| crate::nearest(seen.iter().filter(|c| !primary && !c.with_human && c.visible), tf.translation, |c| c.aim_point))
                     .map(Contact::aim),
                 // Computer ships fire at their captain's target (ship::CaptainTargets): a ship, a hostile base or a rock the script ordered

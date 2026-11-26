@@ -1236,7 +1236,7 @@ fn a_map_mine_rests_where_the_map_put_it_and_fights_for_no_one_until_given_an_ow
     app.update();
     let shell = app.world().get::<Shell>(e).expect("the map mine became a shell");
     assert_eq!((shell.vel, shell.aim), (Vec3::ZERO, Some(at)));
-    assert_eq!(shell.side, crate::scenario::HOSTILE_TO_ALL, "hostile to every ship until the script names an owner");
+    assert_eq!(shell.side, crate::alliance::NEUTRAL, "allied with every ship (it damages none) until the script names an owner");
     assert!(matches!(shell.payload, Payload::Mine { sight, .. } if sight == 50.0));
 }
 

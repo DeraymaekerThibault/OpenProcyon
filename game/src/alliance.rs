@@ -137,7 +137,8 @@ fn click(
     }
 }
 
-/// A side allied with every other: things whose owner is no player of the battle ('NO PLAYER', an unset owner) are never hostile.
+/// The side of things whose owner is no player of the battle ('NO PLAYER', an unset owner): allied with every player, so never a
+/// captain's target, a friend's dock, and an order against one is dropped; the human may still fire at one by hand. PROVISIONAL.
 pub const NEUTRAL: Side = Side(u8::MAX - 1);
 
 /// The battle's alliance table: the one answer to "is X hostile to Y" for ships, shells, bases, docks, boarding and the rules. Each
@@ -177,6 +178,10 @@ impl Alliances {
     }
     pub fn hostile(&self, a: Side, b: Side) -> bool {
         !self.allied(a, b)
+    }
+    /// A ship of side `shooter` may shoot at `target`: a hostile, or (`by_hand`, the human's own aim) a thing of no player. PROVISIONAL.
+    pub fn targetable(&self, shooter: Side, target: Side, by_hand: bool) -> bool {
+        self.hostile(shooter, target) || (by_hand && target == NEUTRAL)
     }
     /// On the human's side of the table (the human's own ships included).
     pub fn with_human(&self, s: Side) -> bool {
@@ -286,5 +291,20 @@ mod tests {
         assert!(t.allied(Side(0), Side(1)), "same lobby team");
         assert!(t.hostile(Side(0), Side(2)) && t.hostile(Side(1), Side(2)), "another team");
         assert!(t.hostile(Side(3), Side(4)), "slots on no team are each their own");
+    }
+
+    /// A thing of no player is allied with every player: never a target or a foe's dock, its mines bounce off every hull (they damage
+    /// no one); only the human's own aim may still fire at it.
+    #[test]
+    fn a_thing_of_no_player_is_everyones_ally_but_can_be_fired_on_by_hand() {
+        let mut t = Alliances::default();
+        t.add_player("Hero", Side::Player);
+        let nobody = t.side_or_neutral("NO PLAYER");
+        let camp = crate::campaign::MissionBase { id: 1, owner: "NO PLAYER".into() };
+        for s in [Side::Player, Side(1), crate::scenario::HOSTILE_TO_ALL] {
+            assert!(t.allied(nobody, s) && !t.targetable(s, nobody, false), "never a captain's target");
+        }
+        assert_eq!(t.base_side(Some(&camp), None), Some(nobody), "its base is a friendly dock");
+        assert!(t.targetable(Side::Player, nobody, true) && !t.targetable(Side::Player, Side::Player, true), "by hand: things of no player only");
     }
 }

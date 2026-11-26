@@ -225,7 +225,9 @@ fn left_click(c: &Controlled, ray: Ray3d, scene: &ClickScene, pointer: &mut Poin
         }
         return;
     }
-    let hit = nearest_ship(scene.others, scene.lib, ray, |(e, _, s, h, m)| !docks.table().with_human(s.side) && !*h && *m && scene.sensors.player_sees(*e, scene.mission));
+    let hit = nearest_ship(scene.others, scene.lib, ray, |(e, _, s, h, m)| {
+        docks.table().targetable(crate::Side::Player, s.side, true) && !*h && *m && scene.sensors.player_sees(*e, scene.mission)
+    });
     let object = object_hit(scene.objects.iter(), ray, scene.sensors, scene.mission, docks.table());
     let base = docks.hostile_base_hit(ray, scene.player_pos);
     let pick = [hit, object, base.map(|(e, t, _)| (e, t))].into_iter().flatten().min_by(|a, b| a.1.total_cmp(&b.1));
@@ -621,7 +623,7 @@ pub fn object_hit<'a>(
                 return None;
             }
             let radius = if let Some(a) = animal {
-                if !a.visible || table.with_human(table.side_or_neutral(&a.owner)) {
+                if !a.visible || !table.targetable(crate::Side::Player, table.side_or_neutral(&a.owner), true) {
                     return None;
                 }
                 a.radius
