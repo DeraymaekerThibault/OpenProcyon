@@ -46,18 +46,43 @@ pub(crate) fn shot_window(shooting: bool) -> Window {
     Window { resolution: bevy::window::WindowResolution::new(1280, 720).with_scale_factor_override(1.0), resizable: false, ..default() }
 }
 
-/// Whether a screenshot run is over. Every requested picture must be on disk (`saved` counts finished writes). A scripted run
-/// then goes on `SCRIPT_TAIL` frames, because smoke scripts assert after their picture (`pause` at frame 70, `fleet` up to 130).
-/// A battle that ended stops 150 frames later and the `restart` script at frame 560.
-fn run_is_over(frame: u32, last_shot: u32, saved: usize, wanted: usize, scripted: bool, ended: Option<u32>, restart: bool) -> bool {
+/// What a screenshot run does on a frame (`run_end`).
+#[derive(Debug, PartialEq)]
+enum RunEnd {
+    /// The simulation goes on.
+    Play,
+    /// The run's last simulated frame has passed: game time stands still until the pictures are on disk.
+    Wait,
+    /// Quit now.
+    Exit,
+}
+
+/// The state of a screenshot run on `frame`. The simulation stops at a frame fixed by the arguments and the battle, never by
+/// file-write timing, so one command gives a trace of one length on every run: the last picture's frame, then for a scripted
+/// run `SCRIPT_TAIL` frames more, because smoke scripts assert after their picture (`pause` at frame 70, `fleet` up to 130).
+/// After that the run waits, game time still, until every requested picture is on disk (`saved` counts finished writes). A
+/// battle that ended stops 150 frames later and the `restart` script at frame 560, whatever the pictures.
+fn run_end(frame: u32, last_shot: u32, saved: usize, wanted: usize, scripted: bool, ended: Option<u32>, restart: bool) -> RunEnd {
     const SCRIPT_TAIL: u32 = 100;
-    let pictures_done = saved >= wanted && frame >= last_shot + if scripted { SCRIPT_TAIL } else { 0 };
-    ended.is_some_and(|e| frame >= e + 150) || pictures_done || (restart && frame >= 560)
+    if ended.is_some_and(|e| frame >= e + 150) || (restart && frame >= 560) {
+        return RunEnd::Exit;
+    }
+    match (frame >= last_shot + if scripted { SCRIPT_TAIL } else { 0 }, saved >= wanted) {
+        (false, _) => RunEnd::Play,
+        (true, false) => RunEnd::Wait,
+        (true, true) => RunEnd::Exit,
+    }
 }
 
 static SHOTS_SAVED: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 
-pub(crate) fn screenshot(mut commands: Commands, mut cfg: ResMut<Config>, loading: Option<Res<loading::Loading>>, mut exit: MessageWriter<AppExit>) {
+pub(crate) fn screenshot(
+    mut commands: Commands,
+    mut cfg: ResMut<Config>,
+    loading: Option<Res<loading::Loading>>,
+    mut vtime: ResMut<Time<Virtual>>,
+    mut exit: MessageWriter<AppExit>,
+) {
     let Some(path) = cfg.shot.clone() else { return };
     // scripts and pictures count frames of the battle: the count waits while it loads
     if loading.is_some() {
@@ -87,7 +112,12 @@ pub(crate) fn screenshot(mut commands: Commands, mut cfg: ResMut<Config>, loadin
         }
     }
     let saved = SHOTS_SAVED.load(std::sync::atomic::Ordering::SeqCst);
-    if run_is_over(cfg.frame, last, saved, shots.len(), cfg.script.is_some(), cfg.ended, cfg.script.as_deref() == Some("restart")) {
+    let end = run_end(cfg.frame, last, saved, shots.len(), cfg.script.is_some(), cfg.ended, cfg.script.as_deref() == Some("restart"));
+    if end != RunEnd::Play && !vtime.is_paused() {
+        // This frame was the last one simulated (its time step is already taken); from the next one game time stands still.
+        vtime.pause();
+    }
+    if end == RunEnd::Exit {
         exit.write(exit::app_exit(0));
     }
 }
@@ -105,12 +135,30 @@ mod tests {
     }
     #[test]
     fn a_run_ends_once_pictures_are_saved() {
-        assert!(!run_is_over(300, 300, 0, 1, false, None, false), "picture not written yet");
-        assert!(run_is_over(303, 300, 1, 1, false, None, false), "plain run stops at the save");
-        assert!(!run_is_over(350, 300, 1, 1, true, None, false), "scripts keep asserting after their picture");
-        assert!(run_is_over(400, 300, 1, 1, true, None, false));
-        assert!(!run_is_over(450, 300, 1, 2, false, None, false), "second picture missing");
-        assert!(run_is_over(560, 300, 0, 1, true, None, true), "restart script");
-        assert!(run_is_over(250, 900, 0, 1, true, Some(100), false), "battle ended long ago");
+        use RunEnd::{Exit, Play, Wait};
+        assert_eq!(run_end(299, 300, 0, 1, false, None, false), Play);
+        assert_eq!(run_end(300, 300, 0, 1, false, None, false), Wait, "the last picture's frame is the last simulated");
+        assert_eq!(run_end(303, 300, 1, 1, false, None, false), Exit, "plain run stops once the picture is saved");
+        assert_eq!(run_end(350, 300, 1, 1, true, None, false), Play, "scripts keep asserting after their picture");
+        assert_eq!(run_end(400, 300, 1, 1, true, None, false), Exit);
+        assert_eq!(run_end(450, 300, 1, 2, false, None, false), Wait, "second picture missing");
+        assert_eq!(run_end(560, 300, 0, 1, true, None, true), Exit, "restart script");
+        assert_eq!(run_end(250, 900, 0, 1, true, Some(100), false), Exit, "battle ended long ago");
+    }
+    /// Two runs of one command once ended a tick apart: the simulation ran until the picture's write finished. The frames
+    /// simulated (up to and including the first frame that is not `Play`) must not depend on when the write lands.
+    #[test]
+    fn simulated_frames_do_not_depend_on_write_timing() {
+        for scripted in [false, true] {
+            let mut lengths = vec![];
+            for write_takes in [1, 2, 3, 7, 150] {
+                let saved = |frame: u32| usize::from(frame >= 300 + write_takes);
+                let last_simulated = (1..).find(|&f| run_end(f, 300, saved(f), 1, scripted, None, false) != RunEnd::Play).unwrap();
+                let exit = (1..).find(|&f| run_end(f, 300, saved(f), 1, scripted, None, false) == RunEnd::Exit).unwrap();
+                assert!(saved(exit) == 1, "exits only once the picture is on disk");
+                lengths.push(last_simulated);
+            }
+            assert!(lengths.iter().all(|&n| n == lengths[0]), "scripted {scripted}: last simulated frames {lengths:?}");
+        }
     }
 }

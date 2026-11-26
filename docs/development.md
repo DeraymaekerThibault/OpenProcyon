@@ -5,7 +5,7 @@
 Work from the repository root with the Python virtual environment active. Use `make help` for commands.
 The Makefile and `tools/check.sh` use the checkout's `.venv` when there is one, even if it is not active. On Windows, install GNU Make
 (`winget install ezwinports.make`) and Git for Windows. `make` then works from PowerShell or Git Bash: the shell scripts run through
-Git Bash (`GIT_BASH=<path>` if it is not in the default place), and the screenshot and battle tools use the desktop instead of Xvfb.
+Git Bash (`GIT_BASH=<path>` if it is not in the default place), and the screenshot and battle tools use the desktop (`PROCYON_RUN=window`; `software` needs Xvfb).
 
 1. Read the owning module and its callers; pick one complete behaviour or visual batch.
 2. Put editable gameplay changes in `mods/`; change exporters only when the retail conversion is wrong.
@@ -129,14 +129,24 @@ Mark new Rust tests that load imported data with the same ignore reason, includi
 Asset-free Rust tests always run. For a manual full run after importing, use `cargo test --manifest-path game/Cargo.toml -- --include-ignored`.
 Python tests that need the install or assets skip.
 `make fmt` formats Rust and Python (`ruff format`, `ruff check --fix`); it does not rewrite generated JSON. `python3 -m tools.format_json assets` formats asset JSON when needed.
-Shared sight smoke: `WAYLAND_DISPLAY= tools/shot.sh local/sight.png --script sight --allies Ship_Navy_Cutter --enemies Ship_Pirate_Schooner --shot-frame 135 --late-frame 0`; it freezes three ships and asserts group/range/cloak transitions against real radar widgets. This is wiring validation, not a campaign playthrough.
+Shared sight smoke: `tools/shot.sh local/sight.png --script sight --allies Ship_Navy_Cutter --enemies Ship_Pirate_Schooner --shot-frame 135 --late-frame 0`; it freezes three ships and asserts group/range/cloak transitions against real radar widgets. This is wiring validation, not a campaign playthrough.
 
 Screenshot tests need a display, or Xvfb + Mesa for the headless helper. Outputs belong in ignored `local/`.
+Run modes: `shot.sh`, `battle_check.py` and `autoplay.py` (and through them `smokes.sh`, `visdiff.py`, `check.sh`) launch the game through
+`tools/rungame.py`, which reads `PROCYON_RUN`: `window` (the desktop session's GPU), `software` (Xvfb + Mesa lavapipe; CPU-bound)
+or `auto`/unset (`window` with `DISPLAY`/`WAYLAND_DISPLAY` or on Windows, else
+`software`); anything else is an error. On Linux `WAYLAND_DISPLAY` is cleared for the game in every mode (X11/XWayland: some Wayland sessions
+render black), so `window` needs `DISPLAY`. Each run prints one line, e.g. `run: mode=window adapter "..." (DiscreteGpu, Vulkan) 3120 frames
+in 41.0 s (76.1 fps)`, from Bevy's `AdapterInfo` log line and the game's `run end: frame N`; check it before comparing timings. With several
+software runs at once (`smokes.sh` exports `PROCYON_JOBS`, `battle_check --jobs`), each gets `LP_NUM_THREADS` = cores / jobs unless set.
+Under `--fixed-step` vsync is off (one frame is one tick: the refresh rate would cap the run). A screenshot run stops simulating on a frame
+fixed by its arguments (the last picture, plus 100 frames for a script) and then waits, game time still, for the writes: same command, same
+trace length.
 The `pause` / `pause-restart` scripts assert that the non-retail Pause key freezes virtual time and that Pause / restarting resumes it; a scripted run goes on 100 frames after its last picture, which covers frame 70 (use a later `--shot-frame` or `--late-frame` for assertions beyond that).
 Every run writes `<user dir>/logs/openprocyon.log` (`~/.local/share/openprocyon/`, `%APPDATA%\openprocyon\`; the run before, or the first 20 MB of a very long one, is `openprocyon.previous.log`): header with version/system/arguments, the console log, panics. Testers attach it to bug reports (`game/src/logging.rs`).
 
 `PROCYON_PROFILE=1 make run ARGS='--mission 1'` logs rolling real frame time and world/FX/mesh/audio counts every five real seconds
-and on mission-end changes (`PROCYON_PROFILE` also turns vsync off at every speed; see "Measuring a look"). Fleet smoke: `tools/shot.sh local/fleet.png --map red_rover --allies Ship_Navy_Cutter,Ship_Navy_Cutter,Ship_Navy_Cutter --script fleet --shot-frame 210 --late-frame 260`; it exercises shared keys/widgets, two heights, promotion, formations, restart and menu re-entry. Lifeboat smoke (scripted, needs `--shot` for the frame counter; run the binary directly with `WAYLAND_DISPLAY=`): `--mission 1 --script lifeboat-m1` (kill Warrior, collect both boats, immediate next level), `lifeboat-m1-fallback --speed 16` (no pickup, ~109 s timers), `--mission 2 --script lifeboat-m2|lifeboat-m2-ladyj`, `--mission 4|9 --script lifeboat-m4|lifeboat-m9`, `--mission 5|6|7|10|12 --script lifeboat-kill`. They kill ships through health and teleport collectors: scripted wiring checks, **not** combat validation. `--mission 3 --script fleet-primary` isolates the real sloop setup rule to check the human-captain handoff; `--mission 5|9 --script fleet-primary` replaces rules with a synthetic primary action to check ECS dispatch, **not** later-mission gameplay. P and brackets now belong to fleet bindings; pause/speed remain on existing HUD/menu controls (Pause key is an explicitly non-retail convenience).
+and on mission-end changes (`PROCYON_PROFILE` also turns vsync off at every speed; see "Measuring a look"). Fleet smoke: `tools/shot.sh local/fleet.png --map red_rover --allies Ship_Navy_Cutter,Ship_Navy_Cutter,Ship_Navy_Cutter --script fleet --shot-frame 210 --late-frame 260`; it exercises shared keys/widgets, two heights, promotion, formations, restart and menu re-entry. Lifeboat smoke (scripted, needs `--shot` for the frame counter; or run the binary directly with `WAYLAND_DISPLAY=`): `--mission 1 --script lifeboat-m1` (kill Warrior, collect both boats, immediate next level), `lifeboat-m1-fallback --speed 16` (no pickup, ~109 s timers), `--mission 2 --script lifeboat-m2|lifeboat-m2-ladyj`, `--mission 4|9 --script lifeboat-m4|lifeboat-m9`, `--mission 5|6|7|10|12 --script lifeboat-kill`. They kill ships through health and teleport collectors: scripted wiring checks, **not** combat validation. `--mission 3 --script fleet-primary` isolates the real sloop setup rule to check the human-captain handoff; `--mission 5|9 --script fleet-primary` replaces rules with a synthetic primary action to check ECS dispatch, **not** later-mission gameplay. P and brackets now belong to fleet bindings; pause/speed remain on existing HUD/menu controls (Pause key is an explicitly non-retail convenience).
 Mission 3 storm smoke: `tools/shot.sh local/m3-storm.png --mission 3 --script storm-m3 --speed 16 --shot-frame 1050 --late-frame 0` isolates the retail storm trigger/entry/release rules and asserts ship carriage (invulnerable ship placed at trigger; not combat validation).
 Use `storm-m3-damage` with the same storm arguments to check survival under normal mission protection (no forced invulnerability).
 Post-storm hunt/NIS smoke: `tools/shot.sh local/m3-hunt.png --mission 3 --script hunt-m3 --speed 16 --shot-frame 140 --late-frame 0`
@@ -302,7 +312,7 @@ compares two imports by meaning (JSON by value, images by pixels) to check expor
 | Retail format readers | `source_text.py`, `wot.py`, `mdb.py`, `msb.py`, `hdt.py`, `fft.py`, `eft.py` |
 | Mesh conversion | `mdb_to_glb.py`, `preview.py` |
 | Content export | `export_ship.py`, `export_combat.py`, `export_maps.py`, `export_campaign.py`, `export_campaign_media.py`, `export_environment.py`, `export_crew.py`, `export_effects.py`, `export_hud.py`, `export_voices.py`, `export_waypoint_art.py`, `export_collision.py`, `export_asteroids.py`, `ogg.py` |
-| Shared helpers | `paths.py` (`REPO`), `jsonio.py` (`dump`/`write`: the one JSON layout the exporters write), `rungame.py` (build the game, display, scratch data home and environment, logged run: `autoplay.py`, `battle_check.py`) |
+| Shared helpers | `paths.py` (`REPO`), `jsonio.py` (`dump`/`write`: the one JSON layout the exporters write), `rungame.py` (build the game, the run mode `PROCYON_RUN` and its display/graphics settings, scratch data home and environment, logged run and `run:` line: `autoplay.py`, `battle_check.py`, `shot.sh`) |
 | Asset preparation | `pack_data.py`, `format_json.py`, `fix_alpha_bleed.py`, `make_slices.py`, `hud_sprites.py` (shared sprite layout) |
 | Workflow | `import_assets.py` (the importer; `build_assets.sh` wraps it), `check.sh`, `shot.sh`, `compare_assets.py`, `package_release.py` (player download) |
 | Research | `extract_wot.py` (catalog of WOT properties) |

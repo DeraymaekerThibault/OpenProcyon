@@ -72,10 +72,16 @@ pub fn toggle_pause(vtime: &mut Time<Virtual>) {
     if vtime.is_paused() { vtime.unpause() } else { vtime.pause() }
 }
 
-/// Vsync is off when the player turns it off, while fast-forwarding (more capped steps fit in a second) and whenever profiling
-/// (a vsynced frame time only measures the display period).
+/// The present mode for this run; see [`vsync`] for the rule.
 pub(crate) fn present_mode(profiling: bool, speed: f32) -> bevy::window::PresentMode {
-    if profiling || speed > 1.0 || !menu::vsync() { bevy::window::PresentMode::AutoNoVsync } else { bevy::window::PresentMode::AutoVsync }
+    if vsync(profiling, fixed_step(), speed, menu::vsync()) { bevy::window::PresentMode::AutoVsync } else { bevy::window::PresentMode::AutoNoVsync }
+}
+
+/// Vsync is off when the player turns it off (`option`), while fast-forwarding (more capped steps fit in a second), whenever
+/// profiling (a vsynced frame time only measures the display period) and in a fixed-step run: one frame is one tick there, so
+/// the display's refresh rate would cap how fast a screenshot or trace run plays.
+fn vsync(profiling: bool, fixed: bool, speed: f32, option: bool) -> bool {
+    option && !profiling && !fixed && speed <= 1.0
 }
 
 /// Testing fast-forward; see [`present_mode`] for the vsync rule.
@@ -89,11 +95,17 @@ mod tests {
     use super::*;
     #[test]
     fn profiling_turns_vsync_off_at_every_speed() {
-        use bevy::window::PresentMode::{AutoNoVsync, AutoVsync};
-        assert_eq!(present_mode(false, 1.0), AutoVsync);
-        assert_eq!(present_mode(false, 4.0), AutoNoVsync);
-        assert_eq!(present_mode(true, 1.0), AutoNoVsync);
-        assert_eq!(present_mode(true, 4.0), AutoNoVsync);
+        assert!(vsync(false, false, 1.0, true));
+        assert!(!vsync(false, false, 4.0, true));
+        assert!(!vsync(true, false, 1.0, true));
+        assert!(!vsync(true, false, 4.0, true));
+        assert!(!vsync(false, false, 1.0, false), "the player's option");
+    }
+    #[test]
+    fn fixed_step_turns_vsync_off_at_every_speed() {
+        assert!(!vsync(false, true, 1.0, true), "a 1x fixed-step run is not held to the display's refresh rate");
+        assert!(!vsync(false, true, 0.5, true));
+        assert!(!vsync(false, true, 4.0, true));
     }
 }
 

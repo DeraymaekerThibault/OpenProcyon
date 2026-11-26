@@ -14,7 +14,7 @@ help:
 	$(info make fmt                          Format Rust and Python source)
 	$(info make test-python                  Fast parser/exporter tests (no Rust build))
 	$(info make shot OUT=local/ui.png [ARGS="--shot-frame 80 --late-frame 0"])
-	$(info make smokes [ARGS="--jobs 4 fleet"]  Run the documented --script smokes in parallel (needs a display or Xvfb))
+	$(info make smokes [ARGS="--jobs 4 fleet"]  Run the documented --script smokes in parallel (PROCYON_RUN=window|software))
 	$(info make smoke WHAT=changed           Run only the smokes that the files you changed map to; WHAT=<regex> picks by name)
 	$(info make battles [ARGS=ambush]        Play short fixed-fleet skirmishes and check they behave like battles (~1-2 min))
 	$(info make autoplay [ARGS=1]            Play campaign missions unattended and summarise what broke (long: ~mission length each))
