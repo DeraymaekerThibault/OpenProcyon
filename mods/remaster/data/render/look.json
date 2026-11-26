@@ -44,12 +44,14 @@
     "replace": true,
     "horizon": 0.25,
     "ring": 0.006,
-    "lensing": 0.8,
-    "disc": {"color": [1.0, 0.45, 0.12], "inner": 0.27, "outer": 0.46, "spin": 0.08, "brightness": 1.8},
+    "lensing": 0.04,
+    "disc": {"color": [1.0, 0.36, 0.05], "inner": 0.27, "outer": 0.46, "spin": 0.08, "brightness": 1.0},
     "glow": 0.15,
-    "ribbons": 1.0,
+    "ribbons": 0.0,
+    "ribbon_color": [1.0, 0.45, 0.1],
     "drop": 0.02,
-    "funnel": {"depth": 0.35, "throat": 0.08, "rim": [0.3, 0.18, 0.65]}
+    "volume": {"thickness": 0.09, "steps": 40},
+    "funnel": {"depth": 0.0, "throat": 0.2, "rim": [0.35, 0.07, 0.03]}
   },
   "nebulae": {
     "bolt": {"color": [0.45, 0.6, 1.0], "core": [1.0, 0.97, 0.9], "max_length": 120, "width": 0.9, "glow": 4.0, "brightness": 2.2, "seconds": 0.24, "segments": 16, "jitter": 0.09, "branches": 2},
