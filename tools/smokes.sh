@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Run the documented --script smokes with their argument sets (docs/development.md) and report pass/fail per run.
 # usage: tools/smokes.sh [--jobs N] [--changed [--base REF]] [--list] [name-filter-regex]
-#   --jobs N    smokes at once, each with its own Xvfb display and scratch XDG_DATA_HOME (default: half the cores)
+#   --jobs N    smokes at once, each with its own display (PROCYON_RUN) and scratch XDG_DATA_HOME (default: half the cores)
 #   --changed   only the smokes that the files changed against the merge base with origin/main (and uncommitted ones) map to
 #               (tools/smokes.py); the battle check runs too when it is in that map
 #   --list      print the selected names and stop
@@ -75,6 +75,10 @@ if [ -n "$selected" ]; then
     # Build once and run the binary directly (shot.sh builds only when PROCYON_BIN is not set).
     cargo build --profile fast --manifest-path game/Cargo.toml -q || exit 1
     export PROCYON_BIN="${CARGO_TARGET_DIR:-$root/game/target}/fast/openprocyon"
+    # One run mode for every smoke (PROCYON_RUN, tools/rungame.py); PROCYON_JOBS bounds each software renderer's threads.
+    mode=$(python3 -m tools.rungame mode) || exit 2
+    echo "smokes: run mode $mode (PROCYON_RUN), $jobs at once"
+    export PROCYON_JOBS=$jobs
 else
     jobs=1
 fi

@@ -4,7 +4,7 @@ Each mission runs the game (the `fast` profile unless --profile) with the `--scr
 game/src/smoke/mod.rs ends the run). The player's fleet is invulnerable (PROCYON_AUTOINVULN) unless --mortal is given: the
 bot has no tactics, and the goal is to reach every rule, not to win fights. Logs go to local/autoplay/missionNN.log; the table lists the outcome, the game time
 reached, peak entity/particle counts, the slowest frame and how many rules never fired (listed in the log's last line).
-Needs a display, or Xvfb + Mesa like tools/shot.sh. The effective speed is capped by the frame rate (an autoplay frame advances at most speed/60 game s)."""
+The run mode (window, software, gpu-hidden) comes from PROCYON_RUN (tools/rungame.py). The effective speed is capped by the frame rate (an autoplay frame advances at most speed/60 game s)."""
 
 import argparse
 import re
@@ -16,8 +16,8 @@ from tools import gamelog
 from tools.paths import REPO
 from tools.rungame import (
     build_game,
-    display_wrapper,
     game_env,
+    launch_plan,
     run_logged,
     silent_data_home,
 )
@@ -75,7 +75,11 @@ def main():
     game = build_game(args.profile)
     out = REPO / "local/autoplay"
     out.mkdir(parents=True, exist_ok=True)
-    wrap = display_wrapper()
+    try:
+        launch = launch_plan(jobs=args.jobs)
+    except ValueError as e:
+        raise SystemExit(f"autoplay: {e}") from None
+    print(f"autoplay: run mode {launch.mode} (PROCYON_RUN)")
     with tempfile.TemporaryDirectory() as xdg:
         # A scratch XDG_DATA_HOME: default key bindings, master volume 0 (other options default) and no saves of the player's;
         # X11, since some Wayland sessions render black.
@@ -90,13 +94,13 @@ def main():
             log = out / f"mission{n:02}.log"
             # Each run builds its own asset overlay (game/src/modding.rs); parallel runs sharing local/overlay broke each other.
             menv = game_env(
-                xdg, wrap, **extra, PROCYON_OVERLAY=str(Path(xdg) / f"overlay{n}")
+                xdg, launch, **extra, PROCYON_OVERLAY=str(Path(xdg) / f"overlay{n}")
             )
-            cmd = [*wrap, str(game), "--mission", str(n), "--script", "mission", "--speed", str(args.speed),
+            cmd = [*launch.prefix, str(game), "--mission", str(n), "--script", "mission", "--speed", str(args.speed),
                    "--shot", str(out / f"mission{n:02}.png"), "--shot-frame", "1000000000", "--late-frame", "0"]  # fmt: skip
             print(f"mission {n} ...", flush=True)
             # Wall-clock cap for a hung run; below 10 fps the game runs slower than 1x, so leave room.
-            code = run_logged(cmd, log, menv, args.limit * 1.5 + 120)
+            code = run_logged(cmd, log, menv, args.limit * 1.5 + 120, launch.mode)
             if code is None:
                 code = "timeout"
             return (

@@ -61,12 +61,15 @@ def build(tree):
 def render(tree, scene, png):
     """One fixed-step picture from `tree`'s build, offscreen, with default settings; the run is capped and killed with its game."""
     with tempfile.TemporaryDirectory() as xdg:
-        env = {
-            k: v
-            for k, v in os.environ.items()
-            if k not in ("DISPLAY", "WAYLAND_DISPLAY", "CARGO_TARGET_DIR")
-        }
+        # Both trees render the same way: software (Xvfb + Mesa) unless PROCYON_RUN asks for another mode (tools/rungame.py).
+        # Software also drops the display variables, for a base whose shot.sh predates PROCYON_RUN and decides by them.
+        mode = os.environ.get("PROCYON_RUN") or "software"
+        drop = {"CARGO_TARGET_DIR"} | (
+            {"DISPLAY", "WAYLAND_DISPLAY"} if mode == "software" else set()
+        )
+        env = {k: v for k, v in os.environ.items() if k not in drop}
         env["XDG_DATA_HOME"] = xdg
+        env["PROCYON_RUN"] = mode
         cap = [
             "systemd-run",
             "--user",

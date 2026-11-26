@@ -292,7 +292,7 @@ pub fn run(view: fn(&mut App), setup_view: fn(&mut App)) {
             }
         })
         .add_systems(Startup, setup)
-        .add_plugins((smoke::plugin, battle_schedule, interpolate::plugin, loading::plugin, commands::plugin))
+        .add_plugins((smoke::plugin, battle_schedule, interpolate::plugin, loading::plugin, commands::plugin, exit::plugin))
         .add_plugins((battle::plugin, course::plugin, view::plugin))
         .run();
     // A system that stopped the run with an error code (`exit::app_exit`) sets the process's status.
