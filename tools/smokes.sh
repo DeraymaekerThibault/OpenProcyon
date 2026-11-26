@@ -83,7 +83,7 @@ if [ -n "$selected" ]; then
 else
     jobs=1
 fi
-export out root
+export out root py
 
 # One smoke: logs to $out/<name>.log, leaves $out/<name>.result (ok|FAIL) and prints one line (more on failure) in one write.
 run_one() {
