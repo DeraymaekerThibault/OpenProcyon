@@ -379,11 +379,15 @@ Static analysis of the original's captain AI, written as rules. Nothing in it de
   Dock, Tow, the script's attack, ram, dock, tow, board and grapple actions, a chosen repair dock) cannot and is kept until lost.
   Aggressive takes the nearest hostile ship or dragon in scan range, else a base as above, else a friend's target, else explores (an
   order on a target that is gone or not hostile counts as none, and an ended path or a stopped ship's leftover points as no path), and
-  with no working gun rams; Persistent, Defensive and Neutral only answer a hostile in scan range that targets them, Defensive and
-  Neutral stop with no target unless on a course or in formation, and a Dummy does nothing. A Persistent ship on a path fires from it
-  and holds position when it ends. A player's Attack or "fire when possible" makes a ship Aggressive; a ship nothing gives a stance
-  (or an unknown stance name) is Aggressive, and a ship the human controls keeps its stance but is not captained. Things of no player are allied
-  with every player.
+  with no working gun rams; Persistent, Defensive and Neutral only answer an attacker: a visible hostile in scan range that holds the
+  ship as its current target (no shot needed; volcanoes, ground lobs and mines never count). A ship scans again only with no target,
+  or every 6 s while its target can be overridden, and keeps its old target when that scan finds nothing. Defensive and Neutral stop
+  with no target unless on a course or in formation, and a Dummy does nothing. A Persistent ship on a path fires from it and holds
+  position when it ends. A player's Attack or "fire when possible" makes a ship Aggressive; a ship nothing gives a stance is
+  Aggressive, and a stance name the parser does not know is a state of its own that picks nothing but obeys orders and paths. Every
+  ship of the human's fleet but the one the human steers is captained, never explores and never docks on its own. Exploring draws its
+  quarter point from the battle's seeded generator. Only NO PLAYER is no one (every player's ally); a volcano is everyone's foe.
+  Cutscenes redirect only the human's input.
 - **Which attack:** the primary gun bank is the one whose live guns cost the most victory points. Its guns' directions and arc edges
   (counted counter-clockwise from the bow in quadrants; an arc over 180° covers all four) decide: only forward quadrants → **frontal**;
   both rear quadrants → **rear**; otherwise **broadside** on the side it covers (port if only port quadrants). No live gun → **ram**
