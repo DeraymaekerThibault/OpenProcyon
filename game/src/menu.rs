@@ -751,8 +751,8 @@ fn esc_menu(
     }
 }
 
-/// A decided skirmish plays on under the end line (`scenario::EndLine`) for `END_LINE_SECS`, then shows the Game Summary (missions end
-/// through their own rules).
+/// A decided skirmish plays on under the end line (`scenario::EndLine`) for `END_LINE_SECS`, then shows the Game Summary (a mission
+/// keeps its own end text).
 fn summary_on_end(
     script: crate::rules::active::ActiveScript,
     out: Res<crate::scenario::Outcome>,

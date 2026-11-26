@@ -61,16 +61,30 @@ pub fn outcome(
     mut cfg: ResMut<Config>,
     player: Query<&Health, With<crate::commands::Commander>>,
     ships: Query<(&Health, &Ship), Without<crate::commands::Commander>>,
-    rules: (Option<Res<victory::Victory>>, Option<Res<combat::Library>>, Option<Res<ship::Fleets>>, Option<Res<crate::rules::skirmish::SkirmishScript>>),
+    rules: (
+        Option<Res<victory::Victory>>,
+        Option<Res<combat::Library>>,
+        Option<Res<ship::Fleets>>,
+        Option<Res<crate::rules::skirmish::SkirmishScript>>,
+        Option<Res<campaign::Mission>>,
+    ),
     all: Query<(Entity, &Health, &Ship, &Transform, Option<&ship::FleetMember>, Option<&MapObject>), Without<crate::lifeboats::Lifeboat>>,
     mut sunk: Local<Vec<(Entity, victory::ShipState)>>,
     bases: Query<(&campaign::MissionBase, &combat::ArmedBase, &Health, Option<(&combat::BaseSide, &combat::BaseOrigin)>)>,
     table: crate::alliance::Hostility,
 ) {
     let enemies = || ships.iter().filter(|(_, s)| !table.with_human(s.side)).map(|(h, _)| h);
-    // missions end through their own rules; a decided battle stays decided (the end flow despawns ships, which must not turn a
-    // victory into a defeat)
-    if campaign::is_mission(cfg.map.as_deref()) || *out != Outcome::Playing {
+    // A decided battle stays decided (the end flow despawns ships, which must not turn a victory into a defeat).
+    if *out != Outcome::Playing {
+        return;
+    }
+    // A mission ends when its rules end it ('End Game', its objectives), at once and through the same decision. PROVISIONAL: its end
+    // speech and end text stay the rules' own, so it shows no end line.
+    if let Some(m) = &rules.4 {
+        if let Some((_, won)) = &m.script.ended {
+            decide(if *won { Outcome::Victory } else { Outcome::Defeat }, None, &mut out, &mut message, &mut line, &mut cfg);
+            line.0 = None;
+        }
         return;
     }
     // The original tests its end rules once a second of game time, so a battle ends up to a second after the cause.

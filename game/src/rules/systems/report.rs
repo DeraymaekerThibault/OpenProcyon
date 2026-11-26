@@ -14,7 +14,6 @@ use bevy::prelude::*;
 use super::*;
 use crate::authoring::RuleReportOutcome;
 use crate::menu::Screen;
-use crate::rules::skirmish::SkirmishScript;
 use crate::scenario::Outcome;
 
 /// Seconds after the mission ends before its report is written (the same wait autoplay gives the end rules: score, speech).
@@ -78,8 +77,7 @@ pub fn write_world(world: &World) {
 
 /// The mission ended: wait `END_WAIT` seconds of play, then write once per ending.
 fn when_ended(world: &World, mut since: Local<Option<f32>>) {
-    let ended = world.get_resource::<Mission>().is_some_and(|m| m.script.ended.is_some())
-        || world.get_resource::<Outcome>().is_some_and(|o| *o != Outcome::Playing) && world.contains_resource::<SkirmishScript>();
+    let ended = world.get_resource::<Outcome>().is_some_and(|o| *o != Outcome::Playing) && crate::rules::active::script_of(world).is_some();
     if !ended {
         *since = None;
         return;

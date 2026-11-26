@@ -206,6 +206,39 @@ mod rotation_tests {
         app.world_mut().run_system_once(outcome).unwrap(); // no PlayerShip left
         assert!(*app.world().resource::<Outcome>() == Outcome::Victory);
     }
+    /// A mission's rules end it through the same decision as a skirmish: the outcome is set at once (the Game Summary countdown starts),
+    /// and the battlefield shows no end line (the mission keeps its own end text). Asset-free.
+    #[test]
+    fn a_mission_end_sets_the_outcome_without_an_end_line() {
+        use bevy::ecs::system::RunSystemOnce;
+        for won in [true, false] {
+            let mut app = App::new();
+            let data = serde_json::json!({"rules": []});
+            let mut script = crate::rules::Script::new(&data, serde_json::Value::Null);
+            script.ended = Some(("Mission complete.".into(), won));
+            app.init_resource::<Time>().insert_resource(Outcome::Playing).init_resource::<EndMessage>().init_resource::<EndLine>().insert_resource(Config {
+                groups: vec![],
+                player: String::new(),
+                allies: vec![],
+                enemies: vec![],
+                map: None,
+                shot: None,
+                frame: 5,
+                speed: 1.0,
+                ended: None,
+                script: None,
+                autolaunch: false,
+                shot_frame: 0,
+                shot_frames: vec![],
+                late_frame: 0,
+            });
+            app.insert_resource(campaign::Mission { id: "synthetic".into(), script, data, opening: None });
+            app.world_mut().run_system_once(outcome).unwrap();
+            assert_eq!(*app.world().resource::<Outcome>(), if won { Outcome::Victory } else { Outcome::Defeat });
+            assert_eq!(app.world().resource::<EndLine>().0, None, "no end line");
+            assert_eq!(app.world().resource::<Config>().ended, Some(5));
+        }
+    }
 }
 
 mod lighting_tests {
