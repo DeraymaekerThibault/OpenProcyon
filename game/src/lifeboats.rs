@@ -106,8 +106,14 @@ fn lifeboats(
         present.retain(|p| p.0 != Some(boat));
         sfx.write(crate::audio::Sfx::ui(PICKUP_SOUND));
         if let Some(m) = mission.as_mut() {
-            let collector = cm.map_or("", |m| m.owner.as_str());
-            m.script.with_table(table.as_deref_mut(), |s| s.lifeboat_saved(collector, &owner(l, bm)));
+            // The scoring reads the battle's alliance table, lent to the script for the call.
+            if let Some(t) = table.as_deref_mut() {
+                m.script.lend(t);
+            }
+            m.script.lifeboat_saved(cm.map_or("", |m| m.owner.as_str()), &owner(l, bm));
+            if let Some(t) = table.as_deref_mut() {
+                m.script.lend(t);
+            }
         }
     }
     if let Some(m) = mission.as_mut() {

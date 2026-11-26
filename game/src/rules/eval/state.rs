@@ -239,17 +239,6 @@ impl Script {
     pub fn lend(&mut self, table: &mut crate::alliance::Alliances) {
         std::mem::swap(&mut self.alliances, table);
     }
-    /// `f` with the battle's table lent in (none: the script's own).
-    pub fn with_table<R>(&mut self, mut table: Option<&mut crate::alliance::Alliances>, f: impl FnOnce(&mut Script) -> R) -> R {
-        if let Some(t) = table.as_deref_mut() {
-            self.lend(t);
-        }
-        let r = f(self);
-        if let Some(t) = table {
-            self.lend(t);
-        }
-        r
-    }
     /// Players `a` and `b` are at war (by name; a name that is no player is never hostile).
     pub fn hostile(&self, a: &str, bb: &str) -> bool {
         self.alliances.hostile_owners(a, bb)
