@@ -219,13 +219,30 @@ mod lighting_tests {
     }
 
     #[test]
-    fn setup_island_strengths_come_from_the_script() {
+    fn a_tower_belongs_to_its_map_player_unless_its_setup_names_another() {
+        let players = [serde_json::json!({"name": "navy"}), serde_json::json!({"name": "pirate base"})];
+        let tower = serde_json::json!({"id": 4, "player": 1});
+        assert_eq!(base_owner(&tower, &players, None), "pirate base", "the map object's player, played or not");
+        assert_eq!(base_owner(&tower, &players, Some(&(Some("navy".into()), None))), "navy", "a Setup Island's Player wins");
+        assert_eq!(base_owner(&serde_json::json!({"id": 5, "player": -1}), &players, None), "", "no player: NO PLAYER");
+        // Border Dispute's base players are slots nobody plays: with the map's pairs each fights for its own side, hostile to the
+        // other team, so the fleets go for it; a tower of NO PLAYER is everyone's ally and never fires.
+        let group = |player, side, team| crate::Group { player, side: Side(side), team, ..default() };
+        let players = [serde_json::json!({"name": "navy", "team": 0}), serde_json::json!({"name": "pirates", "team": 1}), serde_json::json!({"name": "pirate base", "team": 1})];
+        let t = battle_alliances(&[group(0, 0, 0), group(1, 1, 1)], &players, Some(&serde_json::json!([["pirates", "pirate base"]])));
+        let base = t.side_or_neutral(&base_owner(&tower, &players, None));
+        assert!(t.hostile(base, Side(0)) && t.allied(base, Side(1)), "the camp of an unplayed slot: the navy's foe, the pirates' ally");
+        assert!(t.allied(t.side_or_neutral(""), Side(0)) && t.allied(t.side_or_neutral(""), Side(1)));
+    }
+
+    #[test]
+    fn setup_island_owners_and_strengths_come_from_the_script() {
         let script = serde_json::json!({"rules": [{"actions": [
-            {"Type": "*State Init* Setup Island", "World Object ID": 1, "Combat Strength": 60},
+            {"Type": "*State Init* Setup Island", "World Object ID": 1, "Combat Strength": 60, "Player/Owner": "pirate base"},
             {"Type": "*State Init* Setup Island", "World Object ID": 133, "Combat Strength": 80},
             {"Type": "Play Music Track"}]}]});
-        let s = setup_strengths(&script);
-        assert_eq!((s[&1], s[&133], s.len()), (60, 80, 2));
+        let s = setup_islands(&script);
+        assert_eq!((s[&1].clone(), s[&133].clone(), s.len()), ((Some("pirate base".into()), Some(60)), (None, Some(80)), 2));
     }
 }
 

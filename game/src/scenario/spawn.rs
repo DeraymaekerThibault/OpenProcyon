@@ -432,7 +432,7 @@ fn spawn_skirmish(
         None if scripted => commands.insert_resource(victory::Victory::scripted(teams)),
         None => commands.remove_resource::<victory::Victory>(),
     }
-    commands.insert_resource(alliances);
+    commands.insert_resource(alliances.clone());
     let rosters = map_teams
         .iter()
         .enumerate()
@@ -457,8 +457,8 @@ fn spawn_skirmish(
         crate::environment::spawn(commands, assets, script, true);
     }
     // The map script's Setup Island 'Combat Strength' is what boarders must wear down (retail: it seeds the base's strength).
-    let strengths = script_json.as_ref().map(setup_strengths).unwrap_or_default();
-    spawn_bases(commands, assets, lib, bases, &players, &groups, &strengths);
+    let setups = script_json.as_ref().map(setup_islands).unwrap_or_default();
+    spawn_bases(commands, assets, lib, bases, &players, &alliances, &setups);
 }
 
 /// The mines a map places (`mines`: `[{type, id, pos}]`), resting where the map put them until a script hands them to a player.
@@ -469,19 +469,19 @@ fn spawn_mines(commands: &mut Commands, map: &serde_json::Value) {
     }
 }
 
-/// Armed bases and islands of a skirmish map: each fights for the side whose fleet type is theirs, with guns, damage and boarding state.
+/// Armed bases and islands of a skirmish map, with guns, damage and boarding state. A tower or camp belongs to the map object's
+/// player, unless the map script's Setup Island names another, and fights for that owner's side in the alliance table (`table`);
+/// later a capture moves it. One of NO PLAYER never fires. Armed islands (the volcanoes) belong to nobody: they fire on every ship
+/// and cannot be boarded. The armed asteroids (Convoy Raid's belong to the pirate base's player) are owned like a base. PROVISIONAL.
 fn spawn_bases(
     commands: &mut Commands,
     assets: &AssetServer,
     lib: &Library,
     bases: &[(Entity, serde_json::Value)],
     players: &[serde_json::Value],
-    groups: &[Group],
-    strengths: &std::collections::HashMap<i64, i32>,
+    table: &alliance::Alliances,
+    setups: &std::collections::HashMap<i64, (Option<String>, Option<i32>)>,
 ) {
-    // Bases fight for the side whose fleet type is theirs; a base no fleet claims stays neutral (and silent). Armed islands (the
-    // volcanoes) belong to nobody: they fire on every ship and cannot be boarded. The armed asteroids (Convoy Raid's belong to the
-    // pirate base's player) fight for their object's owner like a base.
     for (e, o) in bases {
         let Some(class) = o["type"]
             .as_str()
@@ -496,16 +496,13 @@ fn spawn_bases(
             continue;
         }
         let island = lib.classes[class].name.starts_with("Island_");
-        let owner = o["player"].as_u64().and_then(|i| players.get(i as usize)).and_then(|p| p["name"].as_str()).and_then(faction);
-        let Some(side) =
-            (if island { Some(HOSTILE_TO_ALL) } else { owner.or_else(|| o["type"].as_str().and_then(faction)).and_then(|f| groups.iter().find(|g| g.race == f)).map(|g| g.side) })
-        else {
-            continue;
-        };
         let id = o["id"].as_i64().unwrap_or(-1);
+        let setup = setups.get(&id);
+        let owner = base_owner(o, players, setup);
+        let side = if island { HOSTILE_TO_ALL } else { table.side_or_neutral(&owner) };
         let states = combat::spawn_guns(commands, assets, lib, *e, class);
         commands.entity(*e).insert((
-            campaign::MissionBase { id, owner: format!("base{id}") },
+            campaign::MissionBase { id, owner: if island { String::new() } else { owner } },
             combat::ArmedBase { class },
             combat::DamageFx::new(&lib.classes[class]),
             combat::BaseSide(side),
@@ -518,7 +515,7 @@ fn spawn_bases(
             commands.entity(*e).insert(combat::IslandGunnery { accuracy: 0.0, silent: false, neutral: false });
         }
         if !island {
-            commands.entity(*e).insert(boarding::Boardable::base(&lib.classes[class].name, strengths.get(&id).copied().filter(|s| *s > 0).unwrap_or(SKIRMISH_BASE_STRENGTH), true));
+            commands.entity(*e).insert(boarding::Boardable::base(&lib.classes[class].name, setup.and_then(|s| s.1).filter(|s| *s > 0).unwrap_or(SKIRMISH_BASE_STRENGTH), true));
         }
     }
 }
@@ -545,10 +542,20 @@ fn spawn_arena(commands: &mut Commands, assets: &AssetServer, lib: &Library, fxl
     }
 }
 
-/// Setup Island 'Combat Strength' by world-object id, from a map script.
-pub(super) fn setup_strengths(script: &serde_json::Value) -> std::collections::HashMap<i64, i32> {
+/// The owner of a map's tower or camp: its Setup Island's 'Player/Owner' when the map script names one, else the map object's player
+/// (none: NO PLAYER). PROVISIONAL.
+pub(super) fn base_owner(object: &serde_json::Value, players: &[serde_json::Value], setup: Option<&(Option<String>, Option<i32>)>) -> String {
+    let placed = || object["player"].as_u64().and_then(|i| players.get(i as usize)).and_then(|p| p["name"].as_str()).unwrap_or_default().to_string();
+    setup.and_then(|s| s.0.clone()).unwrap_or_else(placed)
+}
+
+/// Setup Island's 'Player/Owner' and 'Combat Strength' by world-object id, from a map script.
+pub(super) fn setup_islands(script: &serde_json::Value) -> std::collections::HashMap<i64, (Option<String>, Option<i32>)> {
     let actions = script["rules"].as_array().into_iter().flatten().flat_map(|r| r["actions"].as_array().into_iter().flatten());
-    actions.filter(|a| a["Type"] == "*State Init* Setup Island").filter_map(|a| Some((a["World Object ID"].as_i64()?, a["Combat Strength"].as_i64()? as i32))).collect()
+    actions
+        .filter(|a| a["Type"] == "*State Init* Setup Island")
+        .filter_map(|a| Some((a["World Object ID"].as_i64()?, (a["Player/Owner"].as_str().map(String::from), a["Combat Strength"].as_i64().map(|s| s as i32)))))
+        .collect()
 }
 
 /// The side of an armed island: no ship belongs to it, so it fires on all of them.

@@ -222,10 +222,12 @@ fn hostile_island_towers_shoot_the_player_and_neutral_ones_do_not() {
         .init_resource::<crate::environment::Sensors>()
         .add_systems(PreUpdate, crate::environment::refresh_sensors)
         .add_systems(Update, base_fire);
-    let mission = crate::campaign::load_id("mission02");
+    let mut mission = crate::campaign::load_id("mission02");
     let player = mission.script.player().to_string();
     assert!(mission.script.hostile(&player, "SmugglerCampEnemy"), "the camp's enemy owner is hostile to the player");
     assert!(!mission.script.hostile(&player, "NO PLAYER"));
+    // The battle's table, as a mission's spawn hands it over: towers fight for their owner's side, NO PLAYER for nobody.
+    app.insert_resource(std::mem::take(&mut mission.script.alliances));
     app.insert_resource(mission);
     let assets = app.world().resource::<AssetServer>().clone();
     let lib = crate::testutil::lib();

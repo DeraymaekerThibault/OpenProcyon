@@ -496,8 +496,10 @@ pub fn spawn(commands: &mut Commands, assets: &AssetServer, lib: &Library, fxl: 
         let setup = islands.iter().find(|(i, ..)| Some(*i) == o["id"].as_i64()).map(|(_, o, c, g)| (o.clone(), *c, *g));
         // A base no rule sets up (mission 5's Grant and pirate base, 7's Regina, 8's Mining Camp) is still a rules unit with its class's guns
         // and hit points: the rules address it by its TWT group for docking, owner and dockable changes, and mission 5's pirate base must be
-        // destroyed. With no owner until a rule gives one it shoots nobody. PROVISIONAL: default gunnery (no skill level).
-        let unset_base = || (String::new(), 0, crate::combat::IslandGunnery { accuracy: 1.0, silent: false, neutral: false });
+        // destroyed. It belongs to the map object's player (none: NO PLAYER, and it shoots nobody) until a rule gives it another.
+        // PROVISIONAL: default gunnery (no skill level).
+        let placed = o["player"].as_u64().and_then(|i| mission.data["players"].get(i as usize)).and_then(Value::as_str).unwrap_or_default().to_string();
+        let unset_base = || (placed.clone(), 0, crate::combat::IslandGunnery { accuracy: 1.0, silent: false, neutral: false });
         let Some((owner, combat, gunnery)) = setup.or_else(|| o["type"].as_str().is_some_and(|t| t.starts_with("Base_")).then(unset_base)) else {
             // Most volcanoes have no setup rule; they still fire (docs/re/volcanoes.md).
             if let Some(class) = o["type"].as_str().filter(|t| t.starts_with("Island_Volcano")).and_then(|t| lib.classes.iter().position(|c| c.name == t)) {

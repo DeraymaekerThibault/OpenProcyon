@@ -13,7 +13,7 @@ pub use outcome::{END_LINE_SECS, EndLine, EndMessage, Outcome, RULE_PASS_SECS, R
 pub use script::{scripted_kills, scripted_steps};
 pub use spawn::{HOSTILE_TO_ALL, MapObject, Namer, PlayerColor, battle_alliances, faction, game_rotation, game_to_bevy, scenery_transform, spawn_scenario, spawn_ship};
 #[cfg(test)]
-use spawn::{ambient_effect, setup_strengths};
+use spawn::{ambient_effect, base_owner, setup_islands};
 
 #[derive(Component)]
 pub struct Scenario;
