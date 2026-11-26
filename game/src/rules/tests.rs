@@ -1278,11 +1278,18 @@ fn vital_section_damage_follows_the_first_counted_member_of_the_kind() {
     assert!(!holds(cond("Equal To", 1.0), &[unit("A", None)]), "a ship without mission sections never passes");
 }
 
-/// A stance name that is none of the five counts as no stance set: Aggressive, the default (PROVISIONAL).
+/// No stance set (no name, the `AI STANCE` placeholder) is Aggressive; a name the parser does not know is `Unknown` (PROVISIONAL).
 #[test]
-fn an_unknown_stance_name_is_aggressive_the_default() {
+fn no_stance_is_aggressive_and_an_unknown_name_is_its_own_state() {
     assert_eq!(Stance::default(), Stance::Aggressive);
-    for (name, st) in [("Stance_Neutral", Stance::Neutral), ("Stance Persistant", Stance::Persistent), ("AI STANCE", Stance::Aggressive), ("", Stance::Aggressive)] {
+    let names = [
+        ("Stance_Neutral", Stance::Neutral),
+        ("Stance Persistant", Stance::Persistent),
+        ("AI STANCE", Stance::Aggressive),
+        ("", Stance::Aggressive),
+        ("Stance_Wary", Stance::Unknown),
+    ];
+    for (name, st) in names {
         assert_eq!(Stance::parse(name), st, "{name:?}");
     }
 }

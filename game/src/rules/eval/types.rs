@@ -5,8 +5,9 @@ use serde_json::Value;
 use super::*;
 use crate::names::name_newtype;
 
-/// A ship's (or dragon's) AI stance. One that nothing sets, for any owner and whether placed at the start or spawned later, is
-/// Aggressive, and so is a stance name that is none of the five (PROVISIONAL).
+/// A ship's (or dragon's) AI stance. One that nothing sets (no name, or the files' `AI STANCE` placeholder), for any owner and
+/// whether placed at the start or spawned later, is Aggressive. A name that is none of these is `Unknown`, a state of its own
+/// (PROVISIONAL).
 #[derive(Clone, Copy, PartialEq, Debug, Default)]
 pub enum Stance {
     Dummy,
@@ -15,6 +16,9 @@ pub enum Stance {
     #[default]
     Aggressive,
     Persistent,
+    /// A stance name the parser does not know: never picks a target, never retaliates, never explores and stops with no orders;
+    /// it still follows orders, formation and paths, keeps its point defence, and a computer's ship still docks for repair.
+    Unknown,
 }
 impl Stance {
     pub(in crate::rules) fn parse(s: &str) -> Stance {
@@ -29,8 +33,10 @@ impl Stance {
             Stance::Defensive
         } else if s.contains("neutral") {
             Stance::Neutral
-        } else {
+        } else if s.trim().is_empty() || s.trim() == "ai stance" {
             Stance::default()
+        } else {
+            Stance::Unknown
         }
     }
 }

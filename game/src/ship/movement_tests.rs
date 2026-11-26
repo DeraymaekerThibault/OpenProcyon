@@ -1166,3 +1166,27 @@ fn a_rescan_that_finds_nothing_keeps_the_old_target() {
     assert_eq!(choose_target(Some((a, 6.5, true)), None, None, |_| true), Some((a, false, true)), "kept, its age starting again");
     assert_eq!(choose_target(Some((a, 6.5, true)), None, None, |t| t != a), None, "unless it is lost");
 }
+
+/// An unknown stance name is a state of its own: it takes no target (not even an attacker), does not search and stops with no
+/// orders, yet follows an order and a path, and a computer's ship still docks for repair.
+#[test]
+fn an_unknown_stance_obeys_orders_and_paths_but_picks_nothing_itself() {
+    let mut w = captain_world(false);
+    let foe = captain_ship(&mut w, Side::Player, Vec3::X * 40.0);
+    let ship = |w: &mut World, at: Vec3, waypoints: Vec<Vec3>| {
+        let e = captain_ship(w, Side::Enemy, at);
+        w.entity_mut(e).insert(campaign::MissionShip { stance: crate::rules::Stance::Unknown, ..campaign::MissionShip::placed(1, "u".into(), "o".into()) });
+        let mut s = w.get_mut::<Ship>(e).unwrap();
+        (s.waypoints, s.order) = (waypoints, EngineOrder::Full);
+        e
+    };
+    let (idle, sailing, ordered) = (ship(&mut w, Vec3::ZERO, vec![]), ship(&mut w, Vec3::Z * 10.0, vec![Vec3::Z * 900.0]), ship(&mut w, Vec3::NEG_Z * 10.0, vec![]));
+    w.entity_mut(foe).insert(FleetPilot { target: Some(idle), ..default() }); // it even attacks `idle`
+    w.entity_mut(ordered).insert(FleetPilot { target: Some(foe), ..default() });
+    think(&mut w);
+    let t = |e| w.resource::<CaptainTargets>().of(e);
+    assert_eq!((t(idle), w.get::<Ship>(idle).unwrap().order), (None, EngineOrder::Stop), "no pick, no answer: it stops");
+    assert_eq!((t(sailing), w.get::<Ship>(sailing).unwrap().waypoints.len()), (None, 1), "it keeps to its path");
+    assert_eq!(t(ordered), Some(foe), "an order stands");
+    assert!(crate::docking::seeks_repair(Some(crate::rules::Stance::Unknown)), "a computer's ship still docks for repair");
+}

@@ -327,13 +327,13 @@ pub(crate) struct Seen {
     pub targets_me: bool,
 }
 
-/// A captain's own pick by its stance (PROVISIONAL, read, not observed): Dummy none. Persistent, Defensive and Neutral retaliate only:
+/// A captain's own pick by its stance (PROVISIONAL, read, not observed): Dummy and Unknown none. Persistent, Defensive and Neutral retaliate only:
 /// the nearest hostile within scan range whose own target is this ship. Aggressive takes the nearest hostile ship or dragon in scan
 /// range, else the nearest hostile base in reach (`in_reach`).
 pub(crate) fn stance_pick(stance: crate::rules::Stance, campaign: bool, seen: &[Seen]) -> Option<Entity> {
     let nearest = |f: &dyn Fn(&Seen) -> bool| seen.iter().filter(|s| f(s)).min_by(|a, b| a.dist.total_cmp(&b.dist)).map(|s| s.e);
     match stance {
-        crate::rules::Stance::Dummy => None,
+        crate::rules::Stance::Dummy | crate::rules::Stance::Unknown => None,
         crate::rules::Stance::Aggressive => nearest(&|s| !s.base && s.in_scan).or_else(|| nearest(&|s| s.base && in_reach(campaign, || s.in_scan))),
         _ => nearest(&|s| s.targets_me && s.in_scan),
     }

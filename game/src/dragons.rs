@@ -209,7 +209,7 @@ fn think(
             d.roar_in = lo + (hi - lo) * ((d.roars * 37) % 101) as f32 / 100.0;
         }
         d.cooldown -= dt;
-        // Target scan (every tick, Aggressive/Persistent/Neutral; Defensive never scans; an unknown stance name is Aggressive): the nearest hostile ship
+        // Target scan (every tick, Aggressive/Persistent/Neutral; Defensive and an unknown stance name never scan): the nearest hostile ship
         // by surface distance within sight replaces the current target; with none in range the old one stays (an attack order sets it).
         const SHIP_RADIUS: f32 = 8.0; // PROVISIONAL: no ship radius exported; centre distance less the two radii
         let surface = |p: Vec3| p.distance(tf.translation) - animal.radius - SHIP_RADIUS;
