@@ -140,8 +140,22 @@ fn click(
 /// The side of things of the no-owner owner ('NO PLAYER', an unset owner): allied with every player, so never a
 /// captain's target, a friend's dock, and an order against one is dropped; the human may still fire at one by hand. PROVISIONAL.
 pub const NEUTRAL: Side = Side(u8::MAX - 1);
-/// The sides kept for owners that name no player of the battle (`Alliances::side_or_neutral`); the battle's players come first.
+/// The sides handed out, in turn, to owners that name no player of the battle (`Alliances::side_or_neutral`); the battle's players
+/// come first.
 const OUTSIDERS: std::ops::Range<u8> = 128..252;
+/// The side every further outsider shares once `OUTSIDERS` is used up (a debug build stops there instead): such owners are then
+/// allied with each other, still hostile to every player.
+pub const OUTSIDER_OVERFLOW: Side = Side(OUTSIDERS.end);
+
+/// The sides given to owners outside the battle, by name, in the order first asked for. Filled while the table is read (a shared
+/// read hands one out), so it sits behind a lock; it goes with the table, so each battle starts with none.
+#[derive(Default, Debug)]
+struct Outsiders(std::sync::Mutex<Vec<(Owner, Side)>>);
+impl Clone for Outsiders {
+    fn clone(&self) -> Self {
+        Outsiders(std::sync::Mutex::new(self.0.lock().map(|v| v.clone()).unwrap_or_default()))
+    }
+}
 
 /// The battle's alliance table: the one answer to "is X hostile to Y" for ships, shells, bases, docks, boarding and the rules. Each
 /// player has a side (the human's is `Side::Player`); two sides are allied only while each counts the other an ally, and hostile
@@ -153,9 +167,10 @@ pub struct Alliances {
     sides: Vec<(Owner, Side)>,
     /// One-way offers: (a, b) = a counts b as an ally.
     offers: Vec<(Side, Side)>,
+    outsiders: Outsiders,
 }
 
-static EMPTY: Alliances = Alliances { sides: Vec::new(), offers: Vec::new() };
+static EMPTY: Alliances = Alliances { sides: Vec::new(), offers: Vec::new(), outsiders: Outsiders(std::sync::Mutex::new(Vec::new())) };
 
 impl Alliances {
     pub fn add_player(&mut self, owner: &str, side: Side) {
@@ -169,7 +184,8 @@ impl Alliances {
     }
     /// The side a thing of `owner` fights for: its player's; `NEUTRAL` for no owner ('NO PLAYER', unset); and for an owner that names
     /// no player of this battle (a map's base player whose slot is not in play, say) a side of its own, allied with nobody else, so
-    /// hostile to everyone (PROVISIONAL). Such a side is the same for one name every time (`OUTSIDERS`).
+    /// hostile to everyone (PROVISIONAL). Each such name gets the next free side the first time it is asked for, and keeps it for the
+    /// battle; two names never share one (`OUTSIDERS`, then `OUTSIDER_OVERFLOW`).
     pub fn side_or_neutral(&self, owner: &str) -> Side {
         if let Some(side) = self.side_of(owner) {
             return side;
@@ -177,8 +193,15 @@ impl Alliances {
         if owner.trim().is_empty() || owner.trim().eq_ignore_ascii_case("NO PLAYER") {
             return NEUTRAL;
         }
-        let hash = owner.bytes().fold(2166136261u32, |h, b| (h ^ u32::from(b)).wrapping_mul(16777619));
-        Side(OUTSIDERS.start + (hash % u32::from(OUTSIDERS.end - OUTSIDERS.start)) as u8)
+        let Ok(mut given) = self.outsiders.0.lock() else { return OUTSIDER_OVERFLOW };
+        if let Some(side) = given.iter().find(|g| g.0 == owner).map(|g| g.1) {
+            return side;
+        }
+        let next = OUTSIDERS.start as usize + given.len();
+        debug_assert!(next < OUTSIDERS.end as usize, "more than {} owners outside the battle: '{owner}' shares a side", OUTSIDERS.len());
+        let side = if next < OUTSIDERS.end as usize { Side(next as u8) } else { OUTSIDER_OVERFLOW };
+        given.push((owner.into(), side));
+        side
     }
     /// `a` counts `b` an ally.
     pub fn offered(&self, a: Side, b: Side) -> bool {
@@ -353,5 +376,20 @@ mod tests {
         assert!(t.hostile(side("B"), side("C")) && t.allied(side("C"), NEUTRAL), "the rest: only with itself and with no one");
         let old = crate::scenario::battle_alliances(&[group(0, 0, 0), group(1, 1, 5)], &players, None);
         assert_eq!(old.side_of("C"), Some(Side(1)), "without pairs: its team's group, as before");
+    }
+
+    /// Two owners outside the battle never share a side: each gets its own, kept for the battle, and they are hostile to each other.
+    #[test]
+    fn two_outsiders_get_different_sides_and_are_hostile_to_each_other() {
+        let t = Alliances::default();
+        let names: Vec<String> = (0..OUTSIDERS.len()).map(|i| format!("player {i}")).collect();
+        let sides: Vec<Side> = names.iter().map(|n| t.side_or_neutral(n)).collect();
+        let mut distinct = sides.clone();
+        distinct.sort_by_key(|s| s.0);
+        distinct.dedup();
+        assert_eq!(distinct.len(), names.len(), "no two share a side");
+        assert_eq!(t.side_or_neutral("player 8"), sides[8], "the same name keeps its side");
+        assert!(t.hostile(sides[8], sides[9]) && t.hostile(sides[9], sides[8]));
+        assert!(Alliances::default().side_or_neutral("player 9") == Side(OUTSIDERS.start), "a new battle's table starts afresh");
     }
 }
