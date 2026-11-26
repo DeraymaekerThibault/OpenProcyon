@@ -174,6 +174,11 @@ pub enum DockMsg {
 pub struct Tower {
     towee: Entity,
 }
+impl Tower {
+    pub fn towee(&self) -> Entity {
+        self.towee
+    }
+}
 
 /// True when two hulls (centres `here` / `there`, collision radii) are within the tow range of each other.
 pub fn tow_in_range(here: Vec3, there: Vec3, r_tower: f32, r_towee: f32) -> bool {
@@ -229,6 +234,28 @@ pub struct Docker {
     offset: Vec3,
 }
 impl Docker {
+    /// The ship or base it docks with: its captain's target while the order lasts (`ship::ai`).
+    pub fn dockee(&self) -> Entity {
+        self.dockee
+    }
+    /// A computer captain's order to repair at `dockee` (test worlds).
+    #[cfg(test)]
+    pub(crate) fn repair(dockee: Entity) -> Docker {
+        Docker {
+            dockee,
+            point: None,
+            phase: Phase::Wait,
+            final_leg: false,
+            timer: 0.0,
+            duration: 0.0,
+            repair_secs: 0.0,
+            chosen: true,
+            healed: false,
+            full: false,
+            start: Vec3::ZERO,
+            offset: Vec3::ZERO,
+        }
+    }
     pub fn is_docked(&self) -> bool {
         self.phase == Phase::Docked
     }

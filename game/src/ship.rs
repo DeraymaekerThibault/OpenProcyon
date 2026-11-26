@@ -286,8 +286,10 @@ pub const RESELECT_SECS: f32 = 6.0;
 /// ship in sight, again every `RESELECT_SECS` or as soon as the old one is gone or out of sight (docs/re/movement.md). Steering,
 /// fire (`combat::gunnery`) and boarding (`boarding::ai_boarding`) all follow it. The third field is where the guns aim, in the
 /// target's frame: its section nearest to the captain when the target was chosen (`attack::aim_local`), kept until the next choice.
+/// The fourth is the target's "AI can override" flag: set when the captain picked it itself, cleared when an order named it (see
+/// `choose_target`).
 #[derive(Resource, Default)]
-pub struct CaptainTargets(pub std::collections::HashMap<Entity, (Entity, f32, Vec3)>);
+pub struct CaptainTargets(pub std::collections::HashMap<Entity, (Entity, f32, Vec3, bool)>);
 impl CaptainTargets {
     pub fn of(&self, e: Entity) -> Option<Entity> {
         self.0.get(&e).map(|t| t.0)
@@ -298,11 +300,19 @@ impl CaptainTargets {
     }
 }
 
-/// One target-selection step: keep the `held` target (with its age) while it is still `valid` (alive and hostile: the original follows
-/// a held target anywhere) and, when the ship's "AI can override" flag is set (`overrides`), younger than `RESELECT_SECS`; else take
-/// the nearest candidate (entity, distance). Returns the target and whether it was kept.
-fn choose_target(held: Option<(Entity, f32)>, candidates: &[(Entity, f32)], valid: impl Fn(Entity) -> bool, overrides: bool) -> Option<(Entity, bool)> {
-    held.filter(|h| (!overrides || h.1 < RESELECT_SECS) && valid(h.0)).map(|h| (h.0, true)).or_else(|| candidates.iter().min_by(|a, b| a.1.total_cmp(&b.1)).map(|c| (c.0, false)))
+/// One target-selection step. "Can override" belongs to the target (PROVISIONAL): an `explicit` target (a player's Attack, fleet
+/// help-attack, Board, Grapple, Dock or Tow order, the script's Attack Group, Ram, Dock, Tow, Board or Grapple actions, a chosen
+/// repair dock) is taken at once and cannot be overridden; the captain's own pick can. A `held` target (entity, age, can) that is
+/// still `valid` (alive and hostile: the original follows a held target anywhere) is kept until lost, and one that can be overridden
+/// only until it is `RESELECT_SECS` old; else the nearest candidate (entity, distance). Returns the target, whether it was kept,
+/// and its flag.
+fn choose_target(held: Option<(Entity, f32, bool)>, explicit: Option<Entity>, candidates: &[(Entity, f32)], valid: impl Fn(Entity) -> bool) -> Option<(Entity, bool, bool)> {
+    if let Some(x) = explicit.filter(|x| valid(*x)) {
+        return Some((x, held.is_some_and(|h| h.0 == x), false));
+    }
+    held.filter(|h| (!h.2 || h.1 < RESELECT_SECS) && valid(h.0))
+        .map(|h| (h.0, true, h.2))
+        .or_else(|| candidates.iter().min_by(|a, b| a.1.total_cmp(&b.1)).map(|c| (c.0, false, true)))
 }
 
 /// Whether a target or dock is in reach: in a campaign (a mission is loaded) only within the ship's scan range (`in_scan`), in a
@@ -314,9 +324,8 @@ pub fn in_reach(campaign: bool, in_scan: impl FnOnce() -> bool) -> bool {
 /// The computer captain, one for skirmish and missions (docs/re/movement.md "Computer captains"): every think (16 ticks,
 /// docs/re/tick.md) the target is the nearer of the nearest hostile ship in sight and the nearest hostile base (at any range in a
 /// skirmish, within scan range in a campaign), re-chosen after `RESELECT_SECS` only while the ship's "AI can override" flag is set;
-/// failing both, a fleet mate's or an ally's target. An explicit order (a fleet order, a script's attack order) clears the flag
-/// and names the only target. PROVISIONAL: the flag is set on every ship without an explicit order (nearly all ships in the retail
-/// saved games have it set). The attack itself is `attack`. With no target a skirmish computer ship explores (`Explore`); a mission
+/// failing both, a fleet mate's or an ally's target. An explicit order names a target that cannot be overridden (`choose_target`;
+/// nearly all ships in the retail saved games have the flag set: their captains chose their targets). The attack itself is `attack`. With no target a skirmish computer ship explores (`Explore`); a mission
 /// ship keeps its scripted course (PROVISIONAL: today's behaviour). The rules' scripted layer (`rules::mission_ai`: tows, border
 /// leash, follow orders, path ends) runs after this and wins. The player ship only uses this in demo (--shot) mode as an autopilot.
 pub fn ai(
@@ -330,7 +339,11 @@ pub fn ai(
     storms: (Option<Res<crate::nebula::Storms>>, Option<Res<crate::nebula::StormShift>>),
     (mut explore, mut breakoffs): (Local<Explore>, Local<std::collections::HashMap<Entity, attack::Breakoff>>),
     (mut clocks, spawn_order, mut start): (Local<std::collections::HashMap<Entity, ThinkClock>>, Query<&crate::scenario::SpawnIndex>, crate::scenario::BattleStart),
-    (time, mut targets): (Res<Time>, ResMut<CaptainTargets>),
+    (time, mut targets, orders): (
+        Res<Time>,
+        ResMut<CaptainTargets>,
+        Query<(Option<&docking::Docker>, Option<&docking::Tower>, Option<&boarding::GrappleOrder>, Option<&boarding::Boarding>)>,
+    ),
     (lib, fleets): (Res<combat::Library>, Res<Fleets>),
     bases: Query<(Entity, &Transform, &combat::BaseSide, &Health, &combat::ArmedBase)>,
     mut scripted: Query<&mut campaign::MissionShip>,
@@ -370,6 +383,11 @@ pub fn ai(
         let human = !sinking && is_human_ship(s.side, member, Some(&fleets));
         let script = scripted.get(e).ok().map(|m| (m.ordered, m.ram, m.human || m.follow.is_some() || (m.stance == crate::rules::Stance::Persistent && !s.waypoints.is_empty())));
         if busy.contains(e) || scripted.get(e).is_ok_and(left_to_script) {
+            // A dock, tow, grapple or board order (the player's, the script's, or a chosen repair dock) names the ship's target.
+            let order = orders.get(e).ok().and_then(|(d, t, g, b)| d.map(|d| d.dockee()).or(t.map(|t| t.towee())).or(g.map(|g| g.0)).or(b.map(|b| b.target())));
+            if let Some(t) = order.filter(|t| targets.of(e) != Some(*t)) {
+                targets.0.insert(e, (t, 0.0, Vec3::ZERO, false));
+            }
             continue;
         }
         if pilot.is_some_and(FleetPilot::is_steering) {
@@ -391,11 +409,8 @@ pub fn ai(
         if steers {
             s.throttle = None;
         }
-        let candidates: Vec<(Entity, f32)> = snap
-            .iter()
-            .filter(|f| table.hostile(f.2, s.side) && f.3 && (explicit == Some(f.0) || sensors.in_sight(e, f.0, None)) && explicit.is_none_or(|e| e == f.0))
-            .map(|f| (f.0, f.1.distance(tf.translation)))
-            .collect();
+        let candidates: Vec<(Entity, f32)> =
+            snap.iter().filter(|f| table.hostile(f.2, s.side) && f.3 && sensors.in_sight(e, f.0, None)).map(|f| (f.0, f.1.distance(tf.translation))).collect();
         // Computer captains also weigh the nearest hostile base, in reach (the nearer of the two wins).
         // Armed volcano islands fire on everyone but are no base to go for (retail Diablo Strait: the computer came for our ships).
         let island = |b: &combat::ArmedBase| lib.classes[b.class].name.starts_with("Island_");
@@ -405,39 +420,33 @@ pub fn ai(
         let mut candidates = candidates;
         // A rock the script ordered attacked ('attack Asteroid Belt').
         let rock = |t: Entity| rocks.get(t).ok().filter(|r| r.1.hp > 0.0);
-        if let Some(r) = explicit.and_then(rock) {
-            candidates.push((explicit.unwrap_or(e), r.0.translation.distance(tf.translation)));
-        }
-        if !human
-            && explicit.is_none()
-            && let Some(b) = crate::nearest(bases.iter().filter(hostile_base), tf.translation, |b| b.1.translation)
-        {
+        if !human && let Some(b) = crate::nearest(bases.iter().filter(hostile_base), tf.translation, |b| b.1.translation) {
             candidates.push((b.0, b.1.translation.distance(tf.translation)));
         }
-        let valid = |t: Entity| {
-            explicit.is_none_or(|x| x == t)
-                && (snap.iter().any(|f| f.0 == t && table.hostile(f.2, s.side) && f.3) || bases.get(t).is_ok_and(|b| hostile_base(&b)) || rock(t).is_some())
-        };
-        let mut chosen = choose_target(targets.0.get(&e).map(|t| (t.0, t.1)), &candidates, valid, explicit.is_none());
+        let valid = |t: Entity| snap.iter().any(|f| f.0 == t && table.hostile(f.2, s.side) && f.3) || bases.get(t).is_ok_and(|b| hostile_base(&b)) || rock(t).is_some();
+        let mut chosen = choose_target(targets.0.get(&e).map(|t| (t.0, t.1, t.3)), explicit, &candidates, valid);
         // Nothing found: a fleet mate's target, else an allied ship's (same side, another fleet).
         if chosen.is_none() && !human && explicit.is_none() {
             let fleet = member.map(|m| m.0.as_str());
             let adopt = |same_fleet: bool| {
                 snap.iter().filter(|f| f.0 != e && f.3 && table.allied(f.2, s.side) && (f.5.as_deref() == fleet) == same_fleet).find_map(|f| targets.of(f.0).filter(|t| valid(*t)))
             };
-            chosen = adopt(true).or_else(|| adopt(false)).map(|t| (t, false));
+            chosen = adopt(true).or_else(|| adopt(false)).map(|t| (t, false, true));
         }
         match chosen {
-            Some((t, true)) => targets.0.entry(e).or_insert((t, 0.0, Vec3::ZERO)).1 += dt,
-            Some((t, false)) => {
+            Some((t, true, can)) => {
+                let held = targets.0.entry(e).or_insert((t, 0.0, Vec3::ZERO, can));
+                (held.1, held.3) = (held.1 + dt, can);
+            }
+            Some((t, false, can)) => {
                 let aim = snap.iter().find(|f| f.0 == t).map(|f| attack::aim_local(&lib.classes[f.6.1].sections, &f.6.2, &f.6.0, tf.translation, false));
                 let aim = aim.or_else(|| bases.get(t).ok().map(|b| attack::aim_local(&lib.classes[b.4.class].sections, &b.3.sections, b.1, tf.translation, true)));
-                targets.0.insert(e, (t, 0.0, aim.unwrap_or(Vec3::ZERO)));
+                targets.0.insert(e, (t, 0.0, aim.unwrap_or(Vec3::ZERO), can));
             }
             None => _ = targets.0.remove(&e),
         }
         // (position, radius, is a base, aim point)
-        let foe = chosen.and_then(|(t, _)| {
+        let foe = chosen.and_then(|(t, ..)| {
             snap.iter()
                 .find(|f| f.0 == t)
                 .map(|f| (f.1, f.4, false, attack::aim(&lib.classes[f.6.1].sections, &f.6.2, &f.6.0, tf.translation, false)))

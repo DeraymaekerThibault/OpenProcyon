@@ -469,7 +469,7 @@ pub(super) fn fire(
                 _ => match captains.as_deref().and_then(|c| c.aim_of(me)) {
                     Some((t, local)) => seen
                         .iter()
-                        .find(|c| c.entity == t && c.visible)
+                        .find(|c| c.entity == t && c.visible && table.hostile(c.side, ship.side))
                         .map(|c| AimTarget { position: others.get(t).map_or(c.aim_point, |o| o.1.transform_point(local)), ..c.aim() })
                         .or_else(|| base_targets.iter().find(|b| b.0.entity == t && table.hostile(b.1, ship.side)).map(|b| b.0))
                         .or_else(|| rocks.iter().find(|r| r.entity == t).copied()),

@@ -372,19 +372,25 @@ fn exploring_heads_for_quadrant_centres() {
 fn captain_keeps_its_target_six_seconds_then_takes_the_nearest() {
     let (a, b) = (Entity::from_raw_u32(1).unwrap(), Entity::from_raw_u32(2).unwrap());
     let alive = |_: Entity| true;
-    assert_eq!(choose_target(None, &[(a, 90.0), (b, 40.0)], alive, true), Some((b, false)), "no target: the nearest");
-    assert_eq!(choose_target(Some((a, 5.9)), &[(a, 90.0), (b, 40.0)], alive, true), Some((a, true)), "kept inside 6 s though farther");
-    assert_eq!(choose_target(Some((a, 5.9)), &[(b, 40.0)], alive, true), Some((a, true)), "a held target is followed out of sight");
-    assert_eq!(choose_target(Some((a, 6.0)), &[(a, 90.0), (b, 40.0)], alive, true), Some((b, false)), "re-chosen after 6 s");
-    assert_eq!(choose_target(Some((a, 1.0)), &[(b, 40.0)], |t| t != a, true), Some((b, false)), "a sunk target is replaced at once");
-    assert_eq!(choose_target(Some((a, 1.0)), &[], |t| t != a, true), None);
+    let pick = |held, valid: &dyn Fn(Entity) -> bool| choose_target(held, None, &[(a, 90.0), (b, 40.0)], valid);
+    assert_eq!(pick(None, &alive), Some((b, false, true)), "no target: the nearest, a pick of its own that can be overridden");
+    assert_eq!(pick(Some((a, 5.9, true)), &alive), Some((a, true, true)), "kept inside 6 s though farther");
+    assert_eq!(choose_target(Some((a, 5.9, true)), None, &[(b, 40.0)], alive), Some((a, true, true)), "a held target is followed out of sight");
+    assert_eq!(pick(Some((a, 6.0, true)), &alive), Some((b, false, true)), "re-chosen after 6 s");
+    assert_eq!(pick(Some((a, 1.0, true)), &|t| t != a), Some((b, false, true)), "a sunk target is replaced at once");
+    assert_eq!(choose_target(Some((a, 1.0, true)), None, &[], |t| t != a), None);
 }
 
+/// "Cannot override" targets: every explicit target is taken at once and kept past 6 s until it is lost (friendly, sunk) or replaced.
 #[test]
-fn without_the_override_flag_a_captain_keeps_its_target_past_six_seconds() {
-    let (a, b) = (Entity::from_raw_u32(1).unwrap(), Entity::from_raw_u32(2).unwrap());
-    assert_eq!(choose_target(Some((a, 60.0)), &[(a, 90.0), (b, 40.0)], |_| true, false), Some((a, true)), "an explicit order is not re-chosen");
-    assert_eq!(choose_target(Some((a, 60.0)), &[(b, 40.0)], |t| t != a, false), Some((b, false)), "but a sunk one is replaced");
+fn an_ordered_target_cannot_be_overridden_and_is_kept_until_lost() {
+    let (a, b, c) = (Entity::from_raw_u32(1).unwrap(), Entity::from_raw_u32(2).unwrap(), Entity::from_raw_u32(3).unwrap());
+    let near = [(b, 40.0)];
+    assert_eq!(choose_target(Some((b, 1.0, true)), Some(a), &near, |_| true), Some((a, false, false)), "an order replaces the captain's pick");
+    assert_eq!(choose_target(Some((a, 60.0, false)), None, &near, |_| true), Some((a, true, false)), "kept past 6 s once the order is spent");
+    assert_eq!(choose_target(Some((a, 60.0, false)), None, &near, |t| t != a), Some((b, false, true)), "lost: the captain picks again");
+    assert_eq!(choose_target(Some((a, 1.0, false)), Some(c), &near, |_| true), Some((c, false, false)), "a new order replaces it");
+    assert_eq!(choose_target(None, Some(c), &near, |t| t != c), Some((b, false, true)), "an order on a friend is dropped");
 }
 
 #[test]
@@ -393,24 +399,43 @@ fn a_campaign_limits_targets_and_docks_to_scan_range_a_skirmish_does_not() {
     assert!(!in_reach(true, || false) && in_reach(true, || true), "campaign: within scan range only");
 }
 
+/// An asset-free world for the captain (`ai`): one synthetic class (sight 100), sensors refreshed before each think. With `campaign`
+/// a mission is loaded.
+pub(crate) fn captain_world(campaign: bool) -> World {
+    let mut w = World::new();
+    w.insert_resource(Library { classes: vec![crate::fixed_tests::synthetic_class()], guns: default(), bullets: default(), names: default(), clips: default() });
+    w.insert_resource(crate::Config { speed: 1.0, ..default() });
+    w.init_resource::<crate::environment::Sensors>();
+    w.init_resource::<CaptainTargets>();
+    w.init_resource::<Fleets>();
+    w.init_resource::<Time>();
+    if campaign {
+        let data = serde_json::json!({"rules": []});
+        w.insert_resource(campaign::Mission { id: "synthetic".into(), script: crate::rules::Script::new(&data, serde_json::Value::Null), data, opening: None });
+    }
+    w
+}
+/// A ship of `side` at `at`, afloat.
+pub(crate) fn captain_ship(w: &mut World, side: Side, at: Vec3) -> Entity {
+    w.spawn((Ship { heading: 0.0, ..Ship::new(0, side) }, Health { sections: vec![], core: 100.0, destroyed: false }, Transform::from_translation(at))).id()
+}
+/// Runs the captains twice a second apart, so each has thought once.
+pub(crate) fn think(w: &mut World) {
+    let (sense, captains) = (w.register_system(crate::environment::refresh_sensors), w.register_system(ai));
+    for _ in 0..2 {
+        w.run_system(sense).unwrap();
+        w.run_system(captains).unwrap();
+        w.resource_mut::<Time>().advance_by(std::time::Duration::from_secs(1));
+    }
+}
+
 /// The one captain in a mission: a computer mission ship picks a hostile base only inside its scan range (here none is in sight), the
 /// same ship in a skirmish at any range. Asset-free.
 #[test]
 fn a_mission_captain_takes_a_base_only_in_scan_range_a_skirmish_one_at_any() {
     let target_of = |campaign: bool| {
-        let mut w = World::new();
-        let lib = Library { classes: vec![crate::fixed_tests::synthetic_class()], guns: default(), bullets: default(), names: default(), clips: default() };
-        w.insert_resource(lib);
-        w.insert_resource(crate::Config { speed: 1.0, ..default() });
-        w.init_resource::<crate::environment::Sensors>();
-        w.init_resource::<CaptainTargets>();
-        w.init_resource::<Fleets>();
-        w.init_resource::<Time>();
-        if campaign {
-            let data = serde_json::json!({"rules": []});
-            w.insert_resource(campaign::Mission { id: "synthetic".into(), script: crate::rules::Script::new(&data, serde_json::Value::Null), data, opening: None });
-        }
-        let ship = w.spawn((Ship { heading: 0.0, ..Ship::new(0, Side::Enemy) }, Health { sections: vec![], core: 100.0, destroyed: false }, Transform::default())).id();
+        let mut w = captain_world(campaign);
+        let ship = captain_ship(&mut w, Side::Enemy, Vec3::ZERO);
         let base = w
             .spawn((
                 Transform::from_xyz(0.0, 0.0, -5000.0),
@@ -419,15 +444,26 @@ fn a_mission_captain_takes_a_base_only_in_scan_range_a_skirmish_one_at_any() {
                 combat::ArmedBase { class: 0 },
             ))
             .id();
-        let captains = w.register_system(ai);
-        w.run_system(captains).unwrap();
-        w.resource_mut::<Time>().advance_by(std::time::Duration::from_secs(1));
-        w.run_system(captains).unwrap();
+        think(&mut w);
         (w.resource::<CaptainTargets>().of(ship), base)
     };
     let (skirmish, base) = target_of(false);
     assert_eq!(skirmish, Some(base), "skirmish: the base at any range");
     assert_eq!(target_of(true).0, None, "campaign: out of scan range");
+}
+
+/// Every order source sets "cannot override"; the captain's own pick sets "can" (here a repair dock the captain chose, and a hostile in
+/// sight).
+#[test]
+fn a_repair_dock_and_an_order_are_cannot_targets_an_own_pick_can() {
+    let mut w = captain_world(false);
+    let (ship, foe, dock) = (captain_ship(&mut w, Side::Enemy, Vec3::ZERO), captain_ship(&mut w, Side::Player, Vec3::X * 50.0), captain_ship(&mut w, Side::Enemy, Vec3::Z * 50.0));
+    let docker = captain_ship(&mut w, Side::Enemy, Vec3::NEG_X * 50.0);
+    w.entity_mut(docker).insert(crate::docking::Docker::repair(dock));
+    think(&mut w);
+    let t = |e: Entity| w.resource::<CaptainTargets>().0.get(&e).map(|t| (t.0, t.3));
+    assert_eq!(t(ship), Some((foe, true)), "its own pick: can override");
+    assert_eq!(t(docker), Some((dock, false)), "a chosen repair dock: cannot");
 }
 
 #[test]
