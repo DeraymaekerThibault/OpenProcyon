@@ -10,6 +10,7 @@
 set -uo pipefail
 cd "$(dirname "$0")/.."
 root=$PWD
+. tools/python-env.sh  # `py`: the checkout's virtualenv, as tools/check.sh
 jobs=0; ujobs=; changed=; list=; base=origin/main; filter=.
 while [ $# -gt 0 ]; do
     case $1 in
@@ -23,7 +24,7 @@ while [ $# -gt 0 ]; do
 done
 out=$root/local/smokes; mkdir -p "$out"
 # The scratch XDG_DATA_HOME hides the per-user import: pass on the one every tool finds (tools/import_assets.py find_assets).
-[ -n "${PROCYON_ASSETS:-}" ] || { a=$(python3 -m tools.import_assets --print-assets); [ -z "$a" ] || export PROCYON_ASSETS="$a"; }
+[ -n "${PROCYON_ASSETS:-}" ] || { a=$($py -m tools.import_assets --print-assets); [ -z "$a" ] || export PROCYON_ASSETS="$a"; }
 # name | kind | game args (shot.sh adds --shot <png>)
 # kind: asserts = the script logs a PASS line when its checks held and the run fails without it (tools/smokes.py);
 #       visual  = exit status 0 and a picture that is not black; whatever the script asserts with panics shows as a crash.
@@ -56,7 +57,7 @@ EOF2
 )
 battles=
 if [ -n "$changed" ]; then
-    plan=$(python3 -m tools.smokes plan --base "$base") || exit 1
+    plan=$($py -m tools.smokes plan --base "$base") || exit 1
     echo "smokes: changed files map to: ${plan:-nothing (no game change)}"
     case " $plan " in *" all "*) filter=.; battles=1 ;;
         *) [ -z "$plan" ] && exit 0
@@ -76,7 +77,7 @@ if [ -n "$selected" ]; then
     cargo build --profile fast --manifest-path game/Cargo.toml -q || exit 1
     export PROCYON_BIN="${CARGO_TARGET_DIR:-$root/game/target}/fast/openprocyon"
     # One run mode for every smoke (PROCYON_RUN, tools/rungame.py); PROCYON_JOBS bounds each software renderer's threads.
-    mode=$(python3 -m tools.rungame mode) || exit 2
+    mode=$($py -m tools.rungame mode) || exit 2
     echo "smokes: run mode $mode (PROCYON_RUN), $jobs at once"
     export PROCYON_JOBS=$jobs
 else
@@ -93,7 +94,7 @@ run_one() {
     export PROCYON_OVERLAY="$out/overlay/$name"
     # shellcheck disable=SC2086
     timeout 600 "$root/tools/shot.sh" "$out/$name.png" $args >"$out/$name.log" 2>&1; code=$?
-    if why=$(python3 -m tools.smokes verdict "$kind" "$code" "$out/$name.log"); then
+    if why=$($py -m tools.smokes verdict "$kind" "$code" "$out/$name.log"); then
         echo ok >"$out/$name.result"
         msg=$(printf 'ok   %-18s %-7s %3ds' "$name" "$kind" $((SECONDS - start)))
     else
@@ -116,7 +117,7 @@ while IFS='|' read -r name _; do
 done <<<"$selected"
 status=0
 if [ -n "$battles" ]; then
-    python3 -m tools.battle_check ${ujobs:+--jobs "$ujobs"} || status=1
+    $py -m tools.battle_check ${ujobs:+--jobs "$ujobs"} || status=1
 fi
 summary="smokes: $pass ok, ${#fail[@]} FAIL${fail[*]:+: ${fail[*]} (logs: local/smokes/<name>.log)} in $((SECONDS - start))s (jobs $jobs)"
 echo "$summary"
