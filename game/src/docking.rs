@@ -630,7 +630,7 @@ fn wait_phase(st: &Step, dockable: &mut Dockable, docker: &mut Docker, ship: &mu
     } else {
         ship.waypoints = vec![p.with_y(here.y)];
         ship.goal = None;
-        ship.order = EngineOrder::Full;
+        ship.order = EngineOrder::Emergency;
     }
     None
 }
@@ -700,7 +700,7 @@ fn approach_phase(st: &Step, dockable: &Dockable, docker: &mut Docker, ship: &mu
     }
     // The final leg's glide is movement: `dock_glide` runs it in the next tick's step.
     if !docker.final_leg {
-        (ship.waypoints, ship.goal, ship.order) = (vec![ap], None, EngineOrder::Full);
+        (ship.waypoints, ship.goal, ship.order) = (vec![ap], None, EngineOrder::Emergency);
     }
     false
 }
@@ -755,7 +755,7 @@ fn leave_phase(st: &Step, dockable: &Dockable, docker: &mut Docker, ship: &mut S
             if angdiff(bearing(here, docker.start), ship.heading).abs() < TURN_DONE || docker.timer >= LEG_SECS {
                 // Retail: one leg of 100 units toward where the ship came from, not back to that point.
                 let dir = (docker.start - here).with_y(0.0).normalize_or_zero();
-                (ship.waypoints, ship.order) = (vec![here + dir * RETURN_LEG], EngineOrder::Full);
+                (ship.waypoints, ship.order) = (vec![here + dir * RETURN_LEG], EngineOrder::Emergency);
                 docker.phase = Phase::Return;
             }
             false

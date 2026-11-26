@@ -297,3 +297,8 @@ pub fn locked(m: Option<&Mission>) -> bool {
 pub fn nis(m: Option<&Mission>) -> bool {
     m.is_some_and(|m| m.script.nis)
 }
+/// A script NIS whose script has not aimed the camera (no focus and no attached unit, as in mission 4's opening): the NIS camera has
+/// nothing to do, so the normal chase camera keeps running. PROVISIONAL: the original's default NIS camera is not decoded.
+pub fn nis_camera_idle(m: Option<&Mission>) -> bool {
+    m.is_some_and(|m| m.script.nis && m.script.cam.attach.is_none() && m.script.cam.focus_unit.is_none() && m.script.cam.focus_point.is_none())
+}
