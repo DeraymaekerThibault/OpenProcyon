@@ -304,15 +304,36 @@ impl CaptainTargets {
 /// help-attack, Board, Grapple, Dock or Tow order, the script's Attack Group, Ram, Dock, Tow, Board or Grapple actions, a chosen
 /// repair dock) is taken at once and cannot be overridden; the captain's own pick can. A `held` target (entity, age, can) that is
 /// still `valid` (alive and hostile: the original follows a held target anywhere) is kept until lost, and one that can be overridden
-/// only until it is `RESELECT_SECS` old; else the nearest candidate (entity, distance). Returns the target, whether it was kept,
+/// only until it is `RESELECT_SECS` old; else the captain's own `pick` (`stance_pick`). Returns the target, whether it was kept,
 /// and its flag.
-fn choose_target(held: Option<(Entity, f32, bool)>, explicit: Option<Entity>, candidates: &[(Entity, f32)], valid: impl Fn(Entity) -> bool) -> Option<(Entity, bool, bool)> {
+fn choose_target(held: Option<(Entity, f32, bool)>, explicit: Option<Entity>, pick: Option<Entity>, valid: impl Fn(Entity) -> bool) -> Option<(Entity, bool, bool)> {
     if let Some(x) = explicit.filter(|x| valid(*x)) {
         return Some((x, held.is_some_and(|h| h.0 == x), false));
     }
-    held.filter(|h| (!h.2 || h.1 < RESELECT_SECS) && valid(h.0))
-        .map(|h| (h.0, true, h.2))
-        .or_else(|| candidates.iter().min_by(|a, b| a.1.total_cmp(&b.1)).map(|c| (c.0, false, true)))
+    held.filter(|h| (!h.2 || h.1 < RESELECT_SECS) && valid(h.0)).map(|h| (h.0, true, h.2)).or_else(|| pick.map(|c| (c, false, true)))
+}
+
+/// A hostile a captain could pick: a ship, a dragon or a base, its distance, whether it is within the captain's scan range, and
+/// whether its own target is the captain's ship.
+#[derive(Clone, Copy)]
+pub(crate) struct Seen {
+    pub e: Entity,
+    pub dist: f32,
+    pub base: bool,
+    pub in_scan: bool,
+    pub targets_me: bool,
+}
+
+/// A captain's own pick by its stance (PROVISIONAL, read, not observed): Dummy none. Persistent, Defensive and Neutral retaliate only:
+/// the nearest hostile within scan range whose own target is this ship. Aggressive takes the nearest hostile ship or dragon in scan
+/// range, else the nearest hostile base in reach (`in_reach`).
+pub(crate) fn stance_pick(stance: crate::rules::Stance, campaign: bool, seen: &[Seen]) -> Option<Entity> {
+    let nearest = |f: &dyn Fn(&Seen) -> bool| seen.iter().filter(|s| f(s)).min_by(|a, b| a.dist.total_cmp(&b.dist)).map(|s| s.e);
+    match stance {
+        crate::rules::Stance::Dummy => None,
+        crate::rules::Stance::Aggressive => nearest(&|s| !s.base && s.in_scan).or_else(|| nearest(&|s| s.base && in_reach(campaign, || s.in_scan))),
+        _ => nearest(&|s| s.targets_me && s.in_scan),
+    }
 }
 
 /// Whether a target or dock is in reach: in a campaign (a mission is loaded) only within the ship's scan range (`in_scan`), in a
@@ -337,7 +358,7 @@ pub fn ai(
     held: Query<(), With<HoldPosition>>,
     holes: Query<(&Transform, &crate::blackhole::Pull), Without<Ship>>,
     storms: (Option<Res<crate::nebula::Storms>>, Option<Res<crate::nebula::StormShift>>),
-    (mut explore, mut breakoffs): (Local<Explore>, Local<std::collections::HashMap<Entity, attack::Breakoff>>),
+    (mut explore, mut breakoffs, mut courses): (Local<Explore>, Local<std::collections::HashMap<Entity, attack::Breakoff>>, Local<std::collections::HashMap<Entity, Vec3>>),
     (mut clocks, spawn_order, mut start): (Local<std::collections::HashMap<Entity, ThinkClock>>, Query<&crate::scenario::SpawnIndex>, crate::scenario::BattleStart),
     (time, mut targets, orders): (
         Res<Time>,
@@ -353,9 +374,10 @@ pub fn ai(
         crate::alliance::Hostility,
         Query<(&Transform, &combat::Asteroid), Without<Ship>>,
     ),
+    (dragons, aim): (Query<(Entity, &Transform, &crate::environment::SpaceAnimal, &crate::dragons::Dragon), Without<Ship>>, Option<Res<Target>>),
 ) {
     if start.is_new() {
-        (*explore, *breakoffs, *clocks) = Default::default();
+        (*explore, *breakoffs, *clocks, *courses) = Default::default();
     }
     let campaign = mission.is_some();
     // Scripted ships: hidden ones and dummies wait for the script; a persistent ship on its route, a human-captained one
@@ -364,10 +386,14 @@ pub fn ai(
     let left_to_script = |m: &campaign::MissionShip| !m.visible || m.stance == crate::rules::Stance::Dummy;
     let holes = hole_list(&holes, storms.0.as_deref(), storms.1.as_deref());
     let now = time.elapsed_secs();
-    // (entity, position, side, afloat, radius, fleet, the aim point seen from a position)
-    let snap: Vec<(Entity, Vec3, Side, bool, f32, Option<crate::names::Owner>, (Transform, usize, Vec<f32>))> = ships
+    // (entity, position, side, afloat, radius, fleet, the aim point seen from a position, its ordered or aimed target)
+    type Snap = (Entity, Vec3, Side, bool, f32, Option<crate::names::Owner>, (Transform, usize, Vec<f32>), Option<Entity>);
+    let snap: Vec<Snap> = ships
         .iter()
-        .map(|(e, t, s, h, _, _, m, _)| (e, t.translation, s.side, !h.destroyed, lib.classes[s.class].radius, m.map(|m| m.0.clone()), (*t, s.class, h.sections.clone())))
+        .map(|(e, t, s, h, me, p, m, _)| {
+            let aimed = p.and_then(|p| p.target).or(aim.as_ref().filter(|_| me).and_then(|a| a.0));
+            (e, t.translation, s.side, !h.destroyed, lib.classes[s.class].radius, m.map(|m| m.0.clone()), (*t, s.class, h.sections.clone()), aimed)
+        })
         .collect();
     breakoffs.retain(|e, _| snap.iter().any(|f| f.0 == *e));
     clocks.retain(|e, _| snap.iter().any(|f| f.0 == *e));
@@ -409,29 +435,40 @@ pub fn ai(
         if steers {
             s.throttle = None;
         }
-        let candidates: Vec<(Entity, f32)> =
-            snap.iter().filter(|f| table.hostile(f.2, s.side) && f.3 && sensors.in_sight(e, f.0, None)).map(|f| (f.0, f.1.distance(tf.translation))).collect();
-        // Computer captains also weigh the nearest hostile base, in reach (the nearer of the two wins).
-        // Armed volcano islands fire on everyone but are no base to go for (retail Diablo Strait: the computer came for our ships).
+        // What it could pick: hostile ships and dragons, and hostile bases (none for the human's own ships). Armed volcano islands fire
+        // on everyone but are no base to go for (retail Diablo Strait: the computer came for our ships).
         let island = |b: &combat::ArmedBase| lib.classes[b.class].name.starts_with("Island_");
-        let hostile_base = |b: &(Entity, &Transform, &combat::BaseSide, &Health, &combat::ArmedBase)| {
-            table.hostile(b.2.0, s.side) && !b.3.destroyed && !island(b.4) && in_reach(campaign, || sensors.in_sight(e, b.0, None))
+        let hostile_base = |b: &(Entity, &Transform, &combat::BaseSide, &Health, &combat::ArmedBase)| table.hostile(b.2.0, s.side) && !b.3.destroyed && !island(b.4);
+        let dragon = |t: Entity| dragons.get(t).ok().filter(|d| d.2.visible && d.3.hp > 0.0 && table.hostile(table.side_or_neutral(&d.2.owner), s.side));
+        let rock = |t: Entity| rocks.get(t).ok().filter(|r| r.1.hp > 0.0); // a rock the script ordered attacked ('attack Asteroid Belt')
+        let seen = |at: Vec3, t, base, targets_me| Seen { e: t, dist: at.distance(tf.translation), base, in_scan: sensors.in_sight(e, t, None), targets_me };
+        let mut options: Vec<Seen> =
+            snap.iter().filter(|f| f.0 != e && table.hostile(f.2, s.side) && f.3).map(|f| seen(f.1, f.0, false, targets.of(f.0) == Some(e) || f.7 == Some(e))).collect();
+        options.extend(dragons.iter().filter(|d| dragon(d.0).is_some()).map(|d| seen(d.1.translation, d.0, false, d.3.target() == Some(e))));
+        options.extend(bases.iter().filter(|b| !human && hostile_base(b)).map(|b| seen(b.1.translation, b.0, true, false)));
+        let valid = |t: Entity| {
+            snap.iter().any(|f| f.0 == t && table.hostile(f.2, s.side) && f.3) || bases.get(t).is_ok_and(|b| hostile_base(&b)) || dragon(t).is_some() || rock(t).is_some()
         };
-        let mut candidates = candidates;
-        // A rock the script ordered attacked ('attack Asteroid Belt').
-        let rock = |t: Entity| rocks.get(t).ok().filter(|r| r.1.hp > 0.0);
-        if !human && let Some(b) = crate::nearest(bases.iter().filter(hostile_base), tf.translation, |b| b.1.translation) {
-            candidates.push((b.0, b.1.translation.distance(tf.translation)));
-        }
-        let valid = |t: Entity| snap.iter().any(|f| f.0 == t && table.hostile(f.2, s.side) && f.3) || bases.get(t).is_ok_and(|b| hostile_base(&b)) || rock(t).is_some();
-        let mut chosen = choose_target(targets.0.get(&e).map(|t| (t.0, t.1, t.3)), explicit, &candidates, valid);
-        // Nothing found: a fleet mate's target, else an allied ship's (same side, another fleet).
-        if chosen.is_none() && !human && explicit.is_none() {
+        let stance = scripted.get(e).map_or(crate::rules::Stance::Aggressive, |m| m.stance);
+        let aggressive = stance == crate::rules::Stance::Aggressive && !human;
+        let mut chosen = choose_target(
+            targets.0.get(&e).map(|t| (t.0, t.1, t.3)),
+            explicit,
+            stance_pick(if human { crate::rules::Stance::Aggressive } else { stance }, campaign, &options),
+            valid,
+        );
+        // Nothing found: an Aggressive ship takes a fleet mate's target, else an allied ship's (same side, another fleet).
+        if chosen.is_none() && aggressive && explicit.is_none() {
             let fleet = member.map(|m| m.0.as_str());
             let adopt = |same_fleet: bool| {
                 snap.iter().filter(|f| f.0 != e && f.3 && table.allied(f.2, s.side) && (f.5.as_deref() == fleet) == same_fleet).find_map(|f| targets.of(f.0).filter(|t| valid(*t)))
             };
             chosen = adopt(true).or_else(|| adopt(false)).map(|t| (t, false, true));
+        }
+        // An Aggressive ship with no working gun and nothing else to attack rams the nearest hostile ship at any range (PROVISIONAL).
+        let gunless = attack::plan(&lib, &lib.classes[s.class], h, guns).is_none_or(|p| p.0 == attack::Routine::Ram);
+        if chosen.is_none() && aggressive && gunless {
+            chosen = options.iter().filter(|o| !o.base).min_by(|a, b| a.dist.total_cmp(&b.dist)).map(|o| (o.e, false, true));
         }
         match chosen {
             Some((t, true, can)) => {
@@ -457,6 +494,7 @@ pub fn ai(
                         .map(|b| (b.1.translation, lib.classes[b.4.class].radius, true, attack::aim(&lib.classes[b.4.class].sections, &b.3.sections, b.1, tf.translation, true)))
                 })
                 .or_else(|| rock(t).map(|r| (r.0.translation, r.1.radius, false, r.0.translation)))
+                .or_else(|| dragon(t).map(|d| (d.1.translation, d.2.radius, false, d.1.translation)))
         });
         let class = &lib.classes[s.class];
         let explore_now = |s: &mut Ship, explore: &mut Explore| {
@@ -465,16 +503,18 @@ pub fn ai(
         if !steers {
             continue;
         }
+        // A course the captain did not set itself: a script's path or one the player drew.
+        let path = s.waypoints.last().is_some_and(|p| courses.get(&e) != Some(p));
         let Some((foe_pos, foe_radius, foe_base, foe_aim)) = foe else {
-            if campaign {
-                continue; // a mission ship keeps its scripted course (path end: rules::mission_ai)
+            // With no target an Aggressive ship explores (a mission ship on a path keeps to it: PROVISIONAL); the others keep a path or
+            // stop dead (a formation is the fleet's, above).
+            if aggressive && explicit.is_none() && !(campaign && path) {
+                explore_now(&mut s, &mut explore);
+                courses.insert(e, s.waypoints[0]);
+            } else if !path {
+                (s.goal, s.order) = (None, EngineOrder::Stop);
+                s.waypoints.clear();
             }
-            s.goal = None;
-            if human || explicit.is_some() {
-                s.order = EngineOrder::Stop;
-                continue;
-            }
-            explore_now(&mut s, &mut explore);
             continue;
         };
         let kept = std::mem::take(&mut s.waypoints); // contact: drop any exploring course (the quadrant is kept for later)
@@ -507,6 +547,7 @@ pub fn ai(
         } else {
             attack::throttle(routine, key, tf.translation, s.heading, course[0])
         };
+        courses.insert(e, *course.last().unwrap_or(&tf.translation));
         (s.waypoints, s.goal, s.order) = (course, None, EngineOrder::Emergency);
         // A finished chase waits for orders at its last point (rules::mission_ai's path end).
         if let Ok(mut m) = scripted.get_mut(e) {
@@ -1018,6 +1059,13 @@ pub fn promote(world: &mut World, candidate: Entity, scripted: bool) -> bool {
     true
 }
 
+/// A player's Attack or "fire when possible" order makes the ship Aggressive (PROVISIONAL).
+pub fn aggressive(world: &mut World, e: Entity) {
+    if let Some(mut m) = world.get_mut::<campaign::MissionShip>(e) {
+        m.stance = crate::rules::Stance::Aggressive;
+    }
+}
+
 pub fn fleet_help(world: &mut World, owner: &str, attack: bool) {
     let Some(fleet) = world.resource::<Fleets>().groups.get(owner).cloned() else { return };
     let target = if fleet.members.first().copied() == world.resource::<Fleets>().primary() {
@@ -1040,6 +1088,9 @@ pub fn fleet_help(world: &mut World, owner: &str, attack: bool) {
             } else {
                 p.hold_fire = !fleet.cease_fire;
             }
+        }
+        if attack || fleet.cease_fire {
+            aggressive(world, e);
         }
     }
 }

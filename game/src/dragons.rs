@@ -37,6 +37,10 @@ pub struct Dragon {
     roars: usize,
 }
 impl Dragon {
+    /// Its current target.
+    pub fn target(&self) -> Option<Entity> {
+        self.target
+    }
     /// A shell or blast struck it (combat.rs).
     pub fn hurt(&mut self, amount: f32) {
         self.hp = (self.hp - amount).max(0.0);

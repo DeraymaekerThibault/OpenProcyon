@@ -372,25 +372,25 @@ fn exploring_heads_for_quadrant_centres() {
 fn captain_keeps_its_target_six_seconds_then_takes_the_nearest() {
     let (a, b) = (Entity::from_raw_u32(1).unwrap(), Entity::from_raw_u32(2).unwrap());
     let alive = |_: Entity| true;
-    let pick = |held, valid: &dyn Fn(Entity) -> bool| choose_target(held, None, &[(a, 90.0), (b, 40.0)], valid);
-    assert_eq!(pick(None, &alive), Some((b, false, true)), "no target: the nearest, a pick of its own that can be overridden");
+    let pick = |held, valid: &dyn Fn(Entity) -> bool| choose_target(held, None, Some(b), valid);
+    assert_eq!(pick(None, &alive), Some((b, false, true)), "no target: its own pick, which can be overridden");
     assert_eq!(pick(Some((a, 5.9, true)), &alive), Some((a, true, true)), "kept inside 6 s though farther");
-    assert_eq!(choose_target(Some((a, 5.9, true)), None, &[(b, 40.0)], alive), Some((a, true, true)), "a held target is followed out of sight");
+    assert_eq!(choose_target(Some((a, 5.9, true)), None, Some(b), alive), Some((a, true, true)), "a held target is followed out of sight");
     assert_eq!(pick(Some((a, 6.0, true)), &alive), Some((b, false, true)), "re-chosen after 6 s");
     assert_eq!(pick(Some((a, 1.0, true)), &|t| t != a), Some((b, false, true)), "a sunk target is replaced at once");
-    assert_eq!(choose_target(Some((a, 1.0, true)), None, &[], |t| t != a), None);
+    assert_eq!(choose_target(Some((a, 1.0, true)), None, None, |t| t != a), None);
 }
 
 /// "Cannot override" targets: every explicit target is taken at once and kept past 6 s until it is lost (friendly, sunk) or replaced.
 #[test]
 fn an_ordered_target_cannot_be_overridden_and_is_kept_until_lost() {
     let (a, b, c) = (Entity::from_raw_u32(1).unwrap(), Entity::from_raw_u32(2).unwrap(), Entity::from_raw_u32(3).unwrap());
-    let near = [(b, 40.0)];
-    assert_eq!(choose_target(Some((b, 1.0, true)), Some(a), &near, |_| true), Some((a, false, false)), "an order replaces the captain's pick");
-    assert_eq!(choose_target(Some((a, 60.0, false)), None, &near, |_| true), Some((a, true, false)), "kept past 6 s once the order is spent");
-    assert_eq!(choose_target(Some((a, 60.0, false)), None, &near, |t| t != a), Some((b, false, true)), "lost: the captain picks again");
-    assert_eq!(choose_target(Some((a, 1.0, false)), Some(c), &near, |_| true), Some((c, false, false)), "a new order replaces it");
-    assert_eq!(choose_target(None, Some(c), &near, |t| t != c), Some((b, false, true)), "an order on a friend is dropped");
+    let near = Some(b);
+    assert_eq!(choose_target(Some((b, 1.0, true)), Some(a), near, |_| true), Some((a, false, false)), "an order replaces the captain's pick");
+    assert_eq!(choose_target(Some((a, 60.0, false)), None, near, |_| true), Some((a, true, false)), "kept past 6 s once the order is spent");
+    assert_eq!(choose_target(Some((a, 60.0, false)), None, near, |t| t != a), Some((b, false, true)), "lost: the captain picks again");
+    assert_eq!(choose_target(Some((a, 1.0, false)), Some(c), near, |_| true), Some((c, false, false)), "a new order replaces it");
+    assert_eq!(choose_target(None, Some(c), near, |t| t != c), Some((b, false, true)), "an order on a friend is dropped");
 }
 
 #[test]
@@ -880,4 +880,77 @@ fn fleet_orders_as_commands_do_what_the_buttons_did() {
     assert!(pilots(&sent, &ids) == pilots(&direct, &ids));
     assert_eq!(sent.resource::<Fleets>().primary(), Some(ids[2]));
     assert!(sent.get::<PlayerShip>(ids[2]).is_some() && sent.get::<PlayerShip>(ids[0]).is_none());
+}
+
+/// Each stance's own pick (PROVISIONAL): Aggressive the nearest ship or dragon in scan range, else a base (any range in a skirmish,
+/// scan range in a campaign); Persistent, Defensive and Neutral only a hostile in scan range whose target is this ship; Dummy nothing.
+#[test]
+fn each_stance_picks_its_own_kind_of_target() {
+    use crate::rules::Stance::*;
+    let e = |i| Entity::from_raw_u32(i).unwrap();
+    let seen = |i, dist, base, in_scan, targets_me| Seen { e: e(i), dist, base, in_scan, targets_me };
+    let world = [seen(1, 50.0, false, true, false), seen(2, 80.0, false, true, true), seen(3, 20.0, false, false, true), seen(4, 10.0, true, false, false)];
+    assert_eq!(stance_pick(Aggressive, false, &world), Some(e(1)), "the nearest ship in scan range, before a nearer base");
+    for st in [Persistent, Defensive, Neutral] {
+        assert_eq!(stance_pick(st, false, &world), Some(e(2)), "{st:?}: only one that targets it, in scan range");
+    }
+    assert_eq!(stance_pick(Dummy, false, &world), None);
+    let bases = [seen(4, 10.0, true, false, false)];
+    assert_eq!(stance_pick(Aggressive, false, &bases), Some(e(4)), "skirmish: a base at any range");
+    assert_eq!(stance_pick(Aggressive, true, &bases), None, "campaign: only in scan range");
+    assert_eq!(stance_pick(Neutral, false, &bases), None, "a base never retaliates here (it keeps no target)");
+}
+
+/// With no target an Aggressive ship explores, a Defensive or Neutral one stops dead unless it has waypoints (a formation is the
+/// fleet's own, and the captain leaves it alone).
+#[test]
+fn without_a_target_aggressive_explores_and_the_others_stop_unless_on_a_course_or_in_formation() {
+    use crate::rules::Stance::*;
+    let mut w = captain_world(false);
+    let ship = |w: &mut World, stance, waypoints: Vec<Vec3>| {
+        let e = captain_ship(w, Side::Enemy, Vec3::ZERO);
+        w.entity_mut(e).insert(campaign::MissionShip { stance, ..campaign::MissionShip::placed(1, "s".into(), "o".into()) });
+        let mut s = w.get_mut::<Ship>(e).unwrap();
+        (s.waypoints, s.order) = (waypoints, EngineOrder::Full);
+        e
+    };
+    let hunter = ship(&mut w, Aggressive, vec![]);
+    let (still, sailing) = (ship(&mut w, Defensive, vec![]), ship(&mut w, Neutral, vec![Vec3::X * 300.0]));
+    let held = ship(&mut w, Neutral, vec![]);
+    w.entity_mut(held).insert(FleetPilot { hold: true, ..default() });
+    think(&mut w);
+    let at = |e| (w.get::<Ship>(e).unwrap().order, w.get::<Ship>(e).unwrap().waypoints.len());
+    assert_eq!(at(hunter), (EngineOrder::Emergency, 1), "explores");
+    assert_eq!(at(still), (EngineOrder::Stop, 0), "stops dead");
+    assert_eq!(at(sailing), (EngineOrder::Full, 1), "keeps its course");
+    assert_eq!(at(held), (EngineOrder::Full, 0), "in formation: the fleet's");
+}
+
+/// An Aggressive ship with no working gun and nothing to attack in reach rams the nearest hostile ship at any range; a friend's target
+/// comes before that.
+#[test]
+fn a_gunless_aggressive_ship_rams_after_taking_a_friends_target() {
+    let mut w = captain_world(false);
+    let ship = captain_ship(&mut w, Side::Enemy, Vec3::ZERO);
+    let far = captain_ship(&mut w, Side::Player, Vec3::X * 5000.0);
+    think(&mut w);
+    assert_eq!(w.resource::<CaptainTargets>().of(ship), Some(far), "rams the nearest hostile, out of sight");
+    let mut w = captain_world(false);
+    let (ship, mate) = (captain_ship(&mut w, Side::Enemy, Vec3::ZERO), captain_ship(&mut w, Side::Enemy, Vec3::X * 10.0));
+    let (_far, other) = (captain_ship(&mut w, Side::Player, Vec3::X * 5000.0), captain_ship(&mut w, Side::Player, Vec3::Z * 7000.0));
+    for e in [ship, mate] {
+        w.entity_mut(e).insert(FleetMember("computer".into(), 0));
+    }
+    w.resource_mut::<CaptainTargets>().0.insert(mate, (other, 0.0, Vec3::ZERO, false));
+    w.entity_mut(mate).insert(crate::docking::Docker::repair(other)); // keeps the mate's target as it is
+    think(&mut w);
+    assert_eq!(w.resource::<CaptainTargets>().of(ship), Some(other), "a fleet mate's target first");
+}
+
+/// Persistent ships never dock for repair; the other stances may.
+#[test]
+fn a_persistent_or_dummy_ship_never_docks_for_repair() {
+    use crate::rules::Stance::*;
+    assert!([None, Some(Aggressive), Some(Defensive), Some(Neutral)].into_iter().all(crate::docking::seeks_repair));
+    assert!(!crate::docking::seeks_repair(Some(Persistent)) && !crate::docking::seeks_repair(Some(Dummy)));
 }

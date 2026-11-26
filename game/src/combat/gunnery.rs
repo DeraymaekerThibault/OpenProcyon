@@ -439,7 +439,8 @@ pub(super) fn fire(
     let mut walk = shooters.iter_many_mut(&order);
     while let Some(item) = walk.fetch_next() {
         let Ok((me, tf, ship, mut states, health, mission, primary, pilot, cloak, posts, boarding, scan, abandoned)) = item else { continue };
-        if health.destroyed || abandoned {
+        // A Dummy fires nothing, mines and point defence included (PROVISIONAL).
+        if health.destroyed || abandoned || mission.is_some_and(|m| m.stance == crate::rules::Stance::Dummy) {
             ground.remove(&me);
             continue;
         }

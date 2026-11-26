@@ -199,6 +199,7 @@ pub fn apply(world: &mut World, player: PlayerId, kind: &Kind) {
                 && let Some(mut p) = world.get_mut::<crate::ship::FleetPilot>(ship)
             {
                 p.attack(target);
+                crate::ship::aggressive(world, ship);
             }
         }
     }

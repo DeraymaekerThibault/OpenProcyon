@@ -933,11 +933,11 @@ fn ai_repair_dock(
         if docking.is_some_and(|d| !d.retargets()) {
             continue;
         }
-        // Computer players only: skirmish enemies, and mission ships the human does not own; scripted dummies never decide.
+        // Computer players only: skirmish enemies, and mission ships the human does not own.
         let computer = match (ms, script) {
-            (Some(m), Some(sc)) => m.owner != sc.player() && !matches!(m.stance, crate::rules::Stance::Dummy | crate::rules::Stance::Persistent),
+            (Some(m), Some(sc)) => m.owner != sc.player(),
             _ => ship.side != Side::Player,
-        };
+        } && seeks_repair(ms.map(|m| m.stance));
         if h.destroyed || !computer || !needs_repair(&lib, ship, h) {
             continue;
         }
@@ -957,6 +957,12 @@ fn ai_repair_dock(
             msg.write(DockMsg::Repair { docker: Some(e), dockee });
         }
     }
+}
+
+/// Whether a computer captain of this stance may dock for repair (PROVISIONAL): Aggressive, Defensive and Neutral may, a Dummy and a
+/// Persistent ship never do. A ship without a scripted stance is Aggressive.
+pub(crate) fn seeks_repair(stance: Option<crate::rules::Stance>) -> bool {
+    !matches!(stance, Some(crate::rules::Stance::Dummy | crate::rules::Stance::Persistent))
 }
 
 /// Click picking shared by the left-click dock and the right-click menu: what is under the cursor and whether the player can dock there.
