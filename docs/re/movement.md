@@ -243,7 +243,25 @@ Headless retail skirmishes, one computer ship against our idle or fleeing Navy C
   Checked in a fleet battle (Zemyatin, our Man-O-War + Cutter vs a computer Assault Cutter + Barque, six saves over 28 s): both
   computer ships took our Cutter, the nearer of our two ships by 45 units, from 2.8 s on and kept it; no spreading over targets.
   Remake:
-  `ship::CaptainTargets` (steering and fire).
+  `ship::TargetSlot` (steering and fire).
+- **One target slot per ship** (PROVISIONAL: read in the original's captain logic by procyon-re, `evidence/ai-captain/`, not yet
+  watched in play). Every ship, a human's command ship included, has one slot: a target, an aim point in the target's frame, and a
+  flag "the captain may replace it".
+  - The captain's own pick sets the flag; it is chosen again every 6 s with a fresh aim point (the section nearest our ship), the
+    same target or not. An order clears the flag and is kept until the target is lost. The writers are an attack click, fleet
+    attack (it copies the command ship's slot, aim point included, into each secondary's), the rules' attack, ram, grapple, board
+    and dock actions, and the dock, tow, board and grapple orders. The last writer wins; there is no ranking.
+  - The slot empties when the target turns friendly (a capture counts only when the new owner is allied to us), sinks, is destroyed
+    or leaves the world, and on Stop. Losing sight of it, cease fire, rejoining formation, a move order and the end of an attack
+    routine leave it. After a move order the ship goes back to its target when the path ends.
+  - Asteroids never go into the slot: the asteroid routine aims at them on its own.
+  - A human's secondaries pick targets as computer captains do (default stance, nearest hostile visible ship or dragon in scan
+    range against the nearest hostile base, then a fleet mate's target), but never explore or go to repair on their own.
+  - Promotion touches neither ship's slot: the old command ship keeps its click (still ordered) and fights it as a computer
+    captain; the new one keeps its own target.
+  - Remake: `ship::TargetSlot`; asteroids clicked by hand still use the command ship's slot, a human's secondaries still take the
+    nearest visible enemy that is not human-crewed, and the dock, tow, grapple and board orders do not write a command ship's slot
+    (PROVISIONAL, #369).
 - **Nothing in sight: map exploration.** Retail saves give every computer ship an explore-map routine with a quadrant index 0-3
   (random per ship). Observed: a Carrack on the Diablo Strait (half-size 1625) ran from (322, -1127) on course (0.27, 0.96) for
   200 s, straight at the (+x, +y) quadrant centre (812, 812) (bearing (0.245, 0.97)); an Assault Cutter on the Zemyatin Anomaly

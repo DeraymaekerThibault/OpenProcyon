@@ -25,7 +25,7 @@ target's origin while the Barque was ahead, 4.9 to port when it was abeam to por
 abeam to starboard, and it changed only at target choices, 6.3 and 12.7 s apart.
 
 Remake: `ship::attack::aim_local` picks the section (its box centre, the same point the attack courses steer by), stored with the
-target in `ship::CaptainTargets` and used by `combat::gunnery`. PROVISIONAL: only skirmish captains; a base target keeps the roof
+target in the ship's `ship::TargetSlot` and used by `combat::gunnery`. PROVISIONAL: only skirmish captains; a base target keeps the roof
 point of the section nearest its centre (see "Gun tower aim point").
 
 ## Deviation (run once per burst, or per shot if CalculateAccuracyDeviationDuringBurst)
@@ -266,7 +266,7 @@ harpoon decision.
 - The hotkey/HUD button works only while the player ship is not disabled. It is sent like any order (so it works in multiplayer).
 - Every qualifying gun bank (some gun classes are skipped; which is unknown) switches to fire-when-possible in panic mode: each
   gun picks its own target, the best candidate within its own range (nearest-style).
-- Remake: `GroundFire::panic` set by the bar button; each non-indirect player gun fires at the nearest enemy ship in its
+- Remake: `combat::ManualFire::panic` on the command ship, set by the bar button (a `PanicFire` order); each non-indirect player gun fires at the nearest enemy ship in its
   range and arc (fallback: the normal target). Cleared on any retarget (click or C), or when no gun holds its request any more (2 s, or the gun's first shot). PROVISIONAL: persistence, selection score, flag filter.
 
 ## Mine laying
