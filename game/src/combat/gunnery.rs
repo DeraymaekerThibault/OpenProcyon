@@ -342,7 +342,7 @@ pub(super) fn fire(
     assets: Res<AssetServer>,
     lib: Res<Library>,
     fxl: Res<FxLib>,
-    mut target: ResMut<Target>,
+    (command, mut manual_fire): (Query<&crate::ship::TargetSlot, With<crate::PlayerShip>>, Query<&mut ManualFire>),
     look: Res<Look>,
     (mut rng, spawn_order, mut start): (ResMut<SimRng>, Query<&crate::scenario::SpawnIndex>, crate::scenario::BattleStart),
     mut sfx: MessageWriter<Sfx>,
@@ -398,6 +398,9 @@ pub(super) fn fire(
         .collect();
     // 'NIS Toggle NIS mode Gun Accuracy': scripted broadsides fly true.
     let nis_aim = campaign.as_deref().is_some_and(|m| m.script.nis_accuracy);
+    // The local command ship's attack click and the spot clicked: a contact it names is aimed at that spot, by every shooter.
+    // PROVISIONAL (#369 C, step 3): the spot belongs to the command ship's own slot only.
+    let manual = command.single().ok().and_then(crate::ship::TargetSlot::ordered);
     // Script visibility stays separate from observer-dependent detection.
     let contacts: Vec<Contact> = others
         .iter()
@@ -405,7 +408,7 @@ pub(super) fn fire(
             entity,
             side: ship.side,
             with_human: table.with_human(ship.side),
-            aim_point: transform.transform_point(ship_aim_point(&lib.classes[ship.class], health, if Some(entity) == target.0 { target.1 } else { None })),
+            aim_point: transform.transform_point(ship_aim_point(&lib.classes[ship.class], health, manual.filter(|m| m.0 == entity).and_then(|m| m.1))),
             // A fully cloaked ship is never picked as a gun target, whoever knows it is there.
             visible: !health.destroyed && mission_ship.is_none_or(|m| m.visible) && cloak.is_none_or(|c| c.state != crate::cloak::State::Full),
             is_player,
@@ -419,7 +422,7 @@ pub(super) fn fire(
         .filter(|(_, _, a, ..)| a.is_none_or(|a| a.visible))
         .filter_map(|(entity, transform, animal, base, side)| {
             let position = match base {
-                Some((b, h, _)) => transform.transform_point(base_aim_point(&lib.classes[b.class], h, (target.0 == Some(entity)).then_some(target.1).flatten())?),
+                Some((b, h, _)) => transform.transform_point(base_aim_point(&lib.classes[b.class], h, manual.filter(|m| m.0 == entity).and_then(|m| m.1))?),
                 None => transform.translation,
             };
             let owner = animal.map(|a| table.side_or_neutral(&a.owner)).or_else(|| base.and_then(|(_, _, b)| table.base_side(Some(b), side)));
@@ -454,19 +457,22 @@ pub(super) fn fire(
         let cloaked_now = cloak.as_ref().is_some_and(|c| c.holds_fire());
         let class = &lib.classes[ship.class];
         let generic = posts.is_none().then(|| crate::crew_arms::fallback_posts(table.with_human(ship.side), boarding, &class.name)).flatten();
+        // A command ship's attack click (its ordered target) and manual fire orders.
+        let own = if primary { captains.get(me).ok().and_then(crate::ship::TargetSlot::ordered).map(|o| o.0) } else { None };
+        let fire = if primary { manual_fire.get(me).ok().copied().unwrap_or_default() } else { ManualFire::default() };
         // Player's command ship: only the clicked target (retail: direct-fire guns need an enemy click or panic fire). Its other
         // ships: the nearest living enemy. Enemies: their captain's target.
         let ship_target = if pilot.is_some_and(|p| p.hold_fire) || mission.is_some_and(|m| m.hold_fire) {
             None
         } else if let Some(t) = pilot.filter(|_| !primary).and_then(|p| p.target) {
             seen.iter().find(|c| c.entity == t && table.hostile(c.side, ship.side) && c.visible).map(Contact::aim).or_else(|| rock(t, ship.side, false))
-        } else if let (Side::Player, Some(r)) = (ship.side, target.0.filter(|_| primary).and_then(|t| rock(t, ship.side, true))) {
+        } else if let (Side::Player, Some(r)) = (ship.side, own.and_then(|t| rock(t, ship.side, true))) {
             Some(r) // selected space object (asteroid or whale)
         } else {
             match ship.side {
                 Side::Player => seen
                     .iter()
-                    .find(|c| primary && Some(c.entity) == target.0 && table.targetable(ship.side, c.side, true) && c.visible)
+                    .find(|c| primary && Some(c.entity) == own && table.targetable(ship.side, c.side, true) && c.visible)
                     .or_else(|| crate::nearest(seen.iter().filter(|c| !primary && !c.with_human && c.visible), tf.translation, |c| c.aim_point))
                     .map(Contact::aim),
                 // Computer ships fire at their captain's target (ship::TargetSlot): a ship, a base or an animal hostile to their own
@@ -476,7 +482,7 @@ pub(super) fn fire(
                     Some((t, local)) => seen
                         .iter()
                         .find(|c| c.entity == t && c.visible && table.hostile(c.side, ship.side))
-                        .map(|c| AimTarget { position: others.get(t).map_or(c.aim_point, |o| o.1.transform_point(local)), ..c.aim() })
+                        .map(|c| AimTarget { position: local.and_then(|l| others.get(t).ok().map(|o| o.1.transform_point(l))).unwrap_or(c.aim_point), ..c.aim() })
                         .or_else(|| base_targets.iter().find(|b| b.0.entity == t && table.hostile(b.1, ship.side)).map(|b| b.0))
                         .or_else(|| rock(t, ship.side, false)),
                     None => seen.iter().find(|c| c.is_player && c.visible && table.hostile(c.side, ship.side)).map(Contact::aim),
@@ -573,14 +579,14 @@ pub(super) fn fire(
             }
         }
         let ground_banks: Vec<(usize, Vec3)> = ground.get(&me).map(|g| g.banks.clone()).unwrap_or_default();
-        let pending = if primary { target.2.shot } else { None };
+        let pending = if primary { fire.shot } else { None };
         let (mut shot_fired, mut shot_engaged) = (false, false);
         for (mount, state) in class.mounts.iter().zip(states.0.iter_mut()) {
             // The player's indirect guns only fire at a clicked ground point.
             let on_shot = pending.is_some_and(|s| s.0 == mount.bank);
             let gun = &lib.guns[&state.gun];
             // Panic order: each qualifying gun holds a request that a shot, or its time-out, ends.
-            if !(primary && target.2.panic) {
+            if !(primary && fire.panic) {
                 state.request.clear();
             } else if panic_fires(gun, is_mine(&state.gun)) {
                 state.request.ask();
@@ -603,7 +609,7 @@ pub(super) fn fire(
                 // A rock on the captain's course holds every gun that has not fired at it yet; the attack routine's own fire waits.
                 _ if rock_busy.is_some() => rock_busy.filter(|_| state.rock_ask),
                 // The first shot ends the request, not the gun's own target: the rest of its burst follows it (docs/re/gunnery.md).
-                (false, _) if primary && target.2.panic && (state.request.pending() || state.burst_left > 0) && panic_fires(gun, is_mine(&state.gun)) => {
+                (false, _) if primary && fire.panic && (state.request.pending() || state.burst_left > 0) && panic_fires(gun, is_mine(&state.gun)) => {
                     panic_target(&seen, tf, mount, gun).or(ship_target)
                 }
                 (false, _) if !primary && gun.lob.is_some() => {
@@ -765,12 +771,19 @@ pub(super) fn fire(
             }
         }
         // The panic order is over once no gun still holds its request or is in the middle of the burst it fired.
-        if primary && target.2.panic && !states.0.iter().any(|s| s.request.pending() || s.burst_left > 0) {
-            target.2.panic = false;
+        if primary
+            && fire.panic
+            && !states.0.iter().any(|s| s.request.pending() || s.burst_left > 0)
+            && let Ok(mut f) = manual_fire.get_mut(me)
+        {
+            f.panic = false;
         }
         // One click, one shot: drop the point once fired, or when the bank cannot reach it.
-        if pending.is_some() && (shot_fired || !shot_engaged) {
-            target.2.shot = None;
+        if pending.is_some()
+            && (shot_fired || !shot_engaged)
+            && let Ok(mut f) = manual_fire.get_mut(me)
+        {
+            f.shot = None;
         }
     }
 }

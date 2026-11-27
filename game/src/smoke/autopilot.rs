@@ -2,7 +2,7 @@
 //! wait for. A test driver for unattended runs, not game behaviour; all its tuning is PROVISIONAL.
 use crate::EngineOrder;
 use crate::campaign::{Mission, MissionBase, MissionShip};
-use crate::combat::{ArmedBase, Asteroid, Health, Library, Target};
+use crate::combat::{ArmedBase, Asteroid, Health, Library};
 use crate::docking::DockMsg;
 use crate::rules::{RuleShip, RuleWorld, Script, Unit, Want, live_tasks, player_hits};
 use crate::{Config, Nearest, PlayerShip, Ship, game_to_bevy};
@@ -32,6 +32,15 @@ pub struct Extra<'w, 's> {
     pilot: Local<'s, State>,
 }
 
+/// The bot's copy of the command ship's attack click, the spot clicked and its lobbed shot (its `ship::TargetSlot` and
+/// `combat::ManualFire`), loaded each frame and written back at the end of `drive`.
+#[derive(Clone, Default, PartialEq)]
+pub struct Target(pub Option<Entity>, pub Option<Vec3>, pub Shot);
+#[derive(Clone, Copy, Default, PartialEq)]
+pub struct Shot {
+    pub shot: Option<(usize, Vec3)>,
+}
+
 type Rocks<'w, 's> = Query<'w, 's, (Entity, &'static Transform, &'static Asteroid), (Without<Ship>, Without<crate::environment::SpaceAnimal>)>;
 
 /// `--script mission`, outside mission 1's scripted opening: the bot's orders for one frame (fleet, docking, towing, steering), right
@@ -44,7 +53,7 @@ pub fn drive(
     snapshot: Res<RuleWorld>,
     mut commands: Commands,
     mut ships: Query<RuleShip>,
-    mut target: ResMut<Target>,
+    mut command: Query<(&mut crate::ship::TargetSlot, &mut crate::combat::ManualFire), With<crate::PlayerShip>>,
     rocks: Rocks,
     mut extra: Extra,
 ) {
@@ -55,7 +64,12 @@ pub fn drive(
         return;
     }
     let world = snapshot.0.as_slice();
-    let (commands, ships, target, rocks, lib, extra) = (&mut commands, &mut ships, &mut *target, &rocks, &*lib, &mut extra);
+    let loaded = command.single().ok().map_or_else(Target::default, |(slot, fire)| {
+        let o = slot.ordered();
+        Target(o.map(|o| o.0), o.and_then(|o| o.1), Shot { shot: fire.shot })
+    });
+    let mut manual = loaded.clone();
+    let (commands, ships, target, rocks, lib, extra) = (&mut commands, &mut ships, &mut manual, &rocks, &*lib, &mut extra);
     mission.script.crew_screen = false; // keep the default crew and arms (missions 3+ open the screen after their first NIS)
     // PROCYON_AUTOINVULN also keeps the player's fleet from being boarded: a pirate captured mission 4's flagship while the
     // invulnerable bot fought it, leaving the run on a stranded stand-in ship.
@@ -138,6 +152,14 @@ pub fn drive(
     // A new target, the fleet bar's attack order, as a player would give it: the escorts join the fight instead of trailing in formation
     // (`ship::fleet_help` ignores a target their captains may not attack). Not while running (cease fire above).
     let aim = target.0.filter(|_| !flee);
+    if *target != loaded
+        && let Ok((mut slot, mut fire)) = command.single_mut()
+    {
+        if (target.0, target.1) != (loaded.0, loaded.1) {
+            *slot = crate::ship::TargetSlot::order(target.0, target.1);
+        }
+        fire.shot = target.2.shot;
+    }
     if aim != extra.pilot.helped {
         extra.pilot.helped = aim;
         if aim.is_some() {

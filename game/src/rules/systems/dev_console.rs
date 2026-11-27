@@ -152,7 +152,7 @@ pub(super) fn run(
     mut active: crate::rules::active::ActiveScriptMut,
     mut bare: ResMut<BareScript>,
     fleets: Option<Res<crate::ship::Fleets>>,
-    target: Res<Target>,
+    command: Query<&crate::ship::TargetSlot, With<crate::PlayerShip>>,
     lib: Res<Library>,
     mut orbit: ResMut<Orbit>,
     rocks: Query<(Entity, &Transform, &Asteroid), (Without<Ship>, Without<crate::environment::SpaceAnimal>)>,
@@ -204,7 +204,7 @@ pub(super) fn run(
         };
         let mut fx = vec![];
         let env = Env {
-            target: target.0,
+            target: command.single().ok().and_then(crate::ship::TargetSlot::ordered).map(|o| o.0),
             mission: mission_id.clone(),
             marks: marks_path(),
             word: line.split_whitespace().next().unwrap_or_default().to_lowercase(),

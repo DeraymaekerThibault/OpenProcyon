@@ -164,9 +164,18 @@ pub struct ExhaustParticles {
 /// Marks entities that a restart must despawn.
 #[derive(Component)]
 pub struct Transient;
-/// The player's target and where on it the player clicked (ship-local); the guns aim at that spot, as in the original.
+/// The indirect bank the local player has armed in the weapon panel (mortars, mines, gravity charges never auto-target: the next
+/// ground click sends a `Lob` order for it). View input state; the simulation never reads it.
 #[derive(Resource, Default)]
-pub struct Target(pub Option<Entity>, pub Option<Vec3>, pub GroundFire);
+pub struct ArmedBank(pub Option<usize>);
+/// A command ship's manual fire orders (#369 phase 2 C; every `commands::Commander` has one): a lobbed shot waiting for its bank
+/// (`Lob` orders) and the panic button. A command ship's target is its `ship::TargetSlot`, which its player's attack click writes.
+#[derive(Component, Clone, Copy, Debug, Default, PartialEq)]
+pub struct ManualFire {
+    pub shot: Option<(usize, Vec3)>,
+    /// Panic button: every gun picks its own nearest enemy it can engage (as in the original) until the player retargets.
+    pub panic: bool,
+}
 /// One step of a 64-bit xorshift, as a float in 0..1.
 pub fn xorshift_unit(state: &mut u64) -> f32 {
     *state ^= *state << 13;
@@ -309,7 +318,7 @@ pub fn plugin(app: &mut App) {
     // Space animals (whales, dragons) are spawned from the map's data in its order; a number gives them a `commands::NetId`.
     crate::scenario::number_spawns::<crate::environment::SpaceAnimal>(app);
     app.insert_resource(PRELOADED.lock().ok().and_then(|mut slot| slot.take()).unwrap_or_else(|| Library::load(assets_dir())))
-        .init_resource::<Target>()
+        .init_resource::<ArmedBank>()
         .init_resource::<LastDamager>()
         .add_message::<Hit>()
         .add_message::<Splashed>()
@@ -383,16 +392,6 @@ fn engine_rate(
         let thin = particles.as_ref().filter(|p| engine.effect.contains(&p.matching)).map_or(1.0, |p| p.scale);
         (f.rate_scale, f.vel_scale) = (engine.mult * open * thin, engine.mult);
     }
-}
-
-/// Indirect weapons (mortars, mines, gravity charges) never auto-target: the player arms the bank in the weapon panel and
-/// clicks a ground point for each shot.
-#[derive(Default)]
-pub struct GroundFire {
-    pub armed: Option<usize>,
-    pub shot: Option<(usize, Vec3)>,
-    /// Panic button: every gun picks its own nearest enemy it can engage (as in the original) until the player retargets.
-    pub panic: bool,
 }
 
 fn setup(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>, mut mats: ResMut<Assets<StandardMaterial>>) {
@@ -582,16 +581,23 @@ fn ring(g: &mut Gizmos, c: Vec3, r: f32, col: Color) {
 }
 
 /// A ring on the target (the HUD draws the HP; gun readiness is in the weapon panel).
-fn draw(mut g: Gizmos, lib: Res<Library>, target: Res<Target>, ships: Query<(Entity, &Transform, &Ship, &Health)>, mission: Option<Res<crate::campaign::Mission>>) {
+fn draw(
+    mut g: Gizmos,
+    lib: Res<Library>,
+    command: Query<&crate::ship::TargetSlot, With<crate::PlayerShip>>,
+    ships: Query<(Entity, &Transform, &Ship, &Health)>,
+    mission: Option<Res<crate::campaign::Mission>>,
+) {
     if crate::briefing::active(mission.as_deref()) {
         return;
     }
+    let target = command.single().ok().and_then(crate::ship::TargetSlot::ordered).map(|o| o.0);
     for (e, tf, ship, h) in &ships {
         if h.destroyed {
             continue;
         }
         let class = &lib.classes[ship.class];
-        if target.0 == Some(e) {
+        if target == Some(e) {
             ring(&mut g, tf.translation, class.radius, Color::srgb(1.0, 0.2, 0.2));
         }
     }

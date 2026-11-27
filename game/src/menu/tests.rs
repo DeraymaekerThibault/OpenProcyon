@@ -193,7 +193,7 @@ fn skirmish_ship_names_default_to_the_pool_and_follow_the_pull_down() {
 #[test]
 #[ignore = "needs imported assets"]
 fn border_dispute_keeps_the_humans_command_ship() {
-    use crate::{Config, Orbit, PlayerShip, Ship, Target, collision, data, fx, ship};
+    use crate::{Config, Orbit, PlayerShip, Ship, collision, data, fx, ship};
     use bevy::ecs::system::RunSystemOnce;
     use bevy::prelude::*;
     let lib = crate::testutil::lib();
@@ -218,7 +218,7 @@ fn border_dispute_keeps_the_humans_command_ship() {
         .init_resource::<collision::Shapes>()
         .init_resource::<data::AsteroidDefs>()
         .init_resource::<ship::Fleets>()
-        .init_resource::<Target>()
+        .init_resource::<crate::combat::ArmedBank>()
         .insert_resource(Orbit { yaw: 0.0, pitch: 0.0, dist: 60.0, focus: None })
         .insert_resource(Config { groups: plan, map: Some("border_dispute".into()), speed: 1.0, ..default() });
     app.world_mut()

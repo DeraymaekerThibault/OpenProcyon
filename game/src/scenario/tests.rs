@@ -136,7 +136,7 @@ mod rotation_tests {
             .init_resource::<collision::Shapes>()
             .init_resource::<data::AsteroidDefs>()
             .init_resource::<ship::Fleets>()
-            .init_resource::<Target>()
+            .init_resource::<crate::combat::ArmedBank>()
             .insert_resource(Orbit { yaw: 0.0, pitch: 0.0, dist: 60.0, focus: None })
             .insert_resource(Config { player: "Ship_Navy_Tender".into(), enemies: vec!["Ship_Navy_Cutter".into()], map: Some("red_rover".into()), speed: 1.0, ..default() });
         app.world_mut()
@@ -169,7 +169,7 @@ mod rotation_tests {
             .init_resource::<collision::Shapes>()
             .init_resource::<data::AsteroidDefs>()
             .init_resource::<ship::Fleets>()
-            .init_resource::<Target>()
+            .init_resource::<crate::combat::ArmedBank>()
             .insert_resource(Orbit { yaw: 0.0, pitch: 0.0, dist: 60.0, focus: None })
             .insert_resource(Config {
                 player: "Ship_Navy_Cutter".into(),

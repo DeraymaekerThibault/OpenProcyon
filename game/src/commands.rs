@@ -45,6 +45,7 @@ pub struct PlayerId(pub u8);
 /// here). A world built by hand that marks only `PlayerShip` (tests, smokes) gets `Commander` of the local player (`ship.rs`).
 #[derive(Component, Clone, Copy, Debug, Default, PartialEq, Eq)]
 #[component(on_insert = commander_set, on_remove = commander_removed)]
+#[require(crate::combat::ManualFire)]
 pub struct Commander(pub PlayerId);
 
 fn commander_set(mut world: bevy::ecs::world::DeferredWorld, ctx: bevy::ecs::lifecycle::HookContext) {
@@ -233,16 +234,16 @@ pub fn apply(world: &mut World, player: PlayerId, kind: &Kind) {
         }
         Kind::PanicFire { ship } => {
             if direct(world, ship, player)
-                && let Some(mut t) = world.get_resource_mut::<crate::combat::Target>()
+                && let Some(mut f) = world.get_mut::<crate::combat::ManualFire>(ship)
             {
-                t.2.panic = true;
+                f.panic = true;
             }
         }
         Kind::Lob { ship, shot } => {
             if direct(world, ship, player)
-                && let Some(mut t) = world.get_resource_mut::<crate::combat::Target>()
+                && let Some(mut f) = world.get_mut::<crate::combat::ManualFire>(ship)
             {
-                t.2.shot = shot;
+                f.shot = shot;
             }
         }
         Kind::Engine { ship, engine } => {
@@ -257,10 +258,12 @@ pub fn apply(world: &mut World, player: PlayerId, kind: &Kind) {
         }
         Kind::Target { ship, target, spot } => {
             if direct(world, ship, player) {
-                if let Some(mut t) = world.get_resource_mut::<crate::combat::Target>() {
-                    t.0 = target;
-                    t.1 = spot;
-                    t.2.panic = false;
+                // The attack click writes the command ship's own target slot (the original keeps no per-player target).
+                if let Some(mut slot) = world.get_mut::<crate::ship::TargetSlot>(ship) {
+                    *slot = crate::ship::TargetSlot::order(target, spot);
+                }
+                if let Some(mut f) = world.get_mut::<crate::combat::ManualFire>(ship) {
+                    f.panic = false;
                 }
             } else if let Some(target) = target
                 && attackable(world, ship, target)
@@ -360,9 +363,9 @@ fn apply_movement(world: &mut World, player: PlayerId, kind: &Kind) {
                 }
             }
             if direct {
-                if let Some(mut t) = world.get_resource_mut::<crate::combat::Target>() {
-                    t.2.armed = None;
-                    t.2.shot = None;
+                // (The view disarms its armed bank itself when it sends the cancel.)
+                if let Some(mut f) = world.get_mut::<crate::combat::ManualFire>(ship) {
+                    f.shot = None;
                 }
             } else if let Some(mut p) = world.get_mut::<crate::ship::FleetPilot>(ship) {
                 p.destination = None;

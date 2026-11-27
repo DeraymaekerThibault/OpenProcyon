@@ -241,7 +241,7 @@ fn grapple_then_board_captures_the_ship_and_tells_the_rules() {
     assert_eq!(app.world().get::<crate::ship::FleetMember>(foe).unwrap().0, "Player");
     app.insert_resource(crate::ship::Fleets { local: "Player".into(), selected: Some(me), ..default() })
         .insert_resource(crate::Orbit { yaw: 0.0, pitch: 0.0, dist: 60.0, focus: None })
-        .init_resource::<crate::combat::Target>();
+        .init_resource::<crate::combat::ArmedBank>();
     crate::ship::reconcile_fleets(app.world_mut());
     assert_eq!(app.world().resource::<crate::ship::Fleets>().roster(), &[me, foe], "capture joins the captor's own roster");
     assert!(held(&mut app, me).is_empty(), "grapple released");

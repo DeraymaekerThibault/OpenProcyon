@@ -21,3 +21,21 @@ pub fn asset_app() -> App {
 pub fn lib() -> Library {
     Library::load(assets_dir())
 }
+
+/// The local command ship (the one entity carrying `PlayerShip` or `Commander` in a test world).
+fn command_ship(w: &mut World) -> Entity {
+    w.flush();
+    w.query_filtered::<Entity, Or<(With<crate::PlayerShip>, With<crate::commands::Commander>)>>().iter(w).next().expect("a command ship")
+}
+
+/// The command ship's attack click (its ordered target), as the HUD shows it.
+pub fn command_target(w: &mut World) -> Option<Entity> {
+    let e = command_ship(w);
+    w.get::<crate::ship::TargetSlot>(e).and_then(crate::ship::TargetSlot::ordered).map(|o| o.0)
+}
+
+/// An attack click of the command ship on `target` (none clears it), with no spot.
+pub fn set_command_target(w: &mut World, target: Option<Entity>) {
+    let e = command_ship(w);
+    w.entity_mut(e).insert(crate::ship::TargetSlot::order(target, None));
+}

@@ -297,7 +297,7 @@ pub fn asteroid_deaths(
     fxl: Res<FxLib>,
     (mut rng, spawn_order): (ResMut<SimRng>, Query<&crate::scenario::SpawnIndex>),
     mut sfx: MessageWriter<Sfx>,
-    mut target: ResMut<Target>,
+    mut commanders: Query<&mut crate::ship::TargetSlot, With<crate::commands::Commander>>,
 ) {
     for death in crate::scenario::in_spawn_order(&spawn_order, killed.read(), |d| d.victim) {
         let Ok((parent, tf, drift)) = rocks.get(death.victim) else { continue };
@@ -323,9 +323,11 @@ pub fn asteroid_deaths(
                 entity.insert(body);
             }
         }
-        if target.0 == Some(death.victim) {
-            target.0 = None;
-            target.1 = None;
+        // A command ship's attack click on the rock ends with it.
+        for mut slot in &mut commanders {
+            if slot.ordered().is_some_and(|o| o.0 == death.victim) {
+                slot.0 = None;
+            }
         }
         crate::queue_removal(&mut commands, death.victim);
     }

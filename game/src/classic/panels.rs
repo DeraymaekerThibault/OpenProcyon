@@ -644,7 +644,7 @@ fn clip(node: &mut Mut<Node>, img: &mut Mut<ImageNode>, art: &Sprite, top: f32, 
 fn update_guns(
     frames: Option<Res<Frames>>,
     lib: Res<Library>,
-    target: Res<combat::Target>,
+    armed: Res<combat::ArmedBank>,
     player: Single<(&Ship, &Health, &GunStates), With<PlayerShip>>,
     mut q: Query<(&GunSlot, &mut ImageNode, &mut Node)>,
 ) {
@@ -653,7 +653,7 @@ fn update_guns(
     let class = &lib.classes[ship.class];
     for (slot, mut img, mut node) in &mut q {
         let st = combat::bank_state(guns, class, health, slot.bank);
-        let armed = target.2.armed == Some(slot.bank);
+        let armed = armed.0 == Some(slot.bank);
         if slot.icon {
             let Some(first) = class.mounts.iter().position(|m| m.bank == slot.bank) else { continue };
             if let Some(art) = frames.icons.get(&combat::gun_icon(guns.gun(first))) {

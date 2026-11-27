@@ -26,7 +26,6 @@ pub fn fleet_world() -> (World, [Entity; 6]) {
     });
     w.entity_mut(ids[0]).insert(PlayerShip);
     w.insert_resource(lib);
-    w.insert_resource(Target::default());
     w.insert_resource(Orbit { yaw: 0.0, pitch: 0.0, dist: 60.0, focus: None });
     w.insert_resource(Fleets { local: "Player".into(), ..default() });
     // Fleet keys send P as an order (`commands::Kind::Promote`).
@@ -52,7 +51,7 @@ fn secondary_selection_focus_and_orders_do_not_promote_or_touch_siblings() {
     assert!(w.get::<FleetPilot>(ids[1]).unwrap().destination.is_none());
     w.get_mut::<FleetPilot>(actor).unwrap().attack(ids[5]);
     assert_eq!(w.get::<FleetPilot>(actor).unwrap().target, Some(ids[5]));
-    assert_eq!(w.resource::<Target>().0, None);
+    assert_eq!(crate::testutil::command_target(&mut w), None);
     assert_eq!(w.resource::<Fleets>().primary(), Some(ids[0]));
     w.resource_scope(|w, mut f: Mut<Fleets>| {
         assert!(!f.select(ids[4], &mut w.resource_mut::<Orbit>()));
@@ -121,7 +120,7 @@ fn formation_detach_attack_rejoin_release_and_fleet_help_are_per_secondary() {
     w.get_mut::<FleetPilot>(ids[2]).unwrap().target = None;
     fleet_help(&mut w, "Player", true); // No primary target: no invented attack.
     assert!(w.get::<FleetPilot>(ids[2]).unwrap().target.is_none());
-    w.resource_mut::<Target>().0 = Some(ids[5]);
+    crate::testutil::set_command_target(&mut w, Some(ids[5]));
     fleet_help(&mut w, "Player", true);
     assert!(ids[1..4].iter().all(|e| w.get::<FleetPilot>(*e).unwrap().target == Some(ids[5])));
     fleet_help(&mut w, "Player", false);
@@ -859,7 +858,6 @@ fn fleet_orders_as_commands_do_what_the_buttons_did() {
         });
         w.entity_mut(ids[0]).insert(PlayerShip);
         w.insert_resource(Library { classes: vec![class], guns: default(), bullets: default(), names: default(), clips: default() });
-        w.insert_resource(Target::default());
         w.insert_resource(Orbit { yaw: 0.0, pitch: 0.0, dist: 60.0, focus: None });
         w.insert_resource(Fleets { local: "Player".into(), ..default() });
         reconcile_fleets(&mut w);
@@ -869,7 +867,7 @@ fn fleet_orders_as_commands_do_what_the_buttons_did() {
     let (mut sent, again) = world();
     assert_eq!(ids, again);
     for w in [&mut direct, &mut sent] {
-        w.resource_mut::<Target>().0 = Some(ids[5]);
+        crate::testutil::set_command_target(w, Some(ids[5]));
     }
     set_formation(&mut direct, "Player", Some(Formation::Column), true);
     apply(&mut sent, crate::commands::PlayerId(0), &Kind::Formation { formation: Formation::Column, hold: true });
@@ -949,7 +947,7 @@ fn a_gunless_aggressive_ship_rams_after_taking_a_friends_target() {
     for e in [ship, mate] {
         w.entity_mut(e).insert(FleetMember("computer".into(), 0));
     }
-    w.get_mut::<crate::ship::TargetSlot>(mate).unwrap().0 = Some(crate::ship::Held { target: other, age: 0.0, aim: Vec3::ZERO, can_override: false });
+    w.get_mut::<crate::ship::TargetSlot>(mate).unwrap().0 = Some(crate::ship::Held { target: other, age: 0.0, aim: Some(Vec3::ZERO), can_override: false });
     w.entity_mut(mate).insert(crate::docking::Docker::repair(other)); // keeps the mate's target as it is
     think(&mut w);
     assert_eq!(w.get::<crate::ship::TargetSlot>(ship).and_then(crate::ship::TargetSlot::target), Some(other), "a fleet mate's target first");

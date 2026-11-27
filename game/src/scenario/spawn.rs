@@ -209,7 +209,7 @@ pub fn spawn_scenario(commands: &mut Commands, assets: &AssetServer, lib: &Libra
     } else {
         spawn_arena(commands, assets, lib, fxl, cfg, &ours);
     }
-    commands.insert_resource(Target::default());
+    commands.insert_resource(crate::combat::ArmedBank::default());
     commands.insert_resource(Outcome::Playing);
 }
 

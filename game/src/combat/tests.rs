@@ -258,14 +258,14 @@ fn hostile_island_towers_shoot_the_player_and_neutral_ones_do_not() {
     for e in old_shells {
         app.world_mut().despawn(e);
     }
-    app.insert_resource(Target::default()).add_systems(Update, (crate::tick_start.before(fire), fire.after(base_fire), shells.after(fire)));
+    app.add_systems(Update, (crate::tick_start.before(fire), fire.after(base_fire), shells.after(fire)));
     let mut lancer_fired = false;
     for mount in &lib.classes[class].mounts {
         let tower = mount.parent.unwrap();
         let aim = mount.pos;
         let world_aim = app.world().get::<Transform>(hostile).unwrap().transform_point(aim);
         app.world_mut().get_mut::<Transform>(player_ship).unwrap().translation = (world_aim + Vec3::Z * 100.0).with_y(0.0);
-        *app.world_mut().resource_mut::<Target>() = Target(Some(hostile), Some(aim), default());
+        order_target(app.world_mut(), Some(hostile), Some(aim), ManualFire::default());
         for _ in 0..1200 {
             app.world_mut().resource_mut::<Time>().advance_by(std::time::Duration::from_secs_f32(0.05));
             app.update();
@@ -389,7 +389,6 @@ fn the_command_ship_holds_fire_until_an_enemy_is_clicked() {
         .insert_resource(SimRng::new(7))
         .init_resource::<crate::scenario::Difficulty>()
         .insert_resource(Look { mesh: default(), shell: default(), enemy_shell: default() })
-        .insert_resource(Target::default())
         .init_resource::<crate::environment::Sensors>()
         .add_systems(PreUpdate, crate::environment::refresh_sensors)
         .add_systems(Update, (crate::tick_start.before(fire), fire, shells.after(fire)));
@@ -415,7 +414,7 @@ fn the_command_ship_holds_fire_until_an_enemy_is_clicked() {
         app.world_mut().query::<&Shell>().iter(app.world()).any(|s| s.shooter == me)
     };
     assert!(!run(&mut app), "no auto-engage: an enemy in range is not a target until clicked");
-    *app.world_mut().resource_mut::<Target>() = Target(Some(enemy), None, default());
+    order_target(app.world_mut(), Some(enemy), None, ManualFire::default());
     assert!(run(&mut app), "the clicked enemy is engaged");
 }
 
@@ -436,7 +435,6 @@ fn a_skirmish_computer_ship_with_a_map_script_fires_at_its_captains_target() {
         .insert_resource(SimRng::new(7))
         .init_resource::<crate::scenario::Difficulty>()
         .insert_resource(Look { mesh: default(), shell: default(), enemy_shell: default() })
-        .insert_resource(Target::default())
         .init_resource::<crate::environment::Sensors>()
         .add_systems(PreUpdate, crate::environment::refresh_sensors)
         .add_systems(Update, (crate::tick_start.before(fire), fire, shells.after(fire)));
@@ -456,7 +454,7 @@ fn a_skirmish_computer_ship_with_a_map_script_fires_at_its_captains_target() {
     // A skirmish map script tags every ship with MissionShip; there is no campaign Mission, so no rules AI sets its target.
     let enemy = spawn(&mut app, Side::Enemy, 60.0);
     app.world_mut().entity_mut(enemy).insert(crate::campaign::MissionShip { visible: true, ..default() });
-    app.world_mut().get_mut::<crate::ship::TargetSlot>(enemy).unwrap().0 = Some(crate::ship::Held { target: me, age: 0.0, aim: Vec3::ZERO, can_override: true });
+    app.world_mut().get_mut::<crate::ship::TargetSlot>(enemy).unwrap().0 = Some(crate::ship::Held { target: me, age: 0.0, aim: Some(Vec3::ZERO), can_override: true });
     let mut bullets = std::collections::HashSet::new();
     for _ in 0..200 {
         app.world_mut().resource_mut::<Time>().advance_by(std::time::Duration::from_secs_f32(0.05));
@@ -485,7 +483,6 @@ fn the_command_ship_damages_a_clicked_hostile_skirmish_base() {
         .insert_resource(SimRng::new(7))
         .init_resource::<crate::scenario::Difficulty>()
         .insert_resource(Look { mesh: default(), shell: default(), enemy_shell: default() })
-        .insert_resource(Target::default())
         .init_resource::<crate::environment::Sensors>()
         .add_systems(PreUpdate, crate::environment::refresh_sensors)
         .add_systems(Update, (crate::tick_start.before(fire), fire, shells.after(fire)));
@@ -507,7 +504,7 @@ fn the_command_ship_damages_a_clicked_hostile_skirmish_base() {
     let states = spawn_guns(&mut app.world_mut().commands(), &assets, &lib, base, class);
     app.world_mut().entity_mut(base).insert((ArmedBase { class }, Health::new(&lib.classes[class]), states));
     app.world_mut().flush();
-    *app.world_mut().resource_mut::<Target>() = Target(Some(base), None, default());
+    order_target(app.world_mut(), Some(base), None, ManualFire::default());
     for _ in 0..600 {
         app.world_mut().resource_mut::<Time>().advance_by(std::time::Duration::from_secs_f32(0.05));
         app.update();
@@ -540,7 +537,6 @@ fn a_destroyed_base_part_blasts() {
         .insert_resource(SimRng::new(7))
         .init_resource::<crate::scenario::Difficulty>()
         .insert_resource(Look { mesh: default(), shell: default(), enemy_shell: default() })
-        .insert_resource(Target::default())
         .init_resource::<crate::environment::Sensors>()
         .add_systems(PreUpdate, crate::environment::refresh_sensors)
         .init_resource::<Blasts>()
@@ -568,7 +564,7 @@ fn a_destroyed_base_part_blasts() {
             *h = h.min(1.0);
         }
     }
-    *app.world_mut().resource_mut::<Target>() = Target(Some(base), None, default());
+    order_target(app.world_mut(), Some(base), None, ManualFire::default());
     for _ in 0..600 {
         app.world_mut().resource_mut::<Time>().advance_by(std::time::Duration::from_secs_f32(0.05));
         app.update();
@@ -1533,7 +1529,6 @@ fn a_dual_mount_launches_a_shell_from_every_muzzle_on_each_shot() {
         .insert_resource(SimRng::new(7))
         .init_resource::<crate::scenario::Difficulty>()
         .insert_resource(Look { mesh: default(), shell: default(), enemy_shell: default() })
-        .insert_resource(Target::default())
         .init_resource::<crate::environment::Sensors>()
         .add_systems(PreUpdate, crate::environment::refresh_sensors)
         .add_systems(Update, (crate::tick_start.before(fire), fire, shells.after(fire)));
@@ -1551,7 +1546,7 @@ fn a_dual_mount_launches_a_shell_from_every_muzzle_on_each_shot() {
     let me = spawn(&mut app, Side::Player, 0.0);
     app.world_mut().entity_mut(me).insert(PlayerShip);
     let enemy = spawn(&mut app, Side::Enemy, 60.0);
-    *app.world_mut().resource_mut::<Target>() = Target(Some(enemy), None, default());
+    order_target(app.world_mut(), Some(enemy), None, ManualFire::default());
     let (mut dual_shots, mut single_shots) = (0, 0);
     let mut seen = std::collections::HashSet::new();
     for _ in 0..400 {
@@ -1621,7 +1616,6 @@ fn comet_lancer_burst(panic: bool) -> usize {
         .insert_resource(SimRng::new(7))
         .init_resource::<crate::scenario::Difficulty>()
         .insert_resource(Look { mesh: default(), shell: default(), enemy_shell: default() })
-        .insert_resource(Target::default())
         .init_resource::<crate::environment::Sensors>()
         .add_systems(PreUpdate, crate::environment::refresh_sensors)
         .add_systems(Update, (crate::tick_start.before(fire), fire, shells.after(fire)));
@@ -1639,7 +1633,7 @@ fn comet_lancer_burst(panic: bool) -> usize {
     let me = spawn(&mut app, "Ship_Navy_Torpedo", Side::Player, Vec3::ZERO);
     app.world_mut().entity_mut(me).insert(PlayerShip);
     let enemy = spawn(&mut app, "Ship_Pirate_Sloop", Side::Enemy, Vec3::new(10.0, 0.0, -60.0));
-    *app.world_mut().resource_mut::<Target>() = Target((!panic).then_some(enemy), None, GroundFire { panic, ..default() });
+    order_target(app.world_mut(), (!panic).then_some(enemy), None, ManualFire { panic, ..default() });
     let (mut bolts, mut first) = (std::collections::HashSet::new(), None);
     // The first burst (0.75 s from first to last bolt), not the next (3.5 s reload).
     for i in 0..200 {
@@ -1846,4 +1840,10 @@ fn a_computer_ship_shoots_animals_hostile_to_its_own_side_not_the_humans() {
     table.set(reds, dragons, true);
     assert!(!hit(1, reds, &table), "allied with its side: never");
     assert!(hit(2, reds, &table) && hit(2, Side::Player, &table), "a rock is anyone's");
+}
+
+/// The command ship's attack click (`spot` in the target's frame) and manual fire, as its player's orders leave them.
+fn order_target(w: &mut World, target: Option<Entity>, spot: Option<Vec3>, fire: ManualFire) {
+    let e = w.query_filtered::<Entity, With<crate::PlayerShip>>().single(w).expect("a command ship");
+    w.entity_mut(e).insert((crate::ship::TargetSlot::order(target, spot), fire));
 }

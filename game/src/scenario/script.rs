@@ -3,15 +3,16 @@
 
 use bevy::prelude::*;
 
+use crate::Orbit;
+use crate::ship::TargetSlot;
 use crate::smoke::Script;
 use crate::{Config, EngineOrder, Health, Ship, Side, lifeboats};
-use crate::{Orbit, Target};
 
 /// Scripted runs: `pause` / `pause-restart` check the Pause key, `speedtest` cycles the engine order, `course` sets waypoints,
 /// `target` / `fxtest` pick the first enemy so the target reticle can be screenshotted (`fxtest`: so it fires).
 pub fn scripted_steps(
     cfg: Res<Config>,
-    mut target: ResMut<Target>,
+    mut command: Query<&mut TargetSlot, With<crate::PlayerShip>>,
     mut orbit: ResMut<Orbit>,
     mut ships: Query<(Entity, &mut Ship)>,
     mut keys: ResMut<ButtonInput<KeyCode>>,
@@ -63,10 +64,14 @@ pub fn scripted_steps(
         }
     }
     // fxtest clicks the enemy too: the command ship only fires at a clicked target.
-    if matches!(cfg.script, Some(Script::Target | Script::FxTest)) && cfg.frame >= 5 && target.0.is_none() {
-        target.0 = ships.iter().find(|(_, s)| s.side == Side::Enemy).map(|(e, _)| e);
+    if matches!(cfg.script, Some(Script::Target | Script::FxTest))
+        && cfg.frame >= 5
+        && let Ok(mut slot) = command.single_mut()
+        && slot.ordered().is_none()
+    {
+        *slot = TargetSlot::order(ships.iter().find(|(_, s)| s.side == Side::Enemy).map(|(e, _)| e), None);
         if cfg.script == Some(Script::Target) {
-            orbit.focus = target.0; // screenshots look at the target
+            orbit.focus = slot.target(); // screenshots look at the target
         }
     }
 }

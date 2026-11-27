@@ -29,7 +29,7 @@ pub use report::{path_arg as report_path_arg, set_path as set_report_path, write
 
 use crate::campaign::{Mission, MissionBase, MissionShip};
 
-use crate::combat::{Asteroid, Destroyed, Fired, Health, Hit, Library, Target};
+use crate::combat::{Asteroid, Destroyed, Fired, Health, Hit, Library};
 
 use crate::docking::DockMsg;
 
