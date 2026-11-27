@@ -1234,3 +1234,18 @@ fn attack(w: &mut World, e: Entity, target: Entity) {
     w.get_mut::<FleetPilot>(e).unwrap().attack();
     *w.get_mut::<TargetSlot>(e).unwrap() = TargetSlot::order(Some(target), None);
 }
+
+/// The original's promotion touches neither ship's target (procyon-re `evidence/ai-captain/`, stage 2 Read): the old command ship keeps
+/// its attack click, still ordered, and fights it as a computer captain; the new one keeps whatever its captain held.
+#[test]
+fn promotion_leaves_both_target_slots_alone() {
+    let (mut w, ids) = fleet_world();
+    crate::testutil::set_command_target(&mut w, Some(ids[5]));
+    let picked = Held { target: ids[5], age: 2.0, aim: Some(Vec3::Y), can_override: true };
+    w.get_mut::<TargetSlot>(ids[1]).unwrap().0 = Some(picked);
+    w.get_mut::<crate::combat::ManualFire>(ids[0]).unwrap().panic = true;
+    assert!(promote(&mut w, crate::commands::PlayerId(0), ids[1], false));
+    assert_eq!(w.get::<TargetSlot>(ids[0]).unwrap().ordered(), Some((ids[5], None)), "the old command ship keeps its click, ordered");
+    assert_eq!(w.get::<TargetSlot>(ids[1]).unwrap().0, Some(picked), "the new one keeps its captain's pick");
+    assert_eq!(*w.get::<crate::combat::ManualFire>(ids[1]).unwrap(), crate::combat::ManualFire::default());
+}

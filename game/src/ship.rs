@@ -987,11 +987,10 @@ pub fn reconcile_fleets(world: &mut World) {
                 world.entity_mut(e).remove::<Commander>();
             }
             if let Some(e) = fleets.groups.get(owner).and_then(|f| f.members.first()).copied() {
-                let target = world.get::<TargetSlot>(e).and_then(TargetSlot::ordered).map(|o| o.0);
                 if let Some(mut s) = world.get_mut::<Ship>(e) {
                     s.cap = cap;
                 }
-                install_primary(world, e, *player, target);
+                install_primary(world, e, *player);
             }
         }
         if fleets.selected.is_none_or(|e| !fleets.roster().contains(&e)) {
@@ -1054,25 +1053,21 @@ pub fn set_formation(world: &mut World, owner: &str, kind: Option<Formation>, ho
     }
 }
 
-/// `candidate` becomes `player`'s command ship (`Commander`), at the speed it sails now, with `target` as its attack order and no
-/// manual fire pending. PROVISIONAL (#369 C, step 2): only the local player's hand-over sets them, as when the manual target was
-/// one global; the original's promotion touches neither ship's target.
-fn install_primary(world: &mut World, candidate: Entity, player: PlayerId, target: Option<Entity>) {
+/// `candidate` becomes `player`'s command ship (`Commander`), at the speed it sails now, with no manual fire pending. Its target slot is
+/// left as it is: the original's promotion touches neither ship's target, it changes captains and clears the hold flags (procyon-re
+/// `evidence/ai-captain/`, stage 2 Read).
+fn install_primary(world: &mut World, candidate: Entity, player: PlayerId) {
     let max = world.get::<Ship>(candidate).zip(world.get::<Health>(candidate)).map_or(0.0, |(s, h)| max_speed(s, &world.resource::<Library>().classes[s.class], h));
     if let Some(mut s) = world.get_mut::<Ship>(candidate) {
         s.throttle = Some(speed_fraction(s.speed, max));
         s.order = EngineOrder::Full;
     }
-    world.entity_mut(candidate).insert((Commander(player), FleetPilot::default()));
+    world.entity_mut(candidate).insert((Commander(player), FleetPilot::default(), combat::ManualFire::default()));
     if let Some(mut m) = world.get_mut::<campaign::MissionShip>(candidate) {
         m.hold_fire = false;
         m.ordered = None;
         m.attack.clear();
     }
-    if player != crate::commands::local_player(world) {
-        return;
-    }
-    world.entity_mut(candidate).insert((TargetSlot::order(target, None), combat::ManualFire::default()));
 }
 
 /// P (Change Primary): `candidate` becomes `player`'s command ship, its old one a captain again (skirmish only, unless `scripted`: a
@@ -1094,12 +1089,6 @@ pub fn promote(world: &mut World, player: PlayerId, candidate: Entity, scripted:
         return false;
     }
     let old: Vec<Entity> = world.query::<(Entity, &Commander)>().iter(world).filter(|(_, c)| c.0 == player).map(|(e, _)| e).collect();
-    // The local player's manual target is its command ship's ordered slot; another player's goes with the captains' (PROVISIONAL
-    // until step 2 of #369 C, which stops promotion moving targets).
-    let local_manual = old.first().and_then(|e| world.get::<TargetSlot>(*e)).and_then(TargetSlot::ordered).map(|o| o.0);
-    let manual = |world: &World, e: Entity| if local { local_manual } else { world.get::<TargetSlot>(e).and_then(TargetSlot::ordered).map(|o| o.0) };
-    let next_target = if old.contains(&candidate) { manual(world, candidate) } else { world.get::<TargetSlot>(candidate).and_then(TargetSlot::ordered).map(|o| o.0) };
-    let old_target = old.first().map_or_else(|| manual(world, candidate), |e| manual(world, *e));
     let mut retired = Vec::new();
     for e in old {
         world.entity_mut(e).remove::<Commander>();
@@ -1111,11 +1100,8 @@ pub fn promote(world: &mut World, player: PlayerId, candidate: Entity, scripted:
         if let Some(mut p) = world.get_mut::<FleetPilot>(e) {
             p.hold = false;
         }
-        if let Some(mut s) = world.get_mut::<TargetSlot>(e) {
-            *s = TargetSlot::order(old_target, None);
-        }
     }
-    install_primary(world, candidate, player, next_target);
+    install_primary(world, candidate, player);
     let f = {
         let mut fleets = world.resource_mut::<Fleets>();
         let f = fleets.groups.get_mut(&owner).unwrap();
