@@ -418,6 +418,56 @@ fn the_command_ship_holds_fire_until_an_enemy_is_clicked() {
     assert!(run(&mut app), "the clicked enemy is engaged");
 }
 
+/// A human's secondary fires at its captain's target, as a computer ship does (the original gives it the computer captain's pick,
+/// procyon-re Q4), not at the nearest enemy: here a nearer enemy on its other beam is left alone.
+#[test]
+#[ignore = "needs imported assets"]
+fn a_humans_secondary_fires_at_its_captains_target_not_the_nearest_enemy() {
+    let mut app = asset_app();
+    app.add_message::<Sfx>()
+        .add_message::<Fired>()
+        .add_message::<Hit>()
+        .add_message::<Destroyed>()
+        .add_message::<Detonate>()
+        .add_message::<Shoot>()
+        .add_message::<crate::decals::Scar>()
+        .init_resource::<Time>()
+        .init_resource::<FxLib>()
+        .insert_resource(crate::testutil::lib())
+        .insert_resource(SimRng::new(7))
+        .init_resource::<crate::scenario::Difficulty>()
+        .insert_resource(Look { mesh: default(), shell: default(), enemy_shell: default() })
+        .init_resource::<crate::environment::Sensors>()
+        .add_systems(PreUpdate, crate::environment::refresh_sensors)
+        .add_systems(Update, (crate::tick_start.before(fire), fire, shells.after(fire)));
+    let assets = app.world().resource::<AssetServer>().clone();
+    let lib = crate::testutil::lib();
+    let c = lib.index("Ship_Navy_Frigate");
+    let ship = |side| Ship { heading: 0.0, ..Ship::new(c, side) };
+    let spawn = |app: &mut App, side, x: f32| {
+        let e = app.world_mut().spawn((Transform::from_xyz(x, 0.0, 0.0), ship(side), Health::new(&lib.classes[c]), Fires::default())).id();
+        let states = spawn_guns(&mut app.world_mut().commands(), &assets, &lib, e, c);
+        app.world_mut().entity_mut(e).insert(states);
+        app.world_mut().flush();
+        e
+    };
+    // The human's command ship far off, its secondary between a near enemy (port beam) and its captain's target (starboard).
+    let command = spawn(&mut app, Side::Player, 0.0);
+    app.world_mut().entity_mut(command).insert(crate::commands::Commander(crate::commands::PlayerId(0)));
+    let secondary = spawn(&mut app, Side::Player, 400.0);
+    let near = spawn(&mut app, Side::Enemy, 350.0);
+    let target = spawn(&mut app, Side::Enemy, 470.0);
+    app.world_mut().get_mut::<crate::ship::TargetSlot>(secondary).unwrap().0 = Some(crate::ship::Held { target, age: 0.0, aim: Some(Vec3::ZERO), can_override: true });
+    let mut aimed = std::collections::HashSet::new();
+    for _ in 0..200 {
+        app.world_mut().resource_mut::<Time>().advance_by(std::time::Duration::from_secs_f32(0.05));
+        app.update();
+        aimed.extend(app.world_mut().query::<&Shell>().iter(app.world()).filter(|s| s.shooter == secondary).filter_map(|s| s.target));
+    }
+    assert!(aimed.contains(&target), "the secondary engages its captain's target: {aimed:?}");
+    assert!(!aimed.contains(&near), "and leaves the nearer enemy alone");
+}
+
 #[test]
 #[ignore = "needs imported assets"]
 fn a_skirmish_computer_ship_with_a_map_script_fires_at_its_captains_target() {

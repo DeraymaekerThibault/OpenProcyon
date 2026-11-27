@@ -466,25 +466,22 @@ pub(super) fn fire(
         // A command ship's attack click (its ordered target) and manual fire orders.
         let own = if primary { captains.get(me).ok().and_then(crate::ship::TargetSlot::ordered).map(|o| o.0) } else { None };
         let fire = if primary { manual_fire.get(me).ok().copied().unwrap_or_default() } else { ManualFire::default() };
-        // Player's command ship: only the clicked target (retail: direct-fire guns need an enemy click or panic fire). Its other
-        // ships: the nearest living enemy. Enemies: their captain's target.
+        // A human's command ship: only the clicked target (retail: direct-fire guns need an enemy click or panic fire). Every other
+        // ship, a human's secondaries and allied computer fleets included, fires at its captain's target: the original gives a
+        // human's secondaries the computer captain's pick (procyon-re `evidence/ai-captain/`, Q4), not a nearest-enemy rule.
         let ship_target = if pilot.is_some_and(|p| p.hold_fire) || mission.is_some_and(|m| m.hold_fire) {
             None
         } else if let Some(t) = pilot.filter(|_| !primary).and(captains.get(me).ok()).and_then(crate::ship::TargetSlot::ordered).map(|o| o.0) {
             seen.iter().find(|c| c.entity == t && table.hostile(c.side, ship.side) && c.visible).map(Contact::aim).or_else(|| rock(t, ship.side, false))
-        } else if let (Side::Player, Some(r)) = (ship.side, own.and_then(|t| rock(t, ship.side, true))) {
+        } else if let (true, Some(r)) = (primary, own.and_then(|t| rock(t, ship.side, true))) {
             Some(r) // selected space object (asteroid or whale)
         } else {
-            match ship.side {
-                Side::Player => seen
-                    .iter()
-                    .find(|c| primary && Some(c.entity) == own && table.targetable(ship.side, c.side, true) && c.visible)
-                    .or_else(|| crate::nearest(seen.iter().filter(|c| !primary && !c.with_human && c.visible), tf.translation, |c| c.aim_point))
-                    .map(Contact::aim),
+            match primary {
+                true => seen.iter().find(|c| Some(c.entity) == own && table.targetable(ship.side, c.side, true) && c.visible).map(Contact::aim),
                 // Computer ships fire at their captain's target (ship::TargetSlot): a ship, a base or an animal hostile to their own
                 // side, or a rock the script ordered attacked; without one, the player ship when it is hostile.
                 // A ship target is aimed at the section its captain picked on choosing it (ship::TargetSlot), not the hull's centre.
-                _ => match captains.get(me).ok().and_then(crate::ship::TargetSlot::aim) {
+                false => match captains.get(me).ok().and_then(crate::ship::TargetSlot::aim) {
                     Some((t, local)) => seen
                         .iter()
                         .find(|c| c.entity == t && c.visible && table.hostile(c.side, ship.side))
