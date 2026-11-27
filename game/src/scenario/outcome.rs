@@ -119,6 +119,9 @@ pub fn outcome(
         return;
     }
     let mut end_message = None;
+    // No map rules (the test arena): the battle is the local player's, lost with its command ship.
+    let me = rules.5.as_deref().map_or_else(crate::commands::PlayerId::default, |p| p.local);
+    let lost = player.iter().find(|(_, c)| c.0 == me).is_none_or(|(h, _)| h.destroyed);
     let new = if let (Some(victory), Some(lib)) = (&rules.0, &rules.1) {
         // The map's own rules decide: a base falling, the human fleet or every ship lost.
         let states: Vec<victory::ShipState> = all.iter().map(state).chain(gone.iter().cloned()).collect();
@@ -131,11 +134,7 @@ pub fn outcome(
         let decided = victory.decide_with_message(&snap).or_else(|| rules.3.as_ref().and_then(|s| s.script.end.as_ref()).map(|end| victory.decide_end(&snap, end)));
         end_message = decided.as_ref().and_then(|d| d.1.clone());
         decided.map_or(Outcome::Playing, |d| d.0)
-    } else if {
-        // No map rules (the test arena): the battle is the local player's, lost with its command ship.
-        let me = rules.5.as_deref().map_or_else(crate::commands::PlayerId::default, |p| p.local);
-        player.iter().find(|(_, c)| c.0 == me).is_none_or(|(h, _)| h.destroyed)
-    } {
+    } else if lost {
         Outcome::Defeat
     } else if enemies().count() + gone.iter().filter(|g| !table.with_human(g.side)).count() > 0 && enemies().all(|h| h.destroyed) {
         Outcome::Victory
