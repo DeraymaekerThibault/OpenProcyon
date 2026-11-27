@@ -368,7 +368,7 @@ fn menu(
     scene: MenuScene,
     boarding: MenuBoarding,
     mut bar: ResMut<BarMenuRequest>,
-    mut target: ResMut<crate::combat::Target>,
+    mut armed: ResMut<crate::combat::ArmedBank>,
     window: Single<&Window, With<PrimaryWindow>>,
     cam: Single<(&Camera, &GlobalTransform)>,
     hud: Option<Res<HudData>>,
@@ -456,7 +456,7 @@ fn menu(
             return;
         }
         // A right click while a lob bank is armed only cancels it (no menu).
-        if target.2.armed.take().is_some() {
+        if armed.0.take().is_some() {
             sfx.write(Sfx::ui("HUD_LobWeapon_Cancel"));
             return;
         }
@@ -611,7 +611,7 @@ fn context_cursor(
     fleets: Res<crate::ship::Fleets>,
     docks: Dockees,
     mut hover: ResMut<HoverCursor>,
-    (target, guns, mut lob): (Res<crate::combat::Target>, Query<&crate::combat::GunStates>, ResMut<crate::combat::LobAim>),
+    (armed, guns, mut lob): (Res<crate::combat::ArmedBank>, Query<&crate::combat::GunStates>, ResMut<crate::combat::LobAim>),
 ) {
     let mut aim = None;
     let want = (|| {
@@ -624,7 +624,7 @@ fn context_cursor(
         let ray = crate::view::cursor_ray(camera, gt, cursor)?;
         let actor = fleets.selected?;
         // Armed lob bank: its cursor shows over everything (ships, bases, sea) while the pointer is on the sea plane.
-        if let (true, Some(bank), Ok((_, tf, sh, health)), Ok(g)) = (fleets.direct(), target.2.armed, ships.get(actor), guns.get(actor)) {
+        if let (true, Some(bank), Ok((_, tf, sh, health)), Ok(g)) = (fleets.direct(), armed.0, ships.get(actor), guns.get(actor)) {
             let class = &lib.classes[sh.class];
             let kind = class.mounts.iter().enumerate().find(|(_, m)| m.bank == bank).and_then(|(i, _)| crate::combat::lob_kind(lib.guns[g.gun(i)].bullet_family));
             let point = crate::view::ray_on_sea(ray);

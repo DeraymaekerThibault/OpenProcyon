@@ -4,8 +4,7 @@ use crate::Nearest;
 use crate::bindings::Act;
 use crate::commands::{Engine, Kind, Orders};
 use crate::{
-    GunStates, Health, Library, Outcome, PlayerShip, Ship, Target, audio, bindings, briefing, campaign, combat, course, docking, environment, menu, panels, rules, ship,
-    toggle_pause,
+    GunStates, Health, Library, Outcome, PlayerShip, Ship, audio, bindings, briefing, campaign, combat, course, docking, environment, menu, panels, rules, ship, toggle_pause,
 };
 use bevy::input::mouse::AccumulatedMouseMotion;
 use bevy::input::mouse::AccumulatedMouseScroll;
@@ -144,7 +143,7 @@ struct ClickScene<'a> {
 }
 
 /// Speed, course and order keys of the selected ship.
-fn keyboard_orders(c: &Controlled, keys: &ButtonInput<KeyCode>, pointer: &mut Pointer, vtime: &mut Time<Virtual>, orders: &mut Orders) {
+fn keyboard_orders(c: &Controlled, keys: &ButtonInput<KeyCode>, pointer: &mut Pointer, vtime: &mut Time<Virtual>, armed: &mut combat::ArmedBank, orders: &mut Orders) {
     let b = &pointer.binds;
     let direct = c.direct;
     // Engine orders: +/- step through All Stop .. Emergency.
@@ -162,6 +161,9 @@ fn keyboard_orders(c: &Controlled, keys: &ButtonInput<KeyCode>, pointer: &mut Po
         pointer.plot.pending.clear();
     } else if keys.just_pressed(KeyCode::Backspace) {
         orders.send(Kind::Cancel { ship: c.actor });
+        if c.direct {
+            armed.0 = None; // the cancel drops a lobbed shot; the armed bank is the view's
+        }
     }
     if direct && keys.just_pressed(KeyCode::KeyC) {
         orders.send(Kind::Target { ship: c.actor, target: None, spot: None });
@@ -188,9 +190,9 @@ pub fn project(camera: &Camera, gt: &GlobalTransform, world: Vec3) -> Option<Vec
 }
 
 /// An armed indirect bank takes this click as its shot target (a click with no ground point under it keeps the bank armed).
-fn armed_shot(c: &Controlled, ray: Ray3d, target: &mut Target, lob: &combat::LobAim, sfx: &mut MessageWriter<audio::Sfx>, orders: &mut Orders) -> bool {
-    let (true, Some(bank), Some(point)) = (c.direct, target.2.armed, ray_on_sea(ray)) else { return false };
-    target.2.armed = None;
+fn armed_shot(c: &Controlled, ray: Ray3d, armed: &mut combat::ArmedBank, lob: &combat::LobAim, sfx: &mut MessageWriter<audio::Sfx>, orders: &mut Orders) -> bool {
+    let (true, Some(bank), Some(point)) = (c.direct, armed.0, ray_on_sea(ray)) else { return false };
+    armed.0 = None;
     orders.send(Kind::Lob { ship: c.actor, shot: Some((bank, point)) });
     // Retail plays a sound only for gravity charges (PROVISIONAL: star/nova silent as decoded, unconfirmed in play)
     if let Some(a) = lob.0.filter(|a| a.kind == crate::combat::LobKind::GravCharge) {
@@ -273,7 +275,7 @@ pub fn input(
     ships: Query<(Entity, &Ship, &GlobalTransform, &Health, Option<&campaign::MissionShip>)>,
     time: Res<Time<Real>>,
     lib: Res<Library>,
-    mut target: ResMut<Target>,
+    mut armed: ResMut<combat::ArmedBank>,
     mut vtime: ResMut<Time<Virtual>>,
     focus: panels::UiFocus,
     docks: docking::Dockees,
@@ -291,14 +293,14 @@ pub fn input(
         // The focus's bounding radius sets the retail zoom limits (collision sphere for the mesh bounds, PROVISIONAL; others 0).
         let radius = orbit.focus.or(Some(actor)).and_then(|e| ships.get(e).ok()).map_or(0.0, |(_, s, ..)| lib.classes[s.class].sphere.1);
         camera_input(&mouse, &keys, &pointer, &mut orbit, time.delta_secs(), radius);
-        keyboard_orders(&c, &keys, &mut pointer, &mut vtime, &mut orders);
+        keyboard_orders(&c, &keys, &mut pointer, &mut vtime, &mut armed, &mut orders);
         // Left click: an enemy ship selects it as target, otherwise set a destination on the plane (Shift appends).
         if clicking {
             let (camera, gt) = *cam;
             if let Some(ray) = window.cursor_position().and_then(|cursor| cursor_ray(camera, gt, cursor)) {
                 let scene =
                     ClickScene { keys: &keys, lib: &lib, sensors: &sensors, mission: mission.as_deref(), others: &others, objects: &objects, player_pos: player_tf.translation() };
-                if !armed_shot(&c, ray, &mut target, &lob, &mut sfx, &mut orders) && !select_own(ray, &scene, &mut pointer.fleets, &mut orbit) {
+                if !armed_shot(&c, ray, &mut armed, &lob, &mut sfx, &mut orders) && !select_own(ray, &scene, &mut pointer.fleets, &mut orbit) {
                     left_click(&c, ray, &scene, &mut pointer, &docks, &mut orders);
                 }
             }
@@ -562,12 +564,11 @@ pub fn camera(
 pub fn hud(
     lib: Res<Library>,
     out: Res<Outcome>,
-    target: Res<Target>,
-    player: Single<(&Ship, &Health, &GunStates), With<PlayerShip>>,
+    player: Single<(&Ship, &Health, &GunStates, &crate::ship::TargetSlot), With<PlayerShip>>,
     others: Query<(&Ship, &Health), Without<PlayerShip>>,
     mut texts: Query<(&Slot, &mut Text)>,
 ) {
-    let (ship, health, guns) = *player;
+    let (ship, health, guns, slot) = *player;
     let class = &lib.classes[ship.class];
     let (ready, total) = combat::guns_ready(guns, class, health);
     let living = others.iter().filter(|(_, h)| !h.destroyed).count();
@@ -585,7 +586,7 @@ pub fn hud(
         class.core_hp,
         combat::section_lines(class, health),
     );
-    let right = match target.0.and_then(|e| others.get(e).ok()) {
+    let right = match slot.ordered().and_then(|(e, _)| others.get(e).ok()) {
         Some((s, h)) => {
             let c = &lib.classes[s.class];
             format!("TARGET {}{}\nCore {:.0}/{:.0}\n{}", c.name, if h.destroyed { " (destroyed)" } else { "" }, h.core.max(0.0), c.core_hp, combat::section_lines(c, h))
@@ -679,6 +680,7 @@ mod camera_tests {
         }
         world.resource_mut::<ship::Fleets>().selected = Some(ids[0]);
         world.init_resource::<crate::commands::Outbox>();
+        world.init_resource::<combat::ArmedBank>();
         world.spawn((Window::default(), PrimaryWindow));
         world.spawn((Camera::default(), GlobalTransform::default()));
         world.init_resource::<ButtonInput<MouseButton>>();
@@ -779,6 +781,7 @@ mod camera_tests {
         world.init_resource::<Messages<docking::DockMsg>>();
         world.init_resource::<Messages<audio::Sfx>>();
         world.init_resource::<combat::LobAim>();
+        world.init_resource::<combat::ArmedBank>();
         world.resource_mut::<ButtonInput<KeyCode>>().press(KeyCode::ArrowLeft);
         world.resource_mut::<ButtonInput<KeyCode>>().press(KeyCode::ArrowUp);
         let mut real = Time::<Real>::default();

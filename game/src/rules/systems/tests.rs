@@ -44,7 +44,7 @@ fn script_app(map: &str) -> App {
         .init_resource::<ButtonInput<KeyCode>>()
         .init_resource::<RuleInput>()
         .init_resource::<RuleWorld>()
-        .init_resource::<Target>()
+        .init_resource::<crate::combat::ArmedBank>()
         .init_resource::<crate::bindings::Bindings>()
         .init_resource::<crate::campaign::CampaignPoints>()
         .init_resource::<crate::nebula::StormShift>()
@@ -236,7 +236,6 @@ fn mission_ships_halt_when_their_script_route_runs_out() {
         .init_resource::<Time>()
         .init_resource::<crate::environment::Sensors>()
         .add_systems(PreUpdate, crate::environment::refresh_sensors)
-        .init_resource::<crate::ship::CaptainTargets>()
         .add_systems(Update, mission_ai);
     let ship = Ship { heading: 0.0, speed: 5.0, order: EngineOrder::Full, ..Ship::new(0, Side::Player) };
     let n = lib.classes[0].sections.len();
@@ -319,7 +318,6 @@ fn ai_world() -> App {
         .init_resource::<Time>()
         .init_resource::<crate::environment::Sensors>()
         .add_systems(PreUpdate, crate::environment::refresh_sensors)
-        .init_resource::<crate::ship::CaptainTargets>()
         .add_systems(Update, mission_ai);
     app
 }
@@ -674,7 +672,7 @@ use crate::rules::skirmish::SkirmishScript;
 fn console_battle() -> App {
     let mut app = App::new();
     app.init_resource::<Time>()
-        .init_resource::<Target>()
+        .init_resource::<crate::combat::ArmedBank>()
         .init_resource::<RuleWorld>()
         .init_resource::<crate::campaign::CampaignPoints>()
         .init_resource::<crate::nebula::StormShift>()
@@ -750,7 +748,7 @@ fn ship_commands_run_in_a_battle_with_no_mission_and_no_script() {
     assert!(app.world().resource::<Cheats>().god);
     assert_eq!(app.world().get::<MissionShip>(hero).unwrap().invuln, 1.0);
     assert_eq!(app.world().get::<MissionShip>(raider).unwrap().owner.as_str(), "player1");
-    app.world_mut().resource_mut::<Target>().0 = Some(raider);
+    crate::testutil::set_command_target(app.world_mut(), Some(raider));
     say(&mut app, &["kill"]);
     app.update();
     assert!(app.world().get::<Health>(raider).unwrap().destroyed, "kill reaches the target");

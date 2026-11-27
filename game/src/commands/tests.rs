@@ -53,7 +53,7 @@ fn fleet(app: &mut App) -> (Entity, Entity, Entity) {
     let mut fleets = crate::ship::Fleets::default();
     fleets.groups.insert(fleets.local.clone(), crate::ship::Fleet { members: vec![me, captain], ..default() });
     w.insert_resource(fleets);
-    w.init_resource::<crate::combat::Target>();
+    w.init_resource::<crate::combat::ArmedBank>();
     (me, captain, enemy)
 }
 
@@ -82,18 +82,17 @@ fn a_target_is_the_players_own_on_the_command_ship_and_an_attack_order_on_a_capt
     let mut app = battle();
     let (me, captain, enemy) = fleet(&mut app);
     loaded(&mut app);
-    app.world_mut().resource_mut::<crate::combat::Target>().2.panic = true;
+    manual_fire_mut(&mut app, me).panic = true;
     send(&mut app, Kind::Target { ship: me, target: Some(enemy), spot: Some(Vec3::X) });
     send(&mut app, Kind::Target { ship: captain, target: Some(enemy), spot: None });
     frame(&mut app, 40);
-    let t = app.world().resource::<crate::combat::Target>();
-    assert_eq!((t.0, t.1, t.2.panic), (Some(enemy), Some(Vec3::X), false), "the player's target and spot; a retarget ends panic fire");
-    assert_eq!(app.world().get::<crate::ship::FleetPilot>(captain).unwrap().target, Some(enemy));
+    assert_eq!((ordered(&app, me), manual_fire(&app, me).panic), (Some((enemy, Some(Vec3::X))), false), "the player's target and spot; a retarget ends panic fire");
+    assert_eq!(ordered(&app, captain).map(|o| o.0), Some(enemy));
     send(&mut app, Kind::Target { ship: me, target: None, spot: None });
     send(&mut app, Kind::Target { ship: captain, target: None, spot: None });
     frame(&mut app, 40);
-    assert_eq!(app.world().resource::<crate::combat::Target>().0, None, "C clears the command ship's target");
-    assert_eq!(app.world().get::<crate::ship::FleetPilot>(captain).unwrap().target, Some(enemy), "a captain keeps its attack order");
+    assert_eq!(ordered(&app, me), None, "C clears the command ship's target");
+    assert_eq!(ordered(&app, captain).map(|o| o.0), Some(enemy), "a captain keeps its attack order");
 }
 
 /// A click on water: the command ship sails there (Shift appends, a stopped ship goes to light-green Full), a captain is ordered
@@ -133,23 +132,41 @@ fn move_course_and_cancel_orders_do_what_the_clicks_and_keys_did() {
     send(&mut app, Kind::Course { ship: me, points: vec![a], release: true });
     frame(&mut app, 40);
     assert!(app.world().get::<crate::ship::HoldPosition>(me).is_none(), "the closing click ends it");
-    // Backspace: the command ship keeps its engines and loses the armed shot; a captain stops and forgets its orders.
-    {
-        let mut t = app.world_mut().resource_mut::<crate::combat::Target>();
-        t.2.armed = Some(1);
-        t.2.shot = Some((1, Vec3::ONE));
-    }
-    app.world_mut().get_mut::<crate::ship::FleetPilot>(captain).unwrap().attack(enemy);
+    // Backspace: the command ship keeps its engines and loses the lobbed shot; a captain stops and forgets its orders.
+    manual_fire_mut(&mut app, me).shot = Some((1, Vec3::ONE));
+    attack(&mut app, captain, enemy);
     app.world_mut().get_mut::<crate::ship::FleetPilot>(captain).unwrap().hold = true;
     app.world_mut().get_mut::<Ship>(captain).unwrap().order = EngineOrder::Full;
     send(&mut app, Kind::Cancel { ship: me });
     send(&mut app, Kind::Cancel { ship: captain });
     frame(&mut app, 40);
-    let t = app.world().resource::<crate::combat::Target>();
-    assert_eq!((t.2.armed, t.2.shot), (None, None));
+    assert_eq!(manual_fire(&app, me).shot, None);
     assert_eq!((ship(&app, me).waypoints.len(), ship(&app, me).order), (0, EngineOrder::Full));
     let p = app.world().get::<crate::ship::FleetPilot>(captain).unwrap();
-    assert_eq!((p.destination, p.target, p.hold, ship(&app, captain).order), (None, None, false, EngineOrder::Stop));
+    assert_eq!((p.destination, p.hold, ship(&app, captain).order), (None, false, EngineOrder::Stop));
+    assert_eq!(ordered(&app, captain), None, "the cancel clears the captain's target");
+}
+
+/// The original's slot rules for a captain (procyon-re `evidence/ai-captain/`): a move order leaves its target, Stop clears it; the
+/// command ship keeps its attack click through Stop (PROVISIONAL, `commands::clear_target`).
+#[test]
+fn a_move_keeps_a_captains_target_and_stop_clears_it() {
+    let mut app = battle();
+    app.add_message::<crate::docking::DockMsg>();
+    let (me, captain, enemy) = fleet(&mut app);
+    loaded(&mut app);
+    send(&mut app, Kind::Target { ship: captain, target: Some(enemy), spot: Some(Vec3::Y) });
+    send(&mut app, Kind::Target { ship: me, target: Some(enemy), spot: None });
+    frame(&mut app, 40);
+    assert_eq!(ordered(&app, captain), Some((enemy, Some(Vec3::Y))), "the click's spot is kept with the order");
+    send(&mut app, Kind::Move { ship: captain, to: Vec3::new(50.0, 0.0, 50.0), append: false });
+    frame(&mut app, 40);
+    assert_eq!(ordered(&app, captain).map(|o| o.0), Some(enemy), "a move order leaves the target");
+    send(&mut app, Kind::Stop { ship: captain });
+    send(&mut app, Kind::Stop { ship: me });
+    frame(&mut app, 40);
+    assert_eq!(ordered(&app, captain), None, "Stop clears it");
+    assert_eq!(ordered(&app, me).map(|o| o.0), Some(enemy));
 }
 
 /// The right-click menu's Stop, Hold and Cloak.
@@ -177,7 +194,7 @@ fn stop_hold_and_cloak_do_what_the_menu_did() {
     assert_eq!((p.destination, p.hold), (None, true), "Stop leaves the formation hold");
     let msgs: Vec<_> = app.world_mut().resource_mut::<Messages<crate::docking::DockMsg>>().drain().collect();
     assert_eq!(msgs.len(), 2, "Stop also ends a dock routine");
-    app.world_mut().get_mut::<crate::ship::FleetPilot>(captain).unwrap().attack(enemy);
+    attack(&mut app, captain, enemy);
     app.world_mut().get_mut::<crate::ship::FleetPilot>(captain).unwrap().move_to(Vec3::X);
     app.world_mut().get_mut::<Ship>(captain).unwrap().order = EngineOrder::Full;
     send(&mut app, Kind::Hold { ship: captain, on: true });
@@ -247,16 +264,15 @@ fn panic_fire_and_lob_shots_are_the_command_ships() {
     send(&mut app, Kind::PanicFire { ship: captain });
     send(&mut app, Kind::Lob { ship: captain, shot: Some((2, Vec3::X)) });
     frame(&mut app, 40);
-    let t = app.world().resource::<crate::combat::Target>();
-    assert_eq!((t.2.panic, t.2.shot), (false, None), "a captain has no panic button or armed bank");
+    assert_eq!(manual_fire(&app, me), crate::combat::ManualFire::default(), "a captain has no panic button or armed bank");
+    assert!(app.world().get::<crate::combat::ManualFire>(captain).is_none());
     send(&mut app, Kind::PanicFire { ship: me });
     send(&mut app, Kind::Lob { ship: me, shot: Some((2, Vec3::X)) });
     frame(&mut app, 40);
-    let t = app.world().resource::<crate::combat::Target>();
-    assert_eq!((t.2.panic, t.2.shot), (true, Some((2, Vec3::X))));
+    assert_eq!((manual_fire(&app, me).panic, manual_fire(&app, me).shot), (true, Some((2, Vec3::X))));
     send(&mut app, Kind::Lob { ship: me, shot: None });
     frame(&mut app, 40);
-    assert_eq!(app.world().resource::<crate::combat::Target>().2.shot, None, "a gun-bank click drops a shot not fired yet");
+    assert_eq!(manual_fire(&app, me).shot, None, "a gun-bank click drops a shot not fired yet");
 }
 
 /// Everything a player can click has an id: ships, armed bases and rocks by creation number, space animals too, and map scenery
@@ -288,6 +304,27 @@ fn space_animals_and_bases_without_guns_have_ids() {
     assert!(Saved::save(w, &Kind::Target { ship: me, target: Some(whale), spot: None }).is_ok(), "a whale is a target with an id");
 }
 
+/// Two humans in one world: each player's attack click and panic button land on that player's own command ship, never on the
+/// other's (one target slot per ship; #369 phase 2 C).
+#[test]
+fn two_command_ships_each_hold_their_own_target_and_manual_fire() {
+    let mut app = battle();
+    let (me, _, enemy) = fleet(&mut app);
+    let theirs = app.world_mut().spawn((Ship::new(0, Side::Enemy), SpawnIndex(3), Commander(PlayerId(1)))).id();
+    loaded(&mut app);
+    let push = |app: &mut App, player: u8, kind: Kind| app.world_mut().resource_mut::<Outbox>().0.push(PlayerCommand { player: PlayerId(player), kind });
+    push(&mut app, 0, Kind::Target { ship: me, target: Some(enemy), spot: Some(Vec3::X) });
+    push(&mut app, 1, Kind::Target { ship: theirs, target: Some(me), spot: None });
+    push(&mut app, 1, Kind::PanicFire { ship: theirs });
+    frame(&mut app, 40);
+    assert_eq!(ordered(&app, me), Some((enemy, Some(Vec3::X))));
+    assert_eq!(ordered(&app, theirs), Some((me, None)));
+    assert_eq!((manual_fire(&app, me).panic, manual_fire(&app, theirs).panic), (false, true));
+    push(&mut app, 0, Kind::Target { ship: me, target: None, spot: None });
+    frame(&mut app, 40);
+    assert_eq!((ordered(&app, me), ordered(&app, theirs).map(|o| o.0)), (None, Some(me)), "clearing one leaves the other");
+}
+
 /// `Commander` follows `PlayerShip` (battle start, promotion, loss), and "direct" is decided by the command's player: another
 /// player's order to this command ship is not its commander's.
 #[test]
@@ -304,15 +341,14 @@ fn the_command_ship_is_the_commanders_and_only_its_players_orders_are_direct() {
     w.entity_mut(me).insert(crate::PlayerShip);
     w.flush();
     assert_eq!((w.get::<Commander>(captain), w.get::<Commander>(me)), (None, Some(&Commander(PlayerId(0)))), "promotion moves it");
-    app.world_mut().resource_mut::<crate::combat::Target>().2.panic = true;
+    manual_fire_mut(&mut app, me).panic = true;
     app.world_mut().resource_mut::<Outbox>().0.push(PlayerCommand { player: PlayerId(1), kind: Kind::Target { ship: me, target: Some(enemy), spot: None } });
     app.world_mut().resource_mut::<Outbox>().0.push(PlayerCommand { player: PlayerId(1), kind: Kind::PanicFire { ship: me } });
     frame(&mut app, 40);
-    let t = app.world().resource::<crate::combat::Target>();
-    assert_eq!((t.0, t.2.panic), (None, true), "player 1 does not command player 0's ship");
+    assert_eq!((ordered(&app, me), manual_fire(&app, me).panic), (None, true), "player 1 does not command player 0's ship");
     send(&mut app, Kind::Target { ship: me, target: Some(enemy), spot: None });
     frame(&mut app, 40);
-    assert_eq!(app.world().resource::<crate::combat::Target>().0, Some(enemy));
+    assert_eq!(ordered(&app, me).map(|o| o.0), Some(enemy));
 }
 
 /// A replay gives each command back to the player who gave it.
@@ -527,7 +563,7 @@ fn a_recorded_session_replays_tick_for_tick_on_another_frame_rate() {
         }
         frame(&mut app, *ms);
         let c = app.world().resource::<Clock>();
-        seen.push((c.frame, c.tick, order(&app, me), app.world().resource::<crate::combat::Target>().0.is_some()));
+        seen.push((c.frame, c.tick, order(&app, me), crate::testutil::command_target(app.world_mut()).is_some()));
     }
     app.world_mut().write_message(AppExit::Success);
     app.update();
@@ -545,7 +581,7 @@ fn a_recorded_session_replays_tick_for_tick_on_another_frame_rate() {
         send(&mut app, Kind::Engine { ship: me, engine: Engine::To(EngineOrder::Stop) }); // live input is ignored in a replay
         app.update(); // the replay sets each frame's clock
         let c = app.world().resource::<Clock>();
-        again.push((c.frame, c.tick, order(&app, me), app.world().resource::<crate::combat::Target>().0.is_some()));
+        again.push((c.frame, c.tick, order(&app, me), crate::testutil::command_target(app.world_mut()).is_some()));
     }
     assert_eq!(again, seen);
 }
@@ -559,10 +595,10 @@ fn an_attack_order_on_a_thing_of_no_player_is_dropped() {
     loaded(&mut app);
     send(&mut app, Kind::Target { ship: captain, target: Some(nobody), spot: None });
     frame(&mut app, 40);
-    assert_eq!(app.world().get::<crate::ship::FleetPilot>(captain).unwrap().target, None, "dropped");
+    assert_eq!(ordered(&app, captain), None, "dropped");
     send(&mut app, Kind::Target { ship: captain, target: Some(enemy), spot: None });
     frame(&mut app, 40);
-    assert_eq!(app.world().get::<crate::ship::FleetPilot>(captain).unwrap().target, Some(enemy));
+    assert_eq!(ordered(&app, captain).map(|o| o.0), Some(enemy));
 }
 
 /// A player's Attack, and "fire when possible", make the ship Aggressive (PROVISIONAL).
@@ -593,7 +629,6 @@ fn two_humans() -> (World, [Entity; 6]) {
     w.insert_resource(Players { list: [(PlayerId(0), player("Player")), (PlayerId(1), player("Ally"))].into(), local: PlayerId(0) });
     w.entity_mut(ids[3]).insert(crate::ship::FleetMember("Ally".into(), 1));
     w.entity_mut(ids[4]).insert(crate::ship::FleetMember("Ally".into(), 0));
-    w.init_resource::<crate::ship::CaptainTargets>();
     crate::ship::reconcile_fleets(&mut w);
     (w, ids)
 }
@@ -684,4 +719,21 @@ fn orders_are_the_local_players_and_a_tick_applies_them_by_player() {
     frame(&mut app, 40);
     assert_eq!(order(&app, them), EngineOrder::Full, "player 0's Slow, then player 1's step up");
     assert_eq!(order(&app, me), EngineOrder::Stop);
+}
+
+/// A ship's ordered target and spot (its target slot with the override flag clear).
+fn ordered(app: &App, e: Entity) -> Option<(Entity, Option<Vec3>)> {
+    app.world().get::<crate::ship::TargetSlot>(e).and_then(crate::ship::TargetSlot::ordered)
+}
+fn manual_fire(app: &App, e: Entity) -> crate::combat::ManualFire {
+    *app.world().get::<crate::combat::ManualFire>(e).expect("a command ship")
+}
+fn manual_fire_mut(app: &mut App, e: Entity) -> Mut<'_, crate::combat::ManualFire> {
+    app.world_mut().get_mut::<crate::combat::ManualFire>(e).expect("a command ship")
+}
+
+/// An attack order on a captain, as `apply` gives it.
+fn attack(app: &mut App, e: Entity, target: Entity) {
+    app.world_mut().get_mut::<crate::ship::FleetPilot>(e).unwrap().attack();
+    *app.world_mut().get_mut::<crate::ship::TargetSlot>(e).unwrap() = crate::ship::TargetSlot::order(Some(target), None);
 }

@@ -92,7 +92,7 @@ pub(crate) use shot::screenshot;
 pub use view::{Orbit, Sky, Slot, camera, hud, input, sky, toggle_debug};
 
 use bevy::prelude::*;
-pub use combat::{GunStates, Health, Library, Target, Transient};
+pub use combat::{GunStates, Health, Library, Transient};
 use std::f32::consts::PI;
 use std::path::PathBuf;
 

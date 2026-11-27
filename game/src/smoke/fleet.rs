@@ -1,4 +1,4 @@
-use crate::{Config, EngineOrder, Health, Library, Orbit, PlayerShip, Ship, Side, Target, campaign, combat, game_to_bevy, menu, options_menu, rules, ship};
+use crate::{Config, EngineOrder, Health, Library, Orbit, PlayerShip, Ship, Side, campaign, combat, game_to_bevy, menu, options_menu, rules, ship};
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
 
@@ -114,7 +114,7 @@ fn hunt_m3(world: &mut World, frame: u32) {
         assert_eq!(world.get::<Ship>(primary).unwrap().speed, 0.0, "helm motion stops during NIS");
         let pirate = world.get::<campaign::MissionShip>(exile).unwrap();
         assert!(pirate.looping.is_none() && pirate.stop_at_end, "Exile retreats instead of patrolling/attacking");
-        assert!(world.resource::<crate::ship::CaptainTargets>().of(exile).is_none(), "Exile must not engage");
+        assert!(world.get::<crate::ship::TargetSlot>(exile).and_then(crate::ship::TargetSlot::target).is_none(), "Exile must not engage");
     }
     if frame == 90 {
         world.resource_mut::<campaign::Mission>().script.played.insert("1st officer says NO".into());
@@ -309,6 +309,11 @@ fn clear_plane_point(world: &mut World, actor: Entity) -> Vec3 {
         .expect("a plane point whose click ray misses every ship")
 }
 
+/// The command ship's attack click (its ordered target).
+fn manual_target(world: &mut World) -> Option<Entity> {
+    world.query_filtered::<&ship::TargetSlot, With<PlayerShip>>().single(world).ok().and_then(ship::TargetSlot::ordered).map(|o| o.0)
+}
+
 fn fleet(world: &mut World, frame: u32, previous: &mut Option<Entity>) {
     fleet_input(world, frame);
     match frame {
@@ -375,20 +380,20 @@ fn fleet(world: &mut World, frame: u32, previous: &mut Option<Entity>) {
         }
         47 => {
             let actor = world.resource::<ship::Fleets>().selected.unwrap();
-            let target = world.get::<ship::FleetPilot>(actor).unwrap().target.expect("secondary world attack must reach its captain");
+            let target = world.get::<ship::TargetSlot>(actor).and_then(ship::TargetSlot::ordered).map(|o| o.0).expect("secondary world attack must reach its captain");
             assert_eq!(world.get::<Ship>(target).unwrap().side, Side::Enemy);
-            assert!(world.resource::<Target>().0.is_none(), "secondary attack must not overwrite the primary target");
+            assert!(manual_target(world).is_none(), "secondary attack must not overwrite the primary target");
         }
         50 => {
             let enemy = world.query::<(Entity, &Ship)>().iter(world).find(|(_, s)| s.side == Side::Enemy).map(|s| s.0);
             world.resource_mut::<Orbit>().focus = enemy;
         }
         55 => {
+            assert!(manual_target(world).is_none());
             let f = world.resource::<ship::Fleets>();
             let actor = f.selected.unwrap();
             let p = world.get::<ship::FleetPilot>(actor).unwrap();
             assert!(p.destination.is_some() && !p.hold, "secondary plane click must detach only its captain");
-            assert!(world.resource::<Target>().0.is_none());
             assert!(f.roster().iter().skip(1).filter(|e| **e != actor).all(|e| world.get::<ship::FleetPilot>(*e).unwrap().hold));
             assert!(world.get::<PlayerShip>(actor).is_none());
         }
@@ -407,7 +412,8 @@ fn fleet(world: &mut World, frame: u32, previous: &mut Option<Entity>) {
         143 => assert_eq!(world.resource::<crate::panels::FleetHud>().active, Some(ship::Formation::Convoy)),
         158 => {
             let e = world.query::<(Entity, &Ship)>().iter(world).find(|(_, s)| s.side == Side::Enemy).map(|s| s.0);
-            world.resource_mut::<Target>().0 = e;
+            let mut q = world.query_filtered::<&mut ship::TargetSlot, With<PlayerShip>>();
+            *q.single_mut(world).unwrap() = ship::TargetSlot::order(e, None);
         }
         166 => assert!(world.resource::<crate::panels::FleetHud>().cease_fire),
         170 => assert!(!world.resource::<crate::panels::FleetHud>().cease_fire),

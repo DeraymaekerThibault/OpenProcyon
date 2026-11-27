@@ -244,7 +244,7 @@ fn asteroid_breakup_is_once_only_recursive_and_cleans_target() {
         .init_resource::<AsteroidDefs>()
         .init_resource::<crate::collision::Shapes>()
         .init_resource::<FxLib>()
-        .init_resource::<Target>()
+        .init_resource::<crate::combat::ArmedBank>()
         .insert_resource(SimRng::new(123))
         .init_resource::<crate::scenario::Difficulty>()
         .add_message::<Destroyed>()
@@ -253,11 +253,11 @@ fn asteroid_breakup_is_once_only_recursive_and_cleans_target() {
         .add_message::<Strike>()
         .add_message::<Sfx>()
         .add_systems(Update, (crate::tick_start, asteroid_deaths).chain());
-    let shooter = app.world_mut().spawn_empty().id();
+    let shooter = app.world_mut().spawn(crate::commands::Commander::default()).id();
     let rock = Asteroid::new("Asteroid_Large", "Asteroid Belt", app.world().resource::<AsteroidDefs>()).unwrap();
     let parent = app.world_mut().spawn((rock, Transform::default())).id();
     app.world_mut().get_mut::<crate::collision::Drift>(parent).unwrap().0 = Vec3::X * 6.0;
-    app.world_mut().resource_mut::<Target>().0 = Some(parent);
+    crate::testutil::set_command_target(app.world_mut(), Some(parent));
     let mut rock = app.world_mut().get_mut::<Asteroid>(parent).unwrap();
     assert!(!rock.damage(49.0));
     assert!(rock.damage(1.0));
@@ -266,7 +266,7 @@ fn asteroid_breakup_is_once_only_recursive_and_cleans_target() {
     app.update();
     app.update(); // removal is applied at the start of the next tick
     assert!(app.world().get_entity(parent).is_err());
-    assert_eq!(app.world().resource::<Target>().0, None);
+    assert_eq!(crate::testutil::command_target(app.world_mut()), None);
     let children: Vec<_> = app
         .world_mut()
         .query::<(Entity, &Asteroid, &Transform)>()

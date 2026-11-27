@@ -92,8 +92,8 @@ human's command ship) runs it every tick against its current target, without any
   without firing, and only started its grapple passes ~17 s after our first attack click on it (it was first hit 40 s later).
   PROVISIONAL, chosen to fit those runs: the harpoon's reach is its LongRange (45) from the ship's centre, and a computer ship
   only grapples a target that has fired at it. Neither is observed directly.
-- Remake: `boarding::ai_boarding` (skirmish enemies their captain's target, `ship::CaptainTargets`; mission ships the rules' target, the
-  player's other ships their pilot's target); the line-of-fire skip is not modelled.
+- Remake: `boarding::ai_boarding` (every ship the target in its slot, `ship::TargetSlot`: its captain's pick or its order); the
+  line-of-fire skip is not modelled.
 **The grapple line.** A harpoon hit links the two ships; the link remembers the centre distance at that moment and uses it as the rope's length.
 Each tick, if the centres are further apart than the length, the rope pulls **both hulls toward each other by the excess, split by
 mass** (the lighter one moves more; positions only, no velocity change) — and in play the excess

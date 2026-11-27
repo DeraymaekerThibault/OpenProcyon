@@ -132,9 +132,9 @@ pub fn banner_allowed(destroyed: bool, mission_visible: bool, seen: bool, hud_of
 #[allow(clippy::too_many_arguments)]
 fn decide_world_marks(
     mut marks: ResMut<WorldMarks>,
-    target: Res<combat::Target>,
+    command: Query<&crate::ship::TargetSlot, With<crate::PlayerShip>>,
     fleets: Res<crate::ship::Fleets>,
-    pilots: Query<&crate::ship::FleetPilot>,
+    pilots: Query<&crate::ship::TargetSlot, With<crate::ship::FleetPilot>>,
     ships: Query<(Entity, &Health, Option<&crate::campaign::MissionShip>), With<Ship>>,
     animals: Query<&crate::environment::SpaceAnimal>,
     sensors: Res<crate::environment::Sensors>,
@@ -148,9 +148,10 @@ fn decide_world_marks(
         }
     }
     if !hud_off {
-        let ordered = fleets.selected.map(|e| (pilots.get(e).ok().and_then(|p| p.target), ships.get(e).ok().and_then(|s| s.2.and_then(|m| m.ordered))));
+        let ordered = fleets.selected.map(|e| (pilots.get(e).ok().and_then(|s| s.ordered()).map(|o| o.0), ships.get(e).ok().and_then(|s| s.2.and_then(|m| m.ordered))));
         let (pilot, mission_target) = ordered.unwrap_or((None, None));
-        next.reticle = reticle_target(fleets.direct(), target.0, pilot, mission_target).filter(|&e| {
+        let manual = command.single().ok().and_then(crate::ship::TargetSlot::ordered).map(|o| o.0);
+        next.reticle = reticle_target(fleets.direct(), manual, pilot, mission_target).filter(|&e| {
             let shown = match ships.get(e) {
                 Ok((_, h, ms)) => !h.destroyed && ms.is_none_or(|m| m.visible),
                 Err(_) => animals.get(e).is_ok_and(|a| a.visible),
@@ -493,7 +494,7 @@ pub fn plugin(app: &mut App) {
         )
         .add_systems(PreUpdate, name_toggle)
         .add_systems(Update, (fleet_model, update_visibility, update_contacts, update_docking_status, talking_head, pause_button, speed_button).chain().in_set(HudSet))
-        .add_systems(Update, decide_world_marks.in_set(HudSet).run_if(resource_exists::<combat::Target>));
+        .add_systems(Update, decide_world_marks.in_set(HudSet).run_if(resource_exists::<combat::ArmedBank>));
 }
 
 /// `N` toggles the ship-name banners.
@@ -675,7 +676,7 @@ pub fn hud_input(
     mut focus: HudFocus,
     guns: Query<(&GunButton, &Interaction)>,
     lib: Res<Library>,
-    mut target: ResMut<combat::Target>,
+    mut armed: ResMut<combat::ArmedBank>,
     visible: Query<&Visibility, With<HudRoot>>,
     mut orders: crate::commands::Orders,
 ) {
@@ -725,7 +726,7 @@ pub fn hud_input(
         let class = &lib.classes[ship.class];
         for (GunButton(bank), _) in guns.iter().filter(|(_, i)| crate::pointer::over(i)) {
             let indirect = class.mounts.iter().enumerate().any(|(i, m)| m.bank == *bank && combat::is_indirect(&lib, equipped.map_or(m.gun.as_str(), |g| g.gun(i))));
-            target.2.armed = if indirect && target.2.armed != Some(*bank) { Some(*bank) } else { None };
+            armed.0 = if indirect && armed.0 != Some(*bank) { Some(*bank) } else { None };
             orders.send(crate::commands::Kind::Lob { ship: me, shot: None });
         }
     }
@@ -845,7 +846,7 @@ pub fn input_app() -> (App, Entity) {
         .init_resource::<UiClick>()
         .init_resource::<ChatLog>()
         .init_resource::<crate::bindings::Bindings>()
-        .init_resource::<combat::Target>()
+        .init_resource::<combat::ArmedBank>()
         .init_resource::<crate::commands::Outbox>()
         .init_resource::<crate::commands::Clock>()
         .insert_resource(Library::load(crate::assets_dir()))
@@ -1117,7 +1118,8 @@ pub mod tests {
         app.add_systems(Update, crate::commands::apply_tick.after(hud_input));
         app.world_mut().resource_mut::<ButtonInput<MouseButton>>().press(MouseButton::Left);
         app.update();
-        assert!(app.world().resource::<combat::Target>().2.panic);
+        let panic = |app: &mut App| app.world_mut().query::<&combat::ManualFire>().single(app.world()).unwrap().panic;
+        assert!(panic(&mut app));
         assert_eq!(app.world().resource::<crate::Orbit>().focus, None, "ship icon returns the camera to the player");
         assert!(app.world().resource::<UiClick>().0);
         app.world_mut().entity_mut(root).insert(Visibility::Hidden);
@@ -1125,11 +1127,11 @@ pub mod tests {
         app.update();
         assert!(!app.world().resource::<UiClick>().0);
         assert!(app.world().resource::<Toggles>().weapons);
-        app.world_mut().resource_mut::<combat::Target>().2.panic = false;
+        app.world_mut().query::<&mut combat::ManualFire>().single_mut(app.world_mut()).unwrap().panic = false;
         app.world_mut().entity_mut(root).insert(Visibility::Inherited);
         app.world_mut().resource_mut::<ButtonInput<KeyCode>>().press(KeyCode::KeyX);
         app.update();
-        assert!(app.world().resource::<combat::Target>().2.panic);
+        assert!(panic(&mut app));
     }
 
     #[test]
@@ -1206,7 +1208,7 @@ pub mod tests {
         app.add_plugins(MinimalPlugins)
             .insert_resource(Library { classes: vec![class], guns: default(), bullets: default(), names: default(), clips: default() })
             .init_resource::<crate::environment::Sensors>()
-            .init_resource::<combat::Target>()
+            .init_resource::<combat::ArmedBank>()
             .init_resource::<crate::ship::Fleets>()
             .init_resource::<WorldMarks>()
             .add_systems(
@@ -1231,7 +1233,8 @@ pub mod tests {
                 alive(),
                 at(10.0),
                 crate::ship::FleetMember("Player".into(), 1),
-                crate::ship::FleetPilot { target: Some(enemy), ..default() },
+                crate::ship::FleetPilot::default(),
+                crate::ship::TargetSlot::order(Some(enemy), None),
             ))
             .id();
         let hidden = world.spawn((Ship::new(0, enemy_side), alive(), at(25.0), mission_ship(false))).id();
@@ -1246,7 +1249,7 @@ pub mod tests {
     }
 
     fn marks(w: &mut MarkWorld, aimed: Option<Entity>) -> (Option<Entity>, Vec<Entity>) {
-        w.app.world_mut().resource_mut::<combat::Target>().0 = aimed;
+        w.app.world_mut().entity_mut(w.player).insert(crate::ship::TargetSlot::order(aimed, None));
         w.app.update();
         let m = w.app.world().resource::<WorldMarks>();
         let mut banners: Vec<_> = m.banners.iter().copied().collect();
@@ -1285,7 +1288,7 @@ pub mod tests {
         let (enemy, animal, far, fleet) = (w.enemy, w.animal, w.far, w.fleet);
         w.app.world_mut().resource_mut::<crate::ship::Fleets>().selected = Some(fleet);
         assert_eq!(marks(&mut w, Some(animal)).0, Some(enemy), "the fleet pilot's order wins over the player's aim");
-        w.app.world_mut().get_mut::<crate::ship::FleetPilot>(fleet).unwrap().target = Some(far);
+        *w.app.world_mut().get_mut::<crate::ship::TargetSlot>(fleet).unwrap() = crate::ship::TargetSlot::order(Some(far), None);
         assert_eq!(marks(&mut w, Some(enemy)).0, None, "an ordered target out of sight is not marked either");
     }
 

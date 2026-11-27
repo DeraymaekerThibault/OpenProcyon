@@ -108,7 +108,7 @@ pub(crate) fn battle_schedule(app: &mut App) {
 pub struct BattleActive;
 
 pub fn plugin(app: &mut App) {
-    app.init_resource::<collision::Shapes>().add_message::<collision::Ram>().init_resource::<ship::Fleets>().init_resource::<ship::CaptainTargets>().add_plugins(systems);
+    app.init_resource::<collision::Shapes>().add_message::<collision::Ram>().init_resource::<ship::Fleets>().add_plugins(systems);
 }
 
 /// The sets and systems, apart from the resources they read (`Shapes` loads game data, so a test leaves it out).

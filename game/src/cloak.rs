@@ -219,7 +219,7 @@ fn ai(
     time: Res<Time>,
     lib: Res<Library>,
     fleets: Res<Fleets>,
-    targets: Option<Res<crate::ship::CaptainTargets>>,
+    targets: Query<&crate::ship::TargetSlot>,
     mut ships: Query<(Entity, &mut Cloak, &Ship, &Transform, &Health, Has<crate::commands::Commander>, Option<&ScanFactor>, Option<&crate::scenario::SpawnIndex>)>,
     others: Query<(Entity, &Ship, &Transform, &Health)>,
     table: crate::alliance::Hostility,
@@ -240,7 +240,7 @@ fn ai(
             })
             .map(|(o, ..)| o)
             .collect();
-        let targeted = targets.as_deref().is_some_and(|t| hostile.iter().any(|h| t.of(*h) == Some(e)));
+        let targeted = hostile.iter().any(|h| targets.get(*h).is_ok_and(|t| t.target() == Some(e)));
         if hostile.is_empty() || (c.state == State::Full && targeted) {
             c.stop();
         } else if wants_cloak(c.state, class.mounts.iter().map(|m| lib.guns[&m.gun].cloak_fire)) {
