@@ -236,7 +236,6 @@ fn mission_ships_halt_when_their_script_route_runs_out() {
         .init_resource::<Time>()
         .init_resource::<crate::environment::Sensors>()
         .add_systems(PreUpdate, crate::environment::refresh_sensors)
-        .init_resource::<crate::ship::CaptainTargets>()
         .add_systems(Update, mission_ai);
     let ship = Ship { heading: 0.0, speed: 5.0, order: EngineOrder::Full, ..Ship::new(0, Side::Player) };
     let n = lib.classes[0].sections.len();
@@ -319,7 +318,6 @@ fn ai_world() -> App {
         .init_resource::<Time>()
         .init_resource::<crate::environment::Sensors>()
         .add_systems(PreUpdate, crate::environment::refresh_sensors)
-        .init_resource::<crate::ship::CaptainTargets>()
         .add_systems(Update, mission_ai);
     app
 }

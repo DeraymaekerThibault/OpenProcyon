@@ -437,7 +437,6 @@ fn a_skirmish_computer_ship_with_a_map_script_fires_at_its_captains_target() {
         .init_resource::<crate::scenario::Difficulty>()
         .insert_resource(Look { mesh: default(), shell: default(), enemy_shell: default() })
         .insert_resource(Target::default())
-        .init_resource::<crate::ship::CaptainTargets>()
         .init_resource::<crate::environment::Sensors>()
         .add_systems(PreUpdate, crate::environment::refresh_sensors)
         .add_systems(Update, (crate::tick_start.before(fire), fire, shells.after(fire)));
@@ -457,7 +456,7 @@ fn a_skirmish_computer_ship_with_a_map_script_fires_at_its_captains_target() {
     // A skirmish map script tags every ship with MissionShip; there is no campaign Mission, so no rules AI sets its target.
     let enemy = spawn(&mut app, Side::Enemy, 60.0);
     app.world_mut().entity_mut(enemy).insert(crate::campaign::MissionShip { visible: true, ..default() });
-    app.world_mut().resource_mut::<crate::ship::CaptainTargets>().0.insert(enemy, (me, 0.0, Vec3::ZERO, true));
+    app.world_mut().get_mut::<crate::ship::TargetSlot>(enemy).unwrap().0 = Some(crate::ship::Held { target: me, age: 0.0, aim: Vec3::ZERO, can_override: true });
     let mut bullets = std::collections::HashSet::new();
     for _ in 0..200 {
         app.world_mut().resource_mut::<Time>().advance_by(std::time::Duration::from_secs_f32(0.05));

@@ -81,6 +81,7 @@ impl Side {
 pub const DEFAULT_SHIP: &str = "Ship_Navy_Cutter";
 
 #[derive(Component, Clone, PartialEq)]
+#[require(TargetSlot)]
 pub struct Ship {
     pub class: usize,
     pub side: Side,
@@ -291,21 +292,41 @@ impl ThinkClock {
 
 /// Seconds a computer captain keeps its target before choosing again (the original's target-selection timer).
 pub const RESELECT_SECS: f32 = 6.0;
-/// Each skirmish captain's current target and how long it has held it: the original's target selection takes the nearest hostile
-/// ship in sight, again every `RESELECT_SECS` or as soon as the old one is gone or out of sight (docs/re/movement.md). Steering,
-/// fire (`combat::gunnery`) and boarding (`boarding::ai_boarding`) all follow it. The third field is where the guns aim, in the
-/// target's frame: its section nearest to the captain when the target was chosen (`attack::aim_local`), kept until the next choice.
-/// The fourth is the target's "AI can override" flag: set when the captain picked it itself, cleared when an order named it (see
-/// `choose_target`).
-#[derive(Resource, Default)]
-pub struct CaptainTargets(pub std::collections::HashMap<Entity, (Entity, f32, Vec3, bool)>);
-impl CaptainTargets {
-    pub fn of(&self, e: Entity) -> Option<Entity> {
-        self.0.get(&e).map(|t| t.0)
+/// A ship's one target slot (#369 phase 2 step C; the original keeps one per ship: procyon-re `evidence/ai-captain/`, stage 2
+/// Read). The captain picks the nearest hostile ship in sight, again every `RESELECT_SECS` or as soon as the old one is gone or
+/// out of sight (docs/re/movement.md). Steering, fire (`combat::gunnery`) and boarding (`boarding::ai_boarding`) all follow it.
+/// Every ship has one (`Ship` requires it); empty while it holds no target.
+#[derive(Component, Clone, Copy, Debug, Default, PartialEq)]
+pub struct TargetSlot(pub Option<Held>);
+/// What a target slot holds.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Held {
+    pub target: Entity,
+    /// Seconds the target has been held.
+    pub age: f32,
+    /// Where the guns aim, in the target's frame: its section nearest to the captain when the target was chosen
+    /// (`attack::aim_local`), kept until the next choice.
+    pub aim: Vec3,
+    /// The original's "AI can override" flag: set when the captain picked the target itself, cleared when an order named it (see
+    /// `choose_target`).
+    pub can_override: bool,
+}
+impl TargetSlot {
+    pub fn target(&self) -> Option<Entity> {
+        self.0.map(|h| h.target)
     }
     /// The target and the guns' aim point in its frame.
-    pub fn aim_of(&self, e: Entity) -> Option<(Entity, Vec3)> {
-        self.0.get(&e).map(|t| (t.0, t.2))
+    pub fn aim(&self) -> Option<(Entity, Vec3)> {
+        self.0.map(|h| (h.target, h.aim))
+    }
+}
+/// The captains' working copy of every ship's slot during one think pass (`ai`): a captain adopting a fleet mate's target sees
+/// the targets chosen before it in the same pass.
+#[derive(Default)]
+struct CaptainTargets(std::collections::HashMap<Entity, (Entity, f32, Vec3, bool)>);
+impl CaptainTargets {
+    fn of(&self, e: Entity) -> Option<Entity> {
+        self.0.get(&e).map(|t| t.0)
     }
 }
 
@@ -372,9 +393,9 @@ pub fn ai(
     storms: (Option<Res<crate::nebula::Storms>>, Option<Res<crate::nebula::StormShift>>),
     (mut explore, mut breakoffs, mut courses): (Local<Explore>, Local<std::collections::HashMap<Entity, attack::Breakoff>>, Local<std::collections::HashMap<Entity, Vec3>>),
     (mut clocks, spawn_order, mut start): (Local<std::collections::HashMap<Entity, ThinkClock>>, Query<&crate::scenario::SpawnIndex>, crate::scenario::BattleStart),
-    (time, mut targets, orders): (
+    (time, mut slots, orders): (
         Res<Time>,
-        ResMut<CaptainTargets>,
+        Query<(Entity, &mut TargetSlot)>,
         Query<(Option<&docking::Docker>, Option<&docking::Tower>, Option<&boarding::GrappleOrder>, Option<&boarding::Boarding>)>,
     ),
     (lib, fleets, mut rng, scans): (Res<combat::Library>, Res<Fleets>, ResMut<combat::SimRng>, Query<&crate::environment::ScanFactor>),
@@ -395,6 +416,7 @@ pub fn ai(
     if start.is_new() {
         (*explore, *breakoffs, *clocks, *courses, *latched) = Default::default();
     }
+    let mut targets = CaptainTargets(slots.iter().filter_map(|(e, s)| s.0.map(|h| (e, (h.target, h.age, h.aim, h.can_override)))).collect());
     let campaign = mission.is_some();
     // Scripted ships: hidden ones and dummies wait for the script; one following a group takes a target but no course from the captain.
     let left_to_script = |m: &campaign::MissionShip| !m.visible || m.stance == crate::rules::Stance::Dummy;
@@ -581,6 +603,12 @@ pub fn ai(
         // A finished chase waits for orders at its last point (rules::mission_ai's path end).
         if let Ok(mut m) = scripted.get_mut(e) {
             m.stop_at_end = true;
+        }
+    }
+    for (e, mut slot) in &mut slots {
+        let held = targets.0.get(&e).map(|t| Held { target: t.0, age: t.1, aim: t.2, can_override: t.3 });
+        if slot.0 != held {
+            slot.0 = held;
         }
     }
 }
@@ -1110,7 +1138,7 @@ pub fn fleet_help(world: &mut World, owner: &str, attack: bool) {
     let target = if fleet.members.first().copied() == world.resource::<Fleets>().primary() {
         world.resource::<Target>().0
     } else {
-        fleet.members.first().and_then(|e| world.resource::<CaptainTargets>().of(*e))
+        fleet.members.first().and_then(|e| world.get::<TargetSlot>(*e).and_then(TargetSlot::target))
     };
     let target = target.filter(|e| fleet.members.first().is_some_and(|leader| captain_target_valid(world, *leader, *e)));
     if attack && target.is_none() {

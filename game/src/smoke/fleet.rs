@@ -114,7 +114,7 @@ fn hunt_m3(world: &mut World, frame: u32) {
         assert_eq!(world.get::<Ship>(primary).unwrap().speed, 0.0, "helm motion stops during NIS");
         let pirate = world.get::<campaign::MissionShip>(exile).unwrap();
         assert!(pirate.looping.is_none() && pirate.stop_at_end, "Exile retreats instead of patrolling/attacking");
-        assert!(world.resource::<crate::ship::CaptainTargets>().of(exile).is_none(), "Exile must not engage");
+        assert!(world.get::<crate::ship::TargetSlot>(exile).and_then(crate::ship::TargetSlot::target).is_none(), "Exile must not engage");
     }
     if frame == 90 {
         world.resource_mut::<campaign::Mission>().script.played.insert("1st officer says NO".into());

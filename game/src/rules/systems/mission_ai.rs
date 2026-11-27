@@ -23,7 +23,7 @@ pub(super) fn mission_ai(
     busy: Query<(), crate::ship::CaptainBusy>,
     boats: Query<(), With<crate::lifeboats::Lifeboat>>,
     held: Query<(), With<crate::ship::HoldPosition>>,
-    (spawn_order, table, captains): (Query<&crate::scenario::SpawnIndex>, crate::alliance::Hostility, Res<crate::ship::CaptainTargets>),
+    (spawn_order, table, captains): (Query<&crate::scenario::SpawnIndex>, crate::alliance::Hostility, Query<&crate::ship::TargetSlot>),
 ) {
     let key = |e: Entity| crate::scenario::SpawnIndex::of(&spawn_order, e);
     let Some(mission) = mission else { return };
@@ -103,7 +103,7 @@ pub(super) fn mission_ai(
             continue;
         }
         // The captain's attack throttle stands between its thinks.
-        if captains.of(e).is_none() {
+        if captains.get(e).ok().and_then(crate::ship::TargetSlot::target).is_none() {
             ship.throttle = None;
         }
         // loops: restart an exhausted path
@@ -160,7 +160,7 @@ pub(super) fn mission_ai(
             continue; // a human-captained ship (Captain_Human) moves on the human fleet's orders (ship.rs fleet_follow)
         }
         // A ship its captain sends after a target is not at a path end.
-        if ms.stop_at_end && ms.looping.is_none() && captains.of(e).is_none() {
+        if ms.stop_at_end && ms.looping.is_none() && captains.get(e).ok().and_then(crate::ship::TargetSlot::target).is_none() {
             // Retail path end (docs/re/movement.md): throttle holds the speed fraction while turned off the point, else full; the last point
             // of the path counts as reached inside 2 x the ship's radius, then the throttle is 0.
             // PROVISIONAL: `class.radius` stands in for the original's radius field. A finished chase (remake AI) likewise waits for orders.

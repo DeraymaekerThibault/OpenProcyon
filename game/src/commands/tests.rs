@@ -593,7 +593,6 @@ fn two_humans() -> (World, [Entity; 6]) {
     w.insert_resource(Players { list: [(PlayerId(0), player("Player")), (PlayerId(1), player("Ally"))].into(), local: PlayerId(0) });
     w.entity_mut(ids[3]).insert(crate::ship::FleetMember("Ally".into(), 1));
     w.entity_mut(ids[4]).insert(crate::ship::FleetMember("Ally".into(), 0));
-    w.init_resource::<crate::ship::CaptainTargets>();
     crate::ship::reconcile_fleets(&mut w);
     (w, ids)
 }

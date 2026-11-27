@@ -31,7 +31,7 @@ pub(super) fn ai_boarding(
     (mut fired, mut attacked, captains, mut start): (
         MessageReader<crate::combat::Fired>,
         Local<std::collections::HashSet<(Entity, Entity)>>,
-        Option<Res<crate::ship::CaptainTargets>>,
+        Query<&crate::ship::TargetSlot>,
         crate::scenario::BattleStart,
     ),
 ) {
@@ -46,9 +46,12 @@ pub(super) fn ai_boarding(
         if ms.is_some_and(|m| m.stance == crate::rules::Stance::Dummy || m.hold_fire) || pilot.is_some_and(|p| p.hold_fire) {
             continue;
         }
-        // An explicit fleet order, else the captain's target (ship::CaptainTargets), else (computer ships off the human's side) the
+        // An explicit fleet order, else the ship's target slot (ship::TargetSlot), else (computer ships off the human's side) the
         // player's ship.
-        let target = pilot.and_then(|p| p.target).or_else(|| captains.as_deref().and_then(|c| c.of(e))).or_else(|| me.filter(|_| !boarders.table().with_human(ship.side)));
+        let target = pilot
+            .and_then(|p| p.target)
+            .or_else(|| captains.get(e).ok().and_then(crate::ship::TargetSlot::target))
+            .or_else(|| me.filter(|_| !boarders.table().with_human(ship.side)));
         let strong = own.strength.attack > AI_MIN_ATTACK;
         if let Some(t) = target.filter(|t| boarders.hostile(e, *t))
             && let Ok((ttf, tship)) = targets.get(t)

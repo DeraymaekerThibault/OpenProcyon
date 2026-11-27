@@ -375,7 +375,7 @@ pub(super) fn fire(
         Query<(Entity, &Transform, &Shell), (Without<GunPart>, Without<Ship>)>,
         Option<Res<crate::campaign::CampaignPoints>>,
         Res<crate::environment::Sensors>,
-        Option<Res<crate::ship::CaptainTargets>>,
+        Query<&crate::ship::TargetSlot>,
         Local<bevy::platform::collections::HashMap<Entity, MineLaying>>,
         Local<bevy::platform::collections::HashMap<Entity, GroundAim>>,
         Query<(Entity, &crate::collision::Obstacle, Option<&Visibility>, Option<&Asteroid>), (Without<Ship>, Without<GunPart>)>,
@@ -469,10 +469,10 @@ pub(super) fn fire(
                     .find(|c| primary && Some(c.entity) == target.0 && table.targetable(ship.side, c.side, true) && c.visible)
                     .or_else(|| crate::nearest(seen.iter().filter(|c| !primary && !c.with_human && c.visible), tf.translation, |c| c.aim_point))
                     .map(Contact::aim),
-                // Computer ships fire at their captain's target (ship::CaptainTargets): a ship, a base or an animal hostile to their own
+                // Computer ships fire at their captain's target (ship::TargetSlot): a ship, a base or an animal hostile to their own
                 // side, or a rock the script ordered attacked; without one, the player ship when it is hostile.
-                // A ship target is aimed at the section its captain picked on choosing it (ship::CaptainTargets), not the hull's centre.
-                _ => match captains.as_deref().and_then(|c| c.aim_of(me)) {
+                // A ship target is aimed at the section its captain picked on choosing it (ship::TargetSlot), not the hull's centre.
+                _ => match captains.get(me).ok().and_then(crate::ship::TargetSlot::aim) {
                     Some((t, local)) => seen
                         .iter()
                         .find(|c| c.entity == t && c.visible && table.hostile(c.side, ship.side))
