@@ -334,6 +334,11 @@ fn fleet(world: &mut World, frame: u32, previous: &mut Option<Entity>) {
             assert!(f.selected != f.primary());
             *previous = f.primary();
             assert!(world.get::<PlayerShip>(previous.unwrap()).is_some());
+            // A skirmish starts with hold off (docs/re/fleet-controls.md): turn it on, so frame 55 can check that a plane click
+            // detaches only the clicked captain and leaves the other followers in formation.
+            assert!(f.roster().iter().skip(1).all(|e| !world.get::<ship::FleetPilot>(*e).unwrap().hold), "no ship holds formation at the start");
+            let local = f.local.clone();
+            ship::set_formation(world, &local, None, true);
         }
         43 => {
             let actor = world.resource::<ship::Fleets>().selected.unwrap();

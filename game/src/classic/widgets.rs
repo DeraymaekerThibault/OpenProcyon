@@ -117,7 +117,8 @@ fn fit_cover(mut commands: Commands, images: Res<Assets<Image>>, mut q: Query<(E
         img.rect = Some(Rect::from_corners(Vec2::ZERO, shown));
         (node.left, node.top) = (Val::Px((cover.frame.x - size.x) / 2.0), Val::Px((cover.frame.y - size.y) / 2.0));
         (node.width, node.height) = (Val::Px(size.x), Val::Px(size.y));
-        commands.entity(e).insert(Fitted);
+        // A screen can close in the frame its backdrop is sized (mission 3's crew screen under `--script mission`, #686).
+        commands.entity(e).try_insert(Fitted);
     }
 }
 
@@ -862,6 +863,19 @@ mod tests {
             assert!(l > 0.0 && r > 0.0, "{group}");
         }
         assert_eq!(crate::sprites::slice_caps("no_such_group", MENU_SKIN), None);
+    }
+
+    #[test]
+    fn a_backdrop_closed_in_the_frame_it_is_sized_is_not_an_error() {
+        // #686: the screen that owns the backdrop despawns it in the same frame; the `Fitted` mark must not panic on the gone node.
+        let mut app = App::new();
+        app.init_resource::<Assets<Image>>();
+        let image = app.world_mut().resource_mut::<Assets<Image>>().add(Image::default());
+        let e = app.world_mut().spawn((Cover { frame: Vec2::new(800.0, 600.0), ratio: 1.0 }, ImageNode::new(image), Node::default())).id();
+        let close = move |mut commands: Commands| commands.entity(e).despawn();
+        app.add_systems(Update, (close, fit_cover).chain_ignore_deferred());
+        app.update();
+        assert!(app.world().get_entity(e).is_err());
     }
 
     #[test]
