@@ -6,6 +6,7 @@ from tools.battle_check import (
     SCENARIOS,
     evaluate,
     outcome,
+    recorded,
     replay_args,
     same_run,
 )
@@ -239,6 +240,18 @@ class Outcome(unittest.TestCase):
         passed, summary = outcome(log, {"patrol", "fire"})
         self.assertTrue(passed, summary)
         self.assertIn("computer fleets spent 1800/2000 points", summary)
+
+    def test_a_recorded_run_is_judged_only_on_running_and_sanity(self):
+        # The replay check's recording plays the normal clock, a different battle each run: its rules are judged elsewhere.
+        log = "battle report " + json.dumps(report(contact=43.3, side1_bursts=0))
+        self.assertEqual(recorded(log), (True, "recorded"))
+        self.assertEqual(
+            recorded("thread 'main' panicked at src/x.rs:1"), (False, "PANIC")
+        )
+        self.assertFalse(recorded("")[0])
+        r = report()
+        r["sanity"] = {"non_finite": 1}
+        self.assertFalse(recorded("battle report " + json.dumps(r))[0])
 
     def test_panic_and_missing_report(self):
         self.assertEqual(

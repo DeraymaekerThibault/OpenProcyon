@@ -24,7 +24,8 @@ Git Bash (`GIT_BASH=<path>` if it is not in the default place), and the screensh
    mission rules never fired (named in the log). It finds crashes and soft-locks, not fidelity problems.
    `make battles [ARGS=ambush]` (`tools/battle_check.py [--jobs N]`, part of `make check --full` when assets are imported; stutter is judged only with `--jobs 1`) plays short skirmishes with
    fixed fleets at 16x and fails when one stops behaving like a battle: a side never fires or hits, a computer ship parks, a ship
-   grinds on scenery, or the game panics. The game writes one `battle report {json}` line (`PROCYON_REPORT=<game s>`,
+   grinds on scenery, or the game panics. Every run is fixed-step with the seed 1, so a failure reproduces exactly with the rerun
+   line it prints. The game writes one `battle report {json}` line (`PROCYON_REPORT=<game s>`,
    `smoke/report.rs`); read it before adding print statements. When a change touches targeting, steering or what counts as a
    base/ship, add or tighten a scenario there rather than relying on a long manual run.
    `--fire-rule "<rule name>"` (repeatable) and `--start-at x,y` start a mission at a later beat: the named rules' actions run once the world-initialise rules have
@@ -62,7 +63,9 @@ Git Bash (`GIT_BASH=<path>` if it is not in the default place), and the screensh
    first battle of a run is recorded; a campaign mission started from the menus is marked `from_menu` and refused (neither the
    arguments nor a setup hold it). Arguments that take a path (`--mod <dir>`, ...) are left out of the header. `battle_check
    --replay` (in `check.sh --full` for `red_rover` and the lobby scenario `border_dispute_full`) records a run of `--script
-   commands` and fails when its replay's battle report differs; a lobby scenario replays from the log alone.
+   commands` and fails when its replay's battle report differs; a lobby scenario replays from the log alone. It plays the normal
+   clock, a different battle every run, so it judges only the replay (and that the run did not crash or go insane), not the battle's
+   rules: those are the default mode's.
    `--fixed-step` (or `PROCYON_FIXED_STEP=1`; `--shot` implies it unless `PROCYON_FIXED_STEP=0`, `gametime.rs::wants_fixed_step`) makes a scripted run reproducible: each frame is one 33 ms tick at 1x whatever
    the frame rate, and the clock-seeded cosmetic draws (ship names, stars) use a fixed seed. Run twice, it gives the same
    pictures and the same trace. `python3 -m tools.tracediff A.csv B.csv` compares two traces (one line per file, then the
