@@ -1000,12 +1000,12 @@ pub fn outside_world(mission: &Value, map: &Value) -> Vec<Finding> {
     let mut out = vec![];
     for (i, s) in mission["ships"].as_array().into_iter().flatten().enumerate().filter(|(_, s)| outside(&s["pos"])) {
         let who = s["name"].as_str().or_else(|| s["type"].as_str()).unwrap_or("ship");
-        out.push(Finding::in_file(Level::Warning, "", JsonPath::from("ships").index(i).key("pos"), format!("{who} is at {} , outside world_half {half}", s["pos"])));
+        out.push(Finding::in_file(Level::Warning, "", JsonPath::from("ships").index(i).key("pos"), format!("{who} is at {}, outside world_half {half}", s["pos"])));
     }
     for key in ["objects", "mines"] {
         for (i, o) in map[key].as_array().into_iter().flatten().enumerate().filter(|(_, o)| outside(&o["pos"])) {
             let who = o["type"].as_str().unwrap_or(key);
-            out.push(Finding::in_file(Level::Warning, "map.json", JsonPath::from(key).index(i).key("pos"), format!("{who} is at {} , outside world_half {half}", o["pos"])));
+            out.push(Finding::in_file(Level::Warning, "map.json", JsonPath::from(key).index(i).key("pos"), format!("{who} is at {}, outside world_half {half}", o["pos"])));
         }
     }
     out

@@ -534,6 +534,69 @@ pub fn schema() -> Value {
     v
 }
 
+/// The `type` keyword of the part of a JSON Schema `node` that `value` has to match, as the engine reads it: an integer is `as_i64`
+/// or `as_u64`, a number `as_f64`. Follows `$ref`, `anyOf`/`oneOf`, `properties`, `items` and `additionalProperties`. The problems
+/// as `(path, message)`; `--check-mod` reports them as errors. (No JSON Schema validator is a dependency; this checks the types, which is what a lenient reader hides.)
+pub fn shape_problems(root: &Value, node: &Value, value: &Value, at: &str, out: &mut Vec<(String, String)>) {
+    if let Some(r) = node["$ref"].as_str() {
+        if let Some(target) = root.pointer(r.trim_start_matches('#')) {
+            shape_problems(root, target, value, at, out);
+        }
+        return;
+    }
+    for key in ["anyOf", "oneOf"] {
+        if let Some(variants) = node[key].as_array() {
+            let mut best: Option<Vec<(String, String)>> = None;
+            for v in variants {
+                let mut o = vec![];
+                shape_problems(root, v, value, at, &mut o);
+                if best.as_ref().is_none_or(|b| o.len() < b.len()) {
+                    best = Some(o);
+                }
+            }
+            out.extend(best.unwrap_or_default());
+            return;
+        }
+    }
+    let fits = |t: &str| match t {
+        "null" => value.is_null(),
+        "boolean" => value.is_boolean(),
+        "string" => value.is_string(),
+        "integer" => value.is_i64() || value.is_u64(),
+        "number" => value.is_number(),
+        "array" => value.is_array(),
+        "object" => value.is_object(),
+        _ => true,
+    };
+    let types: Vec<&str> = match &node["type"] {
+        Value::String(t) => vec![t.as_str()],
+        Value::Array(ts) => ts.iter().filter_map(Value::as_str).collect(),
+        _ => vec![],
+    };
+    if !types.is_empty() && !types.iter().any(|t| fits(t)) {
+        out.push((at.to_string(), format!("{} is not {}", serde_json::to_string(value).unwrap_or_default().chars().take(60).collect::<String>(), types.join(" or "))));
+        return;
+    }
+    match value {
+        Value::Object(obj) => {
+            for (k, v) in obj {
+                let child = if at.is_empty() { k.clone() } else { format!("{at}.{k}") };
+                match node["properties"].get(k) {
+                    Some(p) => shape_problems(root, p, v, &child, out),
+                    None if node["additionalProperties"].is_object() => shape_problems(root, &node["additionalProperties"], v, &child, out),
+                    None => {}
+                }
+            }
+        }
+        Value::Array(items) if node.get("items").is_some() => {
+            for (i, v) in items.iter().enumerate() {
+                shape_problems(root, &node["items"], v, &format!("{at}[{i}]"), out);
+            }
+        }
+        _ => {}
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -647,74 +710,11 @@ mod tests {
         assert_eq!(d.victory.iter().map(|r| r.conditions.as_ref().map(Vec::len)).collect::<Vec<_>>(), [None, Some(0), None, None]);
     }
 
-    /// The `type` keyword of the part of a JSON Schema `node` that `value` has to match, as the engine reads it: an integer is `as_i64`
-    /// or `as_u64`, a number `as_f64`. Follows `$ref`, `anyOf`/`oneOf`, `properties`, `items` and `additionalProperties`. The problems
-    /// as `(path, message)`. (No JSON Schema validator is a dependency; this checks the types, which is what a lenient reader hides.)
-    pub(crate) fn shape_problems(root: &Value, node: &Value, value: &Value, at: &str, out: &mut Vec<String>) {
-        if let Some(r) = node["$ref"].as_str() {
-            if let Some(target) = root.pointer(r.trim_start_matches('#')) {
-                shape_problems(root, target, value, at, out);
-            }
-            return;
-        }
-        for key in ["anyOf", "oneOf"] {
-            if let Some(variants) = node[key].as_array() {
-                let mut best: Option<Vec<String>> = None;
-                for v in variants {
-                    let mut o = vec![];
-                    shape_problems(root, v, value, at, &mut o);
-                    if best.as_ref().is_none_or(|b| o.len() < b.len()) {
-                        best = Some(o);
-                    }
-                }
-                out.extend(best.unwrap_or_default());
-                return;
-            }
-        }
-        let fits = |t: &str| match t {
-            "null" => value.is_null(),
-            "boolean" => value.is_boolean(),
-            "string" => value.is_string(),
-            "integer" => value.is_i64() || value.is_u64(),
-            "number" => value.is_number(),
-            "array" => value.is_array(),
-            "object" => value.is_object(),
-            _ => true,
-        };
-        let types: Vec<&str> = match &node["type"] {
-            Value::String(t) => vec![t.as_str()],
-            Value::Array(ts) => ts.iter().filter_map(Value::as_str).collect(),
-            _ => vec![],
-        };
-        if !types.is_empty() && !types.iter().any(|t| fits(t)) {
-            out.push(format!("{at}: {} is not {}", serde_json::to_string(value).unwrap_or_default().chars().take(60).collect::<String>(), types.join(" or ")));
-            return;
-        }
-        match value {
-            Value::Object(obj) => {
-                for (k, v) in obj {
-                    let child = if at.is_empty() { k.clone() } else { format!("{at}.{k}") };
-                    match node["properties"].get(k) {
-                        Some(p) => shape_problems(root, p, v, &child, out),
-                        None if node["additionalProperties"].is_object() => shape_problems(root, &node["additionalProperties"], v, &child, out),
-                        None => {}
-                    }
-                }
-            }
-            Value::Array(items) if node.get("items").is_some() => {
-                for (i, v) in items.iter().enumerate() {
-                    shape_problems(root, &node["items"], v, &format!("{at}[{i}]"), out);
-                }
-            }
-            _ => {}
-        }
-    }
-
     fn problems(map: &Value) -> Vec<String> {
         let mut out = vec![];
         let schema = schema();
         shape_problems(&schema, &schema, map, "", &mut out);
-        out
+        out.into_iter().map(|(at, why)| format!("{at}: {why}")).collect()
     }
 
     #[test]
@@ -818,7 +818,7 @@ mod tests {
             maps += 1;
             let mut found = vec![];
             shape_problems(&schema, &schema, &value, "", &mut found);
-            failures.extend(found.into_iter().map(|p| format!("{id}: {p}")));
+            failures.extend(found.into_iter().map(|(at, why)| format!("{id}: {at}: {why}")));
             unknown.extend(crate::authoring::unknown_keys(&schema, &value).into_iter().map(|(path, _)| {
                 // one line per key kind, not per element: `objects[12].foo` -> `objects[].foo`
                 let mut out = String::new();

@@ -11,6 +11,9 @@ import sys
 import tarfile
 from pathlib import Path
 
+import tomllib
+
+from tools import import_assets
 from tools.paths import REPO
 
 SUFFIX = ".exe" if sys.platform == "win32" else ""
@@ -30,7 +33,8 @@ This download contains no game content: you need your own copy of the original g
    the game folder) and converts it once (read-only, a minute or two) into {assets}, then the game starts.
 2. Or convert from a terminal in this folder:
      {importer} --game "<path to Treasure Planet Battle at Procyon>"
-   pass --out <dir> to put the assets elsewhere and set PROCYON_ASSETS to that folder.
+   (it writes the per-user folder the game reads, so the game starts without converting again). Pass --out <dir> to put
+   the assets elsewhere and set PROCYON_ASSETS to that folder.
    Then run {game} (add --mission 1 to go straight into Mission 1).
 3. Optional HD skies: in Mods, pick "Remaster look" and press "Bake HD skies" (a few minutes, once). They are made from your
    own game files, so they cannot be part of the download. From a terminal: {importer} --bake-skies
@@ -127,7 +131,7 @@ def third_party_notices():
             text = f.read_text(encoding="utf-8", errors="replace").strip()
             texts.setdefault(" ".join(text.split()), (text, []))[1].append(label)
         if not files:
-            # ponytail: crates without a licence file get only their SPDX expression; add the standard texts if a licence asks for more.
+            # PROVISIONAL: crates without a licence file get only their SPDX expression; add the standard texts if a licence asks for more.
             lines.append(
                 "  (no licence file in the package; licence by its SPDX expression above)"
             )
@@ -136,9 +140,20 @@ def third_party_notices():
     return "\n".join(lines) + "\n"
 
 
+def game_version():
+    """The version in game/Cargo.toml: what the game stamps its own imports with (`CARGO_PKG_VERSION`)."""
+    with (REPO / "game/Cargo.toml").open("rb") as f:
+        return tomllib.load(f)["package"]["version"]
+
+
 def freeze_importer(work):
     """openprocyon-import: tools.import_assets with every tools module it runs in-process, plus the content/ files they read."""
     data = [f"--add-data={REPO / f}:{Path(f).parent.as_posix()}" for f in IMPORTER_DATA]
+    # The importer stamps the folders it writes with the game's version (import.json), so the game does not convert them again.
+    work.mkdir(parents=True, exist_ok=True)
+    version = work / import_assets.VERSION_FILE
+    version.write_text(game_version(), encoding="utf-8")
+    data.append(f"--add-data={version}:.")
     subprocess.run(
         [
             sys.executable,

@@ -46,7 +46,7 @@ def rounded(clip, names, layers):
 
 def lone_leaf_layers(scene):
     """{id: element} of the mesh layers whose pivot and rest angles are exported: no layer under them, no rotated parent, a name
-    used once. ponytail: the remake places layers flat (no parent hierarchy) and by name, so crane arms and repeated names keep
+    used once. PROVISIONAL: the remake places layers flat (no parent hierarchy) and by name, so crane arms and repeated names keep
     the rest-less pose until the scene hierarchy is built."""
     elements = {e["id"]: e for g in ("nodes", "meshes") for e in scene[g]}
 

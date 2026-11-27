@@ -18,9 +18,27 @@ pub fn walk(dir: &Path, rel: &Path, out: &mut Vec<PathBuf>) {
 
 fn link(from: &Path, to: &Path) {
     let from = std::fs::canonicalize(from).expect("canonical asset path");
-    let _ = std::fs::remove_file(to);
+    // Two game instances can build into the same `local/overlay` at once (#136): the other's remove and symlink interleave with ours,
+    // and it may delete the folder under us. An existing link is retried, and accepted when it already points where ours would (both
+    // build the same tree); a missing folder is made again.
     #[cfg(unix)]
-    std::os::unix::fs::symlink(&from, to).expect("symlink");
+    for attempt in 0.. {
+        let _ = std::fs::remove_file(to);
+        match std::os::unix::fs::symlink(&from, to) {
+            Ok(()) => break,
+            Err(e) if attempt < 16 && e.kind() == std::io::ErrorKind::AlreadyExists => {
+                if std::fs::read_link(to).is_ok_and(|t| t == from) {
+                    break;
+                }
+            }
+            Err(e) if attempt < 16 && e.kind() == std::io::ErrorKind::NotFound => {
+                let _ = std::fs::create_dir_all(to.parent().unwrap_or(Path::new(".")));
+            }
+            Err(e) => panic!("symlink {}: {e}", to.display()),
+        }
+    }
+    #[cfg(not(unix))]
+    let _ = std::fs::remove_file(to);
     // A hard link costs nothing (symlinks need a privilege on Windows); a copy when the overlay is on another volume.
     // Safe because the overlay never writes through a file: merged ones are removed first and written anew.
     #[cfg(not(unix))]
@@ -28,6 +46,9 @@ fn link(from: &Path, to: &Path) {
         std::fs::copy(&from, to).expect("copy");
     }
 }
+
+/// Builds in this process never overlap (two threads, or two tests, building the same folder would delete each other's tree).
+static BUILDING: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 static ACTIVE: std::sync::OnceLock<Vec<PathBuf>> = std::sync::OnceLock::new();
 
@@ -619,6 +640,7 @@ pub fn overlay_into(base: &Path, mods: &[PathBuf], out: &Path) -> Result<ModRepo
 
 /// The shared core: replaces `root` with base links plus the mods' files. `marked` writes the overlay mark (a folder the caller chose).
 fn build_overlay(base: &Path, mods: &[PathBuf], root: &Path, marked: bool) -> ModReport {
+    let _one_at_a_time = BUILDING.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     let mut report = ModReport::default();
     if let (Ok(old), Ok(mut all)) = (std::fs::canonicalize(root), ORIGINS.lock()) {
         all.retain(|(k, _, _)| !k.starts_with(&old));
@@ -987,6 +1009,43 @@ mod tests {
         assert!(!disposable(&dir), "somebody's files are never deleted");
         std::fs::write(dir.join(OVERLAY_MARK), "").unwrap();
         assert!(disposable(&dir), "an overlay the game built");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// #136: several game instances start at once and build the same shared `local/overlay`; none may panic. Threads stand in for the
+    /// instances: they hammer one link (the "File exists" panic of the issue) and build the whole overlay over each other.
+    #[cfg(unix)]
+    #[test]
+    fn concurrent_builds_of_one_shared_overlay_do_not_panic() {
+        let dir = std::env::temp_dir().join(format!("procyon-overlay-race-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let (base, m) = (dir.join("assets"), dir.join("mod"));
+        for d in [base.join("data"), m.join("data"), dir.join("shared")] {
+            std::fs::create_dir_all(d).unwrap();
+        }
+        for i in 0..40 {
+            std::fs::write(base.join(format!("data/f{i}.json")), "{}").unwrap();
+        }
+        std::fs::write(m.join("data/extra.json"), "{}").unwrap();
+        let (source, target) = (base.join("data/f0.json"), dir.join("shared/f0.json"));
+        let handles: Vec<_> = (0..8)
+            .map(|_| {
+                let (base, m, source, target) = (base.clone(), m.clone(), source.clone(), target.clone());
+                std::thread::spawn(move || {
+                    for _ in 0..200 {
+                        link(&source, &target);
+                    }
+                    for _ in 0..3 {
+                        overlay_report(&base, std::slice::from_ref(&m), None);
+                    }
+                })
+            })
+            .collect();
+        for h in handles {
+            h.join().expect("an overlay build panicked");
+        }
+        assert_eq!(std::fs::read_link(&target).unwrap(), std::fs::canonicalize(source).unwrap());
+        assert!(dir.join("local/overlay/data/extra.json").exists());
         std::fs::remove_dir_all(dir).unwrap();
     }
 

@@ -1,5 +1,7 @@
 import contextlib
 import io
+import json
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -20,6 +22,24 @@ class ImportAssets(unittest.TestCase):
                 {"PROCYON_GAME_ROOT": "D:/Games/My Game", "OTHER": "x"},
             )
             self.assertEqual(import_assets.read_env(Path(d, "missing")), {})
+
+    def test_stamp_has_the_shape_the_game_reads(self):
+        with tempfile.TemporaryDirectory() as d:
+            import_assets.write_stamp(d, "0.2.0", Path("/games/tp"))
+            stamp = json.loads(Path(d, "import.json").read_text(encoding="utf-8"))
+            self.assertEqual(
+                stamp, {"version": "0.2.0", "game": str(Path("/games/tp"))}
+            )
+
+    def test_only_a_packaged_importer_knows_the_game_version(self):
+        self.assertIsNone(import_assets.game_version())  # a checkout: not frozen
+        with tempfile.TemporaryDirectory() as d:
+            Path(d, import_assets.VERSION_FILE).write_text("0.2.0\n")
+            with (
+                mock.patch.object(import_assets, "FROZEN", True),
+                mock.patch.object(sys, "_MEIPASS", d, create=True),
+            ):
+                self.assertEqual(import_assets.game_version(), "0.2.0")
 
     def test_refuses_a_folder_that_is_not_an_install(self):
         with tempfile.TemporaryDirectory() as d, self.assertRaises(SystemExit) as e:

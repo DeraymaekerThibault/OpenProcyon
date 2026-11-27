@@ -113,7 +113,9 @@ fn ships_lists_units_with_their_state_and_filters() {
     let all = run(&mut sc, "ships", &env).1.lines;
     assert_eq!(all.len(), 4, "three units and the count: {all:?}");
     let raider = all.iter().find(|l| l.contains("Raider")).unwrap();
-    assert!(raider.contains("#3") && raider.contains("[Raiders]") && raider.contains("(1, 2)") && raider.contains("Aggressive") && raider.contains("dmg 0%"), "{raider}");
+    assert!(raider.contains("#3") && raider.contains("[Raiders]") && raider.contains("(1, 2, 0)") && raider.contains("Aggressive") && raider.contains("dmg 0%"), "{raider}");
+    // #678: the height is printed too (the flagship hangs 5 above the plane), so a height set in an editor can be checked in the game.
+    assert!(all.iter().any(|l| l.contains("Flagship") && l.contains("(10, 20, 5)")), "{all:?}");
     assert_eq!(run(&mut sc, "ships raiders", &env).1.lines.len(), 2, "filtered by owner or group");
     let mut w = world();
     w[2].visible = false;

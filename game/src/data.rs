@@ -12,7 +12,7 @@ pub mod mission_doc;
 mod ships;
 mod weapons;
 pub use crew::{CrewMember, roster};
-pub use maps::MapDoc;
+pub use maps::{MapDoc, shape_problems};
 pub use mission_doc::{MediaDoc, MissionDoc};
 pub(crate) use ships::mount_rotation;
 pub use ships::{CREW_POSTS, Fill, SHIP_FILLS, SHIP_REQUIRED_NEW, derive, fill_of, load_class, resolved, try_load_class, try_load_class_without_weapons};

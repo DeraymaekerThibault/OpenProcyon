@@ -132,6 +132,17 @@ fn a_players_import_must_come_from_this_version() {
     std::fs::remove_dir_all(dir).unwrap();
 }
 
+/// #522: the terminal importer (`tools/import_assets.py`) writes the stamp itself, in this exact text, and the game must take it as current.
+#[test]
+fn a_stamp_written_by_the_python_importer_is_current() {
+    let dir = scratch("py_stamp");
+    std::fs::create_dir_all(dir.join("ships")).unwrap();
+    std::fs::write(dir.join(STAMP), "{\n  \"version\": \"0.2.0\",\n  \"game\": \"/games/tp\"\n}\n").unwrap();
+    assert_eq!(imported(&dir, "0.2.0"), Imported::Ready);
+    assert!(matches!(imported(&dir, "0.2.1"), Imported::Outdated { version: Some(v), .. } if v == "0.2.0"));
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
 #[test]
 fn a_finished_import_replaces_the_old_folder_whole() {
     let dir = scratch("swap");
