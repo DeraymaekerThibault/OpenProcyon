@@ -570,6 +570,29 @@
       },
       {
         "match": [
+          "wood",
+          "deck",
+          "hull",
+          "mast",
+          "plank",
+          "dock",
+          "stairs",
+          "seat",
+          "cabin",
+          "bow",
+          "stern",
+          "keel",
+          "cresentia",
+          "porthole",
+          "damage_"
+        ],
+        "roughness": 0.75,
+        "bump": 0.56,
+        "cavity": 0.17,
+        "gloss": 0.25
+      },
+      {
+        "match": [
           "metal",
           "rivet",
           "cannon",
@@ -585,33 +608,23 @@
           "pon_",
           "dome",
           "plate",
-          "arm"
+          "arm",
+          "carronade",
+          "lancer",
+          "plasma",
+          "gattling",
+          "mortar",
+          "mort",
+          "starmine",
+          "harpoon",
+          "grap",
+          "enet"
         ],
         "metallic": 0.65,
         "roughness": 0.45,
         "bump": 0.32,
         "cavity": 0.17,
         "gloss": 0.35
-      },
-      {
-        "match": [
-          "wood",
-          "deck",
-          "hull",
-          "mast",
-          "plank",
-          "dock",
-          "stairs",
-          "seat",
-          "box",
-          "crate",
-          "rail",
-          "damage_"
-        ],
-        "roughness": 0.75,
-        "bump": 0.56,
-        "cavity": 0.17,
-        "gloss": 0.25
       },
       {
         "match": [
@@ -623,12 +636,32 @@
           "moss",
           "cliff",
           "fissure",
-          "mountv"
+          "asteroid",
+          "dirt",
+          "sand",
+          "beach",
+          "crater",
+          "island",
+          "path",
+          "fields",
+          "edge",
+          "trail"
         ],
         "roughness": 0.95,
         "bump": 0.77,
         "cavity": 0.23,
         "gloss": 0.1
+      },
+      {
+        "match": [
+          "box",
+          "crate",
+          "rail"
+        ],
+        "roughness": 0.75,
+        "bump": 0.56,
+        "cavity": 0.17,
+        "gloss": 0.25
       },
       {
         "match": [

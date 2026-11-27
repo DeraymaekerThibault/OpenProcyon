@@ -75,7 +75,8 @@ pub fn plugin(app: &mut App) {
 /// the free camera (which starts where the orbit camera was), for a screenshot of the drawing.
 /// `--script console --mission 1`: opens the developer console at frame 30 and submits a few lines (`god`, `tasks`, `flags`, `why`),
 /// then checks at frame 60 that `god` reached the player's ship and that the session is marked as cheated. Shot frames after 60
-/// show the open console.
+/// show the open console. The batch has no `restart`: a restart clears the cheats and `god` (docs/development.md), so the checks
+/// could not hold afterwards.
 fn console(
     cfg: Res<Config>,
     mission: Option<Res<Mission>>,
@@ -97,7 +98,7 @@ fn console(
     if !*submitted {
         *submitted = true;
         console.open = true;
-        for line in ["god", "tasks", "why Player Reaches Tender", "schema Set Flag Action", "kill", "rules", "ships", "where", "restart", "list groups", "list objects", "find a"] {
+        for line in ["god", "tasks", "why Player Reaches Tender", "schema Set Flag Action", "kill", "rules", "ships", "where", "list groups", "list objects", "find a"] {
             console.submit(line);
         }
     }
