@@ -87,12 +87,12 @@ fn a_target_is_the_players_own_on_the_command_ship_and_an_attack_order_on_a_capt
     send(&mut app, Kind::Target { ship: captain, target: Some(enemy), spot: None });
     frame(&mut app, 40);
     assert_eq!((ordered(&app, me), manual_fire(&app, me).panic), (Some((enemy, Some(Vec3::X))), false), "the player's target and spot; a retarget ends panic fire");
-    assert_eq!(app.world().get::<crate::ship::FleetPilot>(captain).unwrap().target, Some(enemy));
+    assert_eq!(ordered(&app, captain).map(|o| o.0), Some(enemy));
     send(&mut app, Kind::Target { ship: me, target: None, spot: None });
     send(&mut app, Kind::Target { ship: captain, target: None, spot: None });
     frame(&mut app, 40);
     assert_eq!(ordered(&app, me), None, "C clears the command ship's target");
-    assert_eq!(app.world().get::<crate::ship::FleetPilot>(captain).unwrap().target, Some(enemy), "a captain keeps its attack order");
+    assert_eq!(ordered(&app, captain).map(|o| o.0), Some(enemy), "a captain keeps its attack order");
 }
 
 /// A click on water: the command ship sails there (Shift appends, a stopped ship goes to light-green Full), a captain is ordered
@@ -134,7 +134,7 @@ fn move_course_and_cancel_orders_do_what_the_clicks_and_keys_did() {
     assert!(app.world().get::<crate::ship::HoldPosition>(me).is_none(), "the closing click ends it");
     // Backspace: the command ship keeps its engines and loses the lobbed shot; a captain stops and forgets its orders.
     manual_fire_mut(&mut app, me).shot = Some((1, Vec3::ONE));
-    app.world_mut().get_mut::<crate::ship::FleetPilot>(captain).unwrap().attack(enemy);
+    attack(&mut app, captain, enemy);
     app.world_mut().get_mut::<crate::ship::FleetPilot>(captain).unwrap().hold = true;
     app.world_mut().get_mut::<Ship>(captain).unwrap().order = EngineOrder::Full;
     send(&mut app, Kind::Cancel { ship: me });
@@ -143,7 +143,30 @@ fn move_course_and_cancel_orders_do_what_the_clicks_and_keys_did() {
     assert_eq!(manual_fire(&app, me).shot, None);
     assert_eq!((ship(&app, me).waypoints.len(), ship(&app, me).order), (0, EngineOrder::Full));
     let p = app.world().get::<crate::ship::FleetPilot>(captain).unwrap();
-    assert_eq!((p.destination, p.target, p.hold, ship(&app, captain).order), (None, None, false, EngineOrder::Stop));
+    assert_eq!((p.destination, p.hold, ship(&app, captain).order), (None, false, EngineOrder::Stop));
+    assert_eq!(ordered(&app, captain), None, "the cancel clears the captain's target");
+}
+
+/// The original's slot rules for a captain (procyon-re `evidence/ai-captain/`): a move order leaves its target, Stop clears it; the
+/// command ship keeps its attack click through Stop (PROVISIONAL, `commands::clear_target`).
+#[test]
+fn a_move_keeps_a_captains_target_and_stop_clears_it() {
+    let mut app = battle();
+    app.add_message::<crate::docking::DockMsg>();
+    let (me, captain, enemy) = fleet(&mut app);
+    loaded(&mut app);
+    send(&mut app, Kind::Target { ship: captain, target: Some(enemy), spot: Some(Vec3::Y) });
+    send(&mut app, Kind::Target { ship: me, target: Some(enemy), spot: None });
+    frame(&mut app, 40);
+    assert_eq!(ordered(&app, captain), Some((enemy, Some(Vec3::Y))), "the click's spot is kept with the order");
+    send(&mut app, Kind::Move { ship: captain, to: Vec3::new(50.0, 0.0, 50.0), append: false });
+    frame(&mut app, 40);
+    assert_eq!(ordered(&app, captain).map(|o| o.0), Some(enemy), "a move order leaves the target");
+    send(&mut app, Kind::Stop { ship: captain });
+    send(&mut app, Kind::Stop { ship: me });
+    frame(&mut app, 40);
+    assert_eq!(ordered(&app, captain), None, "Stop clears it");
+    assert_eq!(ordered(&app, me).map(|o| o.0), Some(enemy));
 }
 
 /// The right-click menu's Stop, Hold and Cloak.
@@ -171,7 +194,7 @@ fn stop_hold_and_cloak_do_what_the_menu_did() {
     assert_eq!((p.destination, p.hold), (None, true), "Stop leaves the formation hold");
     let msgs: Vec<_> = app.world_mut().resource_mut::<Messages<crate::docking::DockMsg>>().drain().collect();
     assert_eq!(msgs.len(), 2, "Stop also ends a dock routine");
-    app.world_mut().get_mut::<crate::ship::FleetPilot>(captain).unwrap().attack(enemy);
+    attack(&mut app, captain, enemy);
     app.world_mut().get_mut::<crate::ship::FleetPilot>(captain).unwrap().move_to(Vec3::X);
     app.world_mut().get_mut::<Ship>(captain).unwrap().order = EngineOrder::Full;
     send(&mut app, Kind::Hold { ship: captain, on: true });
@@ -551,10 +574,10 @@ fn an_attack_order_on_a_thing_of_no_player_is_dropped() {
     loaded(&mut app);
     send(&mut app, Kind::Target { ship: captain, target: Some(nobody), spot: None });
     frame(&mut app, 40);
-    assert_eq!(app.world().get::<crate::ship::FleetPilot>(captain).unwrap().target, None, "dropped");
+    assert_eq!(ordered(&app, captain), None, "dropped");
     send(&mut app, Kind::Target { ship: captain, target: Some(enemy), spot: None });
     frame(&mut app, 40);
-    assert_eq!(app.world().get::<crate::ship::FleetPilot>(captain).unwrap().target, Some(enemy));
+    assert_eq!(ordered(&app, captain).map(|o| o.0), Some(enemy));
 }
 
 /// A player's Attack, and "fire when possible", make the ship Aggressive (PROVISIONAL).
@@ -686,4 +709,10 @@ fn manual_fire(app: &App, e: Entity) -> crate::combat::ManualFire {
 }
 fn manual_fire_mut(app: &mut App, e: Entity) -> Mut<'_, crate::combat::ManualFire> {
     app.world_mut().get_mut::<crate::combat::ManualFire>(e).expect("a command ship")
+}
+
+/// An attack order on a captain, as `apply` gives it.
+fn attack(app: &mut App, e: Entity, target: Entity) {
+    app.world_mut().get_mut::<crate::ship::FleetPilot>(e).unwrap().attack();
+    *app.world_mut().get_mut::<crate::ship::TargetSlot>(e).unwrap() = crate::ship::TargetSlot::order(Some(target), None);
 }

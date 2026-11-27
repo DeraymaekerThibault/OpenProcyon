@@ -269,7 +269,11 @@ pub fn apply(world: &mut World, player: PlayerId, kind: &Kind) {
                 && attackable(world, ship, target)
                 && let Some(mut p) = world.get_mut::<crate::ship::FleetPilot>(ship)
             {
-                p.attack(target);
+                p.attack();
+                // The click and its spot go into the ship's slot, kept for the life of the order (procyon-re `evidence/ai-captain/`).
+                if let Some(mut slot) = world.get_mut::<crate::ship::TargetSlot>(ship) {
+                    *slot = crate::ship::TargetSlot::order(Some(target), spot);
+                }
                 crate::ship::aggressive(world, ship);
             }
         }
@@ -369,8 +373,8 @@ fn apply_movement(world: &mut World, player: PlayerId, kind: &Kind) {
                 }
             } else if let Some(mut p) = world.get_mut::<crate::ship::FleetPilot>(ship) {
                 p.destination = None;
-                p.target = None;
                 p.hold = false;
+                clear_target(world, ship);
             }
         }
         _ => {}
@@ -386,6 +390,7 @@ fn apply_menu(world: &mut World, kind: &Kind) {
             }
             if let Some(mut p) = world.get_mut::<crate::ship::FleetPilot>(ship) {
                 p.cancel_actions();
+                clear_target(world, ship);
             }
             dock_msg(world, crate::docking::DockMsg::CancelShip(ship));
         }
@@ -1119,3 +1124,13 @@ pub fn plugin(app: &mut App) {
 
 #[cfg(test)]
 mod tests;
+
+/// Stop and cancel end a captain's target (the original's cancel clears the ship's slot). PROVISIONAL: a command ship keeps its
+/// attack click, as before the slot; whether the original's cancel clears a human command ship's target is not read.
+fn clear_target(world: &mut World, ship: Entity) {
+    if world.get::<Commander>(ship).is_none()
+        && let Some(mut slot) = world.get_mut::<crate::ship::TargetSlot>(ship)
+    {
+        slot.0 = None;
+    }
+}

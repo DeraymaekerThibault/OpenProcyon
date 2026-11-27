@@ -134,7 +134,7 @@ fn decide_world_marks(
     mut marks: ResMut<WorldMarks>,
     command: Query<&crate::ship::TargetSlot, With<crate::PlayerShip>>,
     fleets: Res<crate::ship::Fleets>,
-    pilots: Query<&crate::ship::FleetPilot>,
+    pilots: Query<&crate::ship::TargetSlot, With<crate::ship::FleetPilot>>,
     ships: Query<(Entity, &Health, Option<&crate::campaign::MissionShip>), With<Ship>>,
     animals: Query<&crate::environment::SpaceAnimal>,
     sensors: Res<crate::environment::Sensors>,
@@ -148,7 +148,7 @@ fn decide_world_marks(
         }
     }
     if !hud_off {
-        let ordered = fleets.selected.map(|e| (pilots.get(e).ok().and_then(|p| p.target), ships.get(e).ok().and_then(|s| s.2.and_then(|m| m.ordered))));
+        let ordered = fleets.selected.map(|e| (pilots.get(e).ok().and_then(|s| s.ordered()).map(|o| o.0), ships.get(e).ok().and_then(|s| s.2.and_then(|m| m.ordered))));
         let (pilot, mission_target) = ordered.unwrap_or((None, None));
         let manual = command.single().ok().and_then(crate::ship::TargetSlot::ordered).map(|o| o.0);
         next.reticle = reticle_target(fleets.direct(), manual, pilot, mission_target).filter(|&e| {
@@ -1233,7 +1233,8 @@ pub mod tests {
                 alive(),
                 at(10.0),
                 crate::ship::FleetMember("Player".into(), 1),
-                crate::ship::FleetPilot { target: Some(enemy), ..default() },
+                crate::ship::FleetPilot::default(),
+                crate::ship::TargetSlot::order(Some(enemy), None),
             ))
             .id();
         let hidden = world.spawn((Ship::new(0, enemy_side), alive(), at(25.0), mission_ship(false))).id();
@@ -1287,7 +1288,7 @@ pub mod tests {
         let (enemy, animal, far, fleet) = (w.enemy, w.animal, w.far, w.fleet);
         w.app.world_mut().resource_mut::<crate::ship::Fleets>().selected = Some(fleet);
         assert_eq!(marks(&mut w, Some(animal)).0, Some(enemy), "the fleet pilot's order wins over the player's aim");
-        w.app.world_mut().get_mut::<crate::ship::FleetPilot>(fleet).unwrap().target = Some(far);
+        *w.app.world_mut().get_mut::<crate::ship::TargetSlot>(fleet).unwrap() = crate::ship::TargetSlot::order(Some(far), None);
         assert_eq!(marks(&mut w, Some(enemy)).0, None, "an ordered target out of sight is not marked either");
     }
 

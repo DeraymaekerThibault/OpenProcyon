@@ -48,10 +48,7 @@ pub(super) fn ai_boarding(
         }
         // An explicit fleet order, else the ship's target slot (ship::TargetSlot), else (computer ships off the human's side) the
         // player's ship.
-        let target = pilot
-            .and_then(|p| p.target)
-            .or_else(|| captains.get(e).ok().and_then(crate::ship::TargetSlot::target))
-            .or_else(|| me.filter(|_| !boarders.table().with_human(ship.side)));
+        let target = captains.get(e).ok().and_then(crate::ship::TargetSlot::target).or_else(|| me.filter(|_| !boarders.table().with_human(ship.side)));
         let strong = own.strength.attack > AI_MIN_ATTACK;
         if let Some(t) = target.filter(|t| boarders.hostile(e, *t))
             && let Ok((ttf, tship)) = targets.get(t)

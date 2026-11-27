@@ -464,7 +464,7 @@ pub(super) fn fire(
         // ships: the nearest living enemy. Enemies: their captain's target.
         let ship_target = if pilot.is_some_and(|p| p.hold_fire) || mission.is_some_and(|m| m.hold_fire) {
             None
-        } else if let Some(t) = pilot.filter(|_| !primary).and_then(|p| p.target) {
+        } else if let Some(t) = pilot.filter(|_| !primary).and(captains.get(me).ok()).and_then(crate::ship::TargetSlot::ordered).map(|o| o.0) {
             seen.iter().find(|c| c.entity == t && table.hostile(c.side, ship.side) && c.visible).map(Contact::aim).or_else(|| rock(t, ship.side, false))
         } else if let (Side::Player, Some(r)) = (ship.side, own.and_then(|t| rock(t, ship.side, true))) {
             Some(r) // selected space object (asteroid or whale)
@@ -922,7 +922,7 @@ pub(super) fn base_fire(
         (Entity, &Transform, &crate::campaign::MissionBase, &ArmedBase, &Health, &mut GunStates, Option<&BaseSide>, Option<&IslandGunnery>, Option<&Visibility>),
         Without<GunPart>,
     >,
-    ships: Query<(&Transform, &Ship, &Health, Option<&crate::campaign::MissionShip>, Entity, Option<&crate::ship::FleetPilot>)>,
+    ships: Query<(&Transform, &Ship, &Health, Option<&crate::campaign::MissionShip>, Entity, &crate::ship::TargetSlot)>,
     mut parts: Query<&mut Transform, (With<GunPart>, Without<Ship>)>,
     (globals, sensors): (Query<&GlobalTransform, With<GunPart>>, Res<crate::environment::Sensors>),
 ) {
@@ -942,11 +942,11 @@ pub(super) fn base_fire(
         // The nearest visible hostile ship in sight.
         let target = ships
             .iter()
-            .filter(|(_, ship, h, m, _, pilot)| {
+            .filter(|(_, ship, h, m, _, slot)| {
                 !h.destroyed
                     && !island.is_some_and(|i| i.silent)
                     // PROVISIONAL: a Neutral island fires only at ships whose captain targets it.
-                    && !island.is_some_and(|i| i.neutral && !pilot.is_some_and(|p| p.target == Some(me)))
+                    && !island.is_some_and(|i| i.neutral && slot.target() != Some(me))
                     && m.is_none_or(|m| m.visible)
                     && own.is_some_and(|o| table.hostile(o, ship.side))
             })

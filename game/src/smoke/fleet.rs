@@ -380,7 +380,7 @@ fn fleet(world: &mut World, frame: u32, previous: &mut Option<Entity>) {
         }
         47 => {
             let actor = world.resource::<ship::Fleets>().selected.unwrap();
-            let target = world.get::<ship::FleetPilot>(actor).unwrap().target.expect("secondary world attack must reach its captain");
+            let target = world.get::<ship::TargetSlot>(actor).and_then(ship::TargetSlot::ordered).map(|o| o.0).expect("secondary world attack must reach its captain");
             assert_eq!(world.get::<Ship>(target).unwrap().side, Side::Enemy);
             assert!(manual_target(world).is_none(), "secondary attack must not overwrite the primary target");
         }

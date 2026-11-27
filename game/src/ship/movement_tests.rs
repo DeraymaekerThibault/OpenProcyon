@@ -49,8 +49,8 @@ fn secondary_selection_focus_and_orders_do_not_promote_or_touch_siblings() {
     w.get_mut::<FleetPilot>(actor).unwrap().move_to(Vec3::new(100.0, 0.0, -200.0));
     assert!(w.get::<FleetPilot>(ids[0]).unwrap().destination.is_none());
     assert!(w.get::<FleetPilot>(ids[1]).unwrap().destination.is_none());
-    w.get_mut::<FleetPilot>(actor).unwrap().attack(ids[5]);
-    assert_eq!(w.get::<FleetPilot>(actor).unwrap().target, Some(ids[5]));
+    attack(&mut w, actor, ids[5]);
+    assert_eq!(ordered(&w, actor), Some(ids[5]));
     assert_eq!(crate::testutil::command_target(&mut w), None);
     assert_eq!(w.resource::<Fleets>().primary(), Some(ids[0]));
     w.resource_scope(|w, mut f: Mut<Fleets>| {
@@ -107,7 +107,7 @@ fn formation_detach_attack_rejoin_release_and_fleet_help_are_per_secondary() {
     set_formation(&mut w, "Player", Some(Formation::Diamond), true);
     assert!(!w.get::<FleetPilot>(ids[0]).unwrap().hold);
     w.get_mut::<FleetPilot>(ids[1]).unwrap().move_to(Vec3::X * 100.0);
-    w.get_mut::<FleetPilot>(ids[2]).unwrap().attack(ids[5]);
+    attack(&mut w, ids[2], ids[5]);
     assert!(!w.get::<FleetPilot>(ids[1]).unwrap().hold);
     assert!(w.get::<FleetPilot>(ids[2]).unwrap().hold);
     assert!(w.get::<FleetPilot>(ids[3]).unwrap().hold);
@@ -117,12 +117,12 @@ fn formation_detach_attack_rejoin_release_and_fleet_help_are_per_secondary() {
     set_formation(&mut w, "Player", Some(Formation::Diamond), false);
     assert_eq!(w.resource::<Fleets>().groups["Player"].formation, Formation::Diamond);
     assert!(ids[1..4].iter().all(|e| !w.get::<FleetPilot>(*e).unwrap().hold));
-    w.get_mut::<FleetPilot>(ids[2]).unwrap().target = None;
+    w.get_mut::<TargetSlot>(ids[2]).unwrap().0 = None;
     fleet_help(&mut w, "Player", true); // No primary target: no invented attack.
-    assert!(w.get::<FleetPilot>(ids[2]).unwrap().target.is_none());
+    assert!(ordered(&w, ids[2]).is_none());
     crate::testutil::set_command_target(&mut w, Some(ids[5]));
     fleet_help(&mut w, "Player", true);
-    assert!(ids[1..4].iter().all(|e| w.get::<FleetPilot>(*e).unwrap().target == Some(ids[5])));
+    assert!(ids[1..4].iter().all(|e| ordered(&w, *e) == Some(ids[5])));
     fleet_help(&mut w, "Player", false);
     assert!(!w.get::<FleetPilot>(ids[0]).unwrap().hold_fire);
     assert!(ids[1..4].iter().all(|e| w.get::<FleetPilot>(*e).unwrap().hold_fire));
@@ -242,10 +242,10 @@ fn destruction_despawn_empty_and_scenario_reset_clear_stale_fleet_state() {
     reconcile_fleets(&mut w);
     assert_eq!(w.resource::<Fleets>().roster(), &[ids[3]]);
     assert!(w.get::<PlayerShip>(ids[2]).is_none());
-    w.get_mut::<FleetPilot>(ids[3]).unwrap().target = Some(ids[5]);
+    *w.get_mut::<TargetSlot>(ids[3]).unwrap() = TargetSlot::order(Some(ids[5]), None);
     w.get_mut::<Ship>(ids[5]).unwrap().side = Side::Player;
     reconcile_fleets(&mut w);
-    assert!(w.get::<FleetPilot>(ids[3]).unwrap().target.is_none(), "capture/alliance changes must not leave a friendly attack target");
+    assert!(ordered(&w, ids[3]).is_none(), "capture/alliance changes must not leave a friendly attack target");
     w.despawn(ids[3]);
     reconcile_fleets(&mut w);
     assert_eq!(w.resource::<Fleets>().selected, None);
@@ -718,19 +718,17 @@ fn hold_and_stop_zero_the_controls_and_end_the_course() {
 }
 
 #[test]
-fn hold_ends_a_captains_destination_but_keeps_its_target_and_formation_hold() {
-    let target = Entity::from_raw_u32(7).unwrap();
-    let mut p = FleetPilot { hold: true, target: Some(target), destination: Some(Vec3::X), hold_fire: true, ..default() };
+fn hold_ends_a_captains_destination_but_keeps_its_formation_hold() {
+    let mut p = FleetPilot { hold: true, destination: Some(Vec3::X), hold_fire: true, ..default() };
     p.hold_position();
-    assert_eq!((p.destination, p.target, p.hold, p.hold_fire), (None, Some(target), true, true));
+    assert_eq!((p.destination, p.hold, p.hold_fire), (None, true, true));
 }
 
 #[test]
 fn stop_leaves_formation_hold_and_hold_fire_alone() {
-    let target = Entity::from_raw_u32(7).unwrap();
-    let mut p = FleetPilot { hold: true, target: Some(target), destination: Some(Vec3::X), hold_fire: true, ..default() };
+    let mut p = FleetPilot { hold: true, destination: Some(Vec3::X), hold_fire: true, ..default() };
     p.cancel_actions();
-    assert_eq!((p.destination, p.target, p.hold, p.hold_fire), (None, None, true, true));
+    assert_eq!((p.destination, p.hold, p.hold_fire), (None, true, true));
 }
 
 #[test]
@@ -837,9 +835,8 @@ fn a_tower_is_slowed_by_the_mass_it_tows() {
 #[test]
 fn an_attack_order_ends_hold_fire_on_that_ship() {
     let mut p = FleetPilot { hold_fire: true, ..default() };
-    p.attack(Entity::from_bits(7 | 1 << 32));
+    p.attack();
     assert!(!p.hold_fire);
-    assert_eq!(p.target, Some(Entity::from_bits(7 | 1 << 32)));
 }
 
 /// The Fleet Commands buttons and P as commands (`commands::Kind`) do what the direct calls did.
@@ -876,7 +873,7 @@ fn fleet_orders_as_commands_do_what_the_buttons_did() {
     fleet_help(&mut direct, "Player", true);
     apply(&mut sent, crate::commands::PlayerId(0), &Kind::FleetAttack);
     assert!(pilots(&sent, &ids) == pilots(&direct, &ids));
-    assert!(ids[1..4].iter().all(|e| sent.get::<FleetPilot>(*e).unwrap().target == Some(ids[5])));
+    assert!(ids[1..4].iter().all(|e| ordered(&sent, *e) == Some(ids[5])));
     fleet_help(&mut direct, "Player", false);
     apply(&mut sent, crate::commands::PlayerId(0), &Kind::CeaseFire);
     assert!(pilots(&sent, &ids) == pilots(&direct, &ids));
@@ -1157,7 +1154,7 @@ fn a_defensive_ship_answers_a_visible_attacker_in_scan_range_that_targets_it() {
         let attacker = captain_ship(&mut w, Side::Player, attacker_at);
         let me = captain_ship(&mut w, Side::Enemy, Vec3::ZERO);
         w.entity_mut(me).insert(campaign::MissionShip { stance: crate::rules::Stance::Defensive, ..campaign::MissionShip::placed(1, "d".into(), "o".into()) });
-        w.entity_mut(attacker).insert((FleetPilot { target: Some(me), ..default() }, crate::commands::Commander(crate::commands::PlayerId(0))));
+        w.entity_mut(attacker).insert((FleetPilot::default(), TargetSlot::order(Some(me), None), crate::commands::Commander(crate::commands::PlayerId(0))));
         if cloaked {
             w.entity_mut(attacker).insert(crate::cloak::Cloak::new(true));
         }
@@ -1192,8 +1189,8 @@ fn an_unknown_stance_obeys_orders_and_paths_but_picks_nothing_itself() {
         e
     };
     let (idle, sailing, ordered) = (ship(&mut w, Vec3::ZERO, vec![]), ship(&mut w, Vec3::Z * 10.0, vec![Vec3::Z * 900.0]), ship(&mut w, Vec3::NEG_Z * 10.0, vec![]));
-    w.entity_mut(foe).insert(FleetPilot { target: Some(idle), ..default() }); // it even attacks `idle`
-    w.entity_mut(ordered).insert(FleetPilot { target: Some(foe), ..default() });
+    w.entity_mut(foe).insert((FleetPilot::default(), TargetSlot::order(Some(idle), None))); // it even attacks `idle`
+    w.entity_mut(ordered).insert((FleetPilot::default(), TargetSlot::order(Some(foe), None)));
     think(&mut w);
     let t = |e| w.get::<crate::ship::TargetSlot>(e).and_then(crate::ship::TargetSlot::target);
     assert_eq!((t(idle), w.get::<Ship>(idle).unwrap().order), (None, EngineOrder::Stop), "no pick, no answer: it stops");
@@ -1225,4 +1222,15 @@ fn exploring_draws_its_quarter_point_from_the_battles_seeded_stream() {
     let (mut explore, mut rng) = (Explore::default(), combat::SimRng::new(7));
     let first = explore.goal(&cfg, e, Vec3::ZERO, 100.0, &mut rng.explore);
     assert_eq!(explore.goal(&cfg, e, Vec3::new(300.0, 0.0, 0.0), 100.0, &mut rng.explore), first, "far from it: the same point");
+}
+
+/// A ship's ordered target (its slot with the override flag clear).
+fn ordered(w: &World, e: Entity) -> Option<Entity> {
+    w.get::<TargetSlot>(e).and_then(TargetSlot::ordered).map(|o| o.0)
+}
+
+/// An attack order on a captain, as `commands` applies it.
+fn attack(w: &mut World, e: Entity, target: Entity) {
+    w.get_mut::<FleetPilot>(e).unwrap().attack();
+    *w.get_mut::<TargetSlot>(e).unwrap() = TargetSlot::order(Some(target), None);
 }
