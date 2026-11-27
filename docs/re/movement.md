@@ -318,8 +318,12 @@ Static analysis of the original's AI, written as rules; it explains the island b
   whatever its side or owner; only a lifeboat ignores other lifeboats. Friendly mines are skipped.
 - **When:** twice a second per ship, spread over 0.05 s steps.
 - **Looking ahead:** along the ship's present heading at its present speed for 10 s (less when the next course point is closer), one test per hull length
-  of travel. Other ships are carried along their own heading at their own speed; islands use their collision triangles. The first sample with
-  any contact decides, and of several obstacles there the nearest counts.
+  of travel, starting at the present position (time 0, then one step, two steps, ...). Other ships are carried along their own heading at their own
+  speed. Islands and bases are tested with the same box tree as the contact test ([collision.md](collision.md)): yes or no, each mesh layer in its
+  own pose, the first layer that reports contact deciding; an object without a tree is tested against its single bounding box. Triangles are never
+  used. So the avoider sees land at a pose only where the collision pass would also report contact and push the ship out, and the time-0 sample is
+  clear unless the ship is in contact. The first sample with any contact decides, and of several obstacles there the nearest counts. One island
+  object is one obstacle, whatever its layers. (Static reading, 2026-11-27; an earlier note here said triangles, which was wrong.)
 - **Braking:** the throttle is capped from 0.1 to 1.0 as the gap grows from the ship's radius r to 4r. For land the gap is the distance along the
   course to the contact; for anything else it is the distance between the two spheres.
 - **Turning away:** the present heading is turned in steps of the hull's angular width (2 x atan(half width / length)), up to half a circle each way;
@@ -327,20 +331,30 @@ Static analysis of the original's AI, written as rules; it explains the island b
   ahead on that heading, then on to its course point. The detour is dropped once the straight line to the course point is clear for 17.5 s.
 - **Right of way:** after the same obstacle six thinks in a row (about 3 s), each side's priority is its speed, plus 50 for a moving ship commanded by the
   human; anything that is not a ship has 0. If the obstacle's priority is at least the ship's own, the ship stops for 4 s, again while it persists.
-  So computer ships give way to the human's moving ships, the slower of two computer ships stops, and a moving ship never stops for land.
+  So computer ships give way to the human's moving ships, the slower of two computer ships stops, and a moving ship never stops for land. A ship
+  at exactly zero speed has priority 0, the same as land, so one at rest facing land stops and waits 4 s, again and again.
 - **Inside a black hole or nebula:** straight out to 2r beyond its rim. **Wedged** (unchecked against play): when the same obstacle has been
-  found on more than ten thinks in a row (about 5.5 s), the ship overlaps its bounding sphere (gap under 1 unit) and it barely moves (under
-  0.1 units per 0.033 s), the avoider drops the detour and turns the ship in place toward the side of the smaller clear turn (a tie, or no
-  clear side: the original's sign convention). The turn runs at a fixed sqrt(MaxAngularAcceleration / RotationalFriction) / 3 rad/s (a
-  Carrack 5.7°/s), whatever the speed, rudder, crew or damage; meanwhile nothing else moves the ship and its speed and throttle are kept.
-  It ends on the first think where any condition fails. Retail saves never caught a ship in it: a last resort, since a moving ship's
-  look-ahead keeps it off land. At a standstill the look-ahead covers only obstacles whose sphere the ship already overlaps.
+  found on more than ten thinks in a row (about 5.5 s), the ship overlaps its bounding sphere (gap under 1 unit) and it barely moves, the
+  avoider drops the detour and turns the ship in place toward the side of the smaller clear turn (a tie, or no clear side: the original's sign
+  convention). "Barely moves" is the ship's last position change, squared, below 0.01 (under 0.1 units), whichever write came last in the
+  tick: its own move, a push out of land, or the drift update at the start of a physics step (normally zero). It is not a speed test. The turn
+  runs at a fixed sqrt(MaxAngularAcceleration / RotationalFriction) / 3 rad/s (a Carrack 5.7°/s), whatever the speed, rudder, crew or
+  damage; meanwhile nothing else moves the ship (no nudge, no reverse) and its speed and throttle are kept, so the look-ahead still sweeps
+  10 s x that speed along the turning bow. It ends only on the first think where a condition fails, nothing else (no timer, no full-turn
+  limit, no teleport): a bow turned clear of the land releases it, and so does a push-out over 0.1 units, since the collision pass still runs
+  on a wedged ship. The wedged test does not check which obstacle it met and leaves the same-obstacle count alone (only the normal path
+  changes it), so a ship released while the count is still 11 or more is wedged again on its next think when it meets the same land and
+  barely moves. Retail saves never caught a ship in it: a last resort, since a moving ship's look-ahead keeps it off land. At a standstill
+  the look-ahead covers only obstacles the ship already touches. (Static reading, 2026-11-27; not yet checked in play.)
 - Fits play: computer ships keep clear of each other (both sides steer) but meet the human's ships, which do not steer for them, and stop in front of a
   moving one of them.
 - Remake: `collision/avoid.rs`, run from `collision::sail` for every computer-captained ship and for the human's ships on their dock routine; it sets
   `Ship::avoid` (the speed fraction `ship::step` multiplies in) and puts the detour point in front of the course. PROVISIONAL (not ported yet):
-  mines, torpedoes, dragons, black holes and nebulae as obstacles (black holes and storms are left to `ship::flee`), the sight-range limit. PROVISIONAL: "barely moves" is read as a speed under 3 units/s (the original tests the
-  last position change, push-outs included).
+  mines, torpedoes, dragons, black holes and nebulae as obstacles (black holes and storms are left to `ship::flee`), the sight-range limit.
+  `collision::sail` records each ship's last position change for the wedged test. PROVISIONAL: the layer range the land test walks (all of an
+  island's layers is inferred, not read). Before 2026-11-27 the remake's look-ahead tested islands by their triangles while the contact pass used
+  the tree; where the two disagree (Island_Mega_05's shore on Border Dispute: the triangles reach past the tree) a computer Frigate saw land on
+  every think, nothing pushed it, and it turned in place for the rest of the battle.
 
 ## Computer ships and a hostile base (Border Dispute, 2026-10-27; re-read 2026-10-31)
 

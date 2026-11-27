@@ -98,11 +98,17 @@ class Evaluate(unittest.TestCase):
             evaluate(sunk, {"patrol"}), [], "a ship sunk early is not parked"
         )
 
-    def test_grinding_on_scenery_always_fails(self):
+    def test_a_computer_ship_grinding_on_scenery_always_fails(self):
         self.assertEqual(
             evaluate(report(contact=12.5), set()),
             ["Ship_Pirate_Barque (side1) ground on scenery for 12.5 s"],
         )
+
+    def test_the_humans_ships_are_not_judged_for_grinding(self):
+        # They skip the avoider on attack and move orders and sail into land, as in the original.
+        r = report()
+        r["ships"][0]["worst_contact"] = 31.9
+        self.assertEqual(evaluate(r, set()), [])
 
     def test_stutter_fails(self):
         # Border Dispute before the lazy planner: a 0.5 s route plan every few seconds.

@@ -521,6 +521,7 @@ pub(super) fn fire(
                     radius: class.radius,
                     priority: 0.0,
                     lifeboat: false,
+                    moved: 0.0,
                 };
                 let live =
                     scenery.iter().filter(|(_, _, v, _)| *v != Some(&Visibility::Hidden)).filter_map(|(e, o, _, rock)| rock.filter(|r| r.hp > 0.0).map(|r| (e, o, r.velocity)));

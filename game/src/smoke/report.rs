@@ -189,7 +189,8 @@ fn watch(
         }
         report.sides.entry(side).or_default().alive += 1;
         live.push((ship.side, tf.translation));
-        let touching = crate::collision::touches(class.collision_bounds, tf, &scenery);
+        // The collision pass's own contact (the box tree for islands and bases), so a hull held off the shore does not count.
+        let touching = scenery.iter().any(|o| crate::collision::in_contact(class.collision_bounds, tf, o));
         let line = report.ships.get_mut(&e).unwrap();
         line.sailed += tf.translation.distance(line.last);
         line.last = tf.translation;
