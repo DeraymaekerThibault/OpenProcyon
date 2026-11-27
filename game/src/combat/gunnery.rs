@@ -342,7 +342,7 @@ pub(super) fn fire(
     assets: Res<AssetServer>,
     lib: Res<Library>,
     fxl: Res<FxLib>,
-    (command, mut manual_fire): (Query<&crate::ship::TargetSlot, With<crate::PlayerShip>>, Query<&mut ManualFire>),
+    mut manual_fire: Query<&mut ManualFire>,
     look: Res<Look>,
     (mut rng, spawn_order, mut start): (ResMut<SimRng>, Query<&crate::scenario::SpawnIndex>, crate::scenario::BattleStart),
     mut sfx: MessageWriter<Sfx>,
@@ -398,9 +398,6 @@ pub(super) fn fire(
         .collect();
     // 'NIS Toggle NIS mode Gun Accuracy': scripted broadsides fly true.
     let nis_aim = campaign.as_deref().is_some_and(|m| m.script.nis_accuracy);
-    // The local command ship's attack click and the spot clicked: a contact it names is aimed at that spot, by every shooter.
-    // PROVISIONAL (#369 C, step 3): the spot belongs to the command ship's own slot only.
-    let manual = command.single().ok().and_then(crate::ship::TargetSlot::ordered);
     // Script visibility stays separate from observer-dependent detection.
     let contacts: Vec<Contact> = others
         .iter()
@@ -408,7 +405,7 @@ pub(super) fn fire(
             entity,
             side: ship.side,
             with_human: table.with_human(ship.side),
-            aim_point: transform.transform_point(ship_aim_point(&lib.classes[ship.class], health, manual.filter(|m| m.0 == entity).and_then(|m| m.1))),
+            aim_point: transform.transform_point(ship_aim_point(&lib.classes[ship.class], health, None)),
             // A fully cloaked ship is never picked as a gun target, whoever knows it is there.
             visible: !health.destroyed && mission_ship.is_none_or(|m| m.visible) && cloak.is_none_or(|c| c.state != crate::cloak::State::Full),
             is_player,
@@ -422,7 +419,7 @@ pub(super) fn fire(
         .filter(|(_, _, a, ..)| a.is_none_or(|a| a.visible))
         .filter_map(|(entity, transform, animal, base, side)| {
             let position = match base {
-                Some((b, h, _)) => transform.transform_point(base_aim_point(&lib.classes[b.class], h, manual.filter(|m| m.0 == entity).and_then(|m| m.1))?),
+                Some((b, h, _)) => transform.transform_point(base_aim_point(&lib.classes[b.class], h, None)?),
                 None => transform.translation,
             };
             let owner = animal.map(|a| table.side_or_neutral(&a.owner)).or_else(|| base.and_then(|(_, _, b)| table.base_side(Some(b), side)));
@@ -430,6 +427,15 @@ pub(super) fn fire(
         })
         .collect();
     let rock = |t: Entity, shooter: Side, by_hand: bool| object_target(&space, &table, t, shooter, by_hand);
+    // The world point of a spot clicked on a ship or a base (in its frame), checked against its sections as the click was.
+    let spot_aim = |t: Entity, p: Vec3| -> Option<Vec3> {
+        if let Ok((_, tf, s, h, ..)) = others.get(t) {
+            return Some(tf.transform_point(ship_aim_point(&lib.classes[s.class], h, Some(p))));
+        }
+        let (_, tf, _, base, _) = objects.get(t).ok()?;
+        let (b, h, _) = base?;
+        Some(tf.transform_point(base_aim_point(&lib.classes[b.class], h, Some(p))?))
+    };
     // Bases of any side, for the computer captains that hunt a hostile base.
     let base_targets: Vec<(AimTarget, Side)> = objects
         .iter()
@@ -489,6 +495,13 @@ pub(super) fn fire(
                 },
             }
         };
+        // A human's ship aims at the spot its own attack order names: its click, or the command ship's that fleet attack copied (the
+        // original keeps the click point in the ship's slot for the life of the order).
+        let spot = if primary || pilot.is_some() { captains.get(me).ok().and_then(crate::ship::TargetSlot::ordered) } else { None };
+        let ship_target = ship_target.map(|t| match spot {
+            Some((e, Some(p))) if e == t.entity => AimTarget { position: spot_aim(e, p).unwrap_or(t.position), ..t },
+            _ => t,
+        });
         let ship_target = ship_target.filter(|t| sensors.in_sight(me, t.entity, campaign.as_deref()));
         // A computer captain holds fire while a friendly ship or scenery is on the line to the aim point (docs/re/gunnery.md).
         let blocked = |t: &AimTarget| {
