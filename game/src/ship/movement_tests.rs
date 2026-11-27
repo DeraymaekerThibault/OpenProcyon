@@ -63,24 +63,24 @@ fn secondary_selection_focus_and_orders_do_not_promote_or_touch_siblings() {
 #[ignore = "needs imported assets"]
 fn promotion_checks_membership_reorders_and_preserves_speed_not_camera() {
     let (mut w, ids) = fleet_world();
-    assert!(!promote(&mut w, ids[4], false));
-    assert!(!promote(&mut w, ids[5], false));
+    assert!(!promote(&mut w, PlayerId(0), ids[4], false));
+    assert!(!promote(&mut w, PlayerId(0), ids[5], false));
     let max = full_speed(&w.resource::<Library>().classes[w.get::<Ship>(ids[2]).unwrap().class]);
     w.get_mut::<Ship>(ids[2]).unwrap().speed = max * 0.6;
     w.get_mut::<Ship>(ids[2]).unwrap().cap = 0.75;
     w.resource_mut::<Orbit>().focus = Some(ids[5]);
-    assert!(promote(&mut w, ids[2], false));
+    assert!(promote(&mut w, PlayerId(0), ids[2], false));
     assert_eq!(w.resource::<Fleets>().roster(), &[ids[2], ids[0], ids[1], ids[3]]);
     assert_eq!(w.resource::<Orbit>().focus, Some(ids[5]));
     assert!(w.get::<PlayerShip>(ids[0]).is_none());
     assert!((w.get::<Ship>(ids[2]).unwrap().throttle.unwrap() - 0.8).abs() < 0.001);
     assert_eq!(w.get::<Ship>(ids[2]).unwrap().cap, 0.75, "command fraction must not overwrite the mission speed cap");
-    assert!(promote(&mut w, ids[2], false)); // Already primary still resets.
-    assert!(promote(&mut w, ids[1], false));
+    assert!(promote(&mut w, PlayerId(0), ids[2], false)); // Already primary still resets.
+    assert!(promote(&mut w, PlayerId(0), ids[1], false));
     assert_eq!(w.get::<Ship>(ids[1]).unwrap().throttle, Some(0.0));
     w.insert_resource(campaign::load_id("mission05"));
-    assert!(!promote(&mut w, ids[2], false));
-    assert!(promote(&mut w, ids[2], true));
+    assert!(!promote(&mut w, PlayerId(0), ids[2], false));
+    assert!(promote(&mut w, PlayerId(0), ids[2], true));
 }
 
 #[test]
@@ -91,8 +91,8 @@ fn scripted_cross_group_primary_retires_standin_and_updates_mission_identity() {
     w.entity_mut(ids[0]).insert(ms(-1, "Player", "RLS Stand-in"));
     w.entity_mut(ids[4]).insert(ms(99, "Players Ships", "RLS St Roch"));
     w.insert_resource(campaign::load_id("mission09"));
-    assert!(!promote(&mut w, ids[4], false));
-    assert!(promote(&mut w, ids[4], true));
+    assert!(!promote(&mut w, PlayerId(0), ids[4], false));
+    assert!(promote(&mut w, PlayerId(0), ids[4], true));
     assert!(w.get_entity(ids[0]).is_err());
     assert_eq!(w.resource::<Fleets>().primary(), Some(ids[4]));
     assert_eq!(w.resource::<Fleets>().selected, Some(ids[4]));
@@ -885,7 +885,7 @@ fn fleet_orders_as_commands_do_what_the_buttons_did() {
     apply(&mut sent, crate::commands::PlayerId(0), &Kind::CeaseFire);
     assert!(pilots(&sent, &ids) == pilots(&direct, &ids));
     assert!(sent.resource::<Fleets>().groups["Player"].cease_fire);
-    assert!(promote(&mut direct, ids[2], false));
+    assert!(promote(&mut direct, PlayerId(0), ids[2], false));
     apply(&mut sent, crate::commands::PlayerId(0), &Kind::Promote { ship: ids[2] });
     assert!(pilots(&sent, &ids) == pilots(&direct, &ids));
     assert_eq!(sent.resource::<Fleets>().primary(), Some(ids[2]));

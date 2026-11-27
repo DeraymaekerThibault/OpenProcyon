@@ -157,7 +157,7 @@ fn think(
     skirmish: Option<Res<crate::rules::skirmish::SkirmishScript>>,
     fxl: Option<Res<crate::fx::FxLib>>,
     mut commands: Commands,
-    mut dragons: Query<(Entity, &mut Dragon, &mut SpaceAnimal, &Transform, &mut Visibility), Without<Ship>>,
+    mut dragons: Query<(Entity, &mut Dragon, &mut SpaceAnimal, &Transform, &mut Visibility, Option<&crate::scenario::SpawnIndex>), Without<Ship>>,
     ships: Query<(Entity, &Transform, &Ship, &Health, Option<&MissionShip>, Has<crate::commands::Commander>)>,
     mut sfx: MessageWriter<crate::audio::Sfx>,
     (mut shoot, table): (MessageWriter<crate::combat::Shoot>, crate::alliance::Hostility),
@@ -175,7 +175,7 @@ fn think(
     let num = |v: &Value, d: f32| v.as_f64().map_or(d, |x| x as f32);
     let (muzzle, reload, range) = (num(&gun["muzzle"], 40.0), num(&gun["reload"], 10.0), num(&gun["range"][2], 60.0));
     let bullet = gun["bullet"].as_str().unwrap_or("Bullet_DragonBreath").to_string();
-    for (e, mut d, mut animal, tf, mut vis) in &mut dragons {
+    for (e, mut d, mut animal, tf, mut vis, number) in &mut dragons {
         if animal.dead || !animal.visible {
             animal.paused = false;
             continue;
@@ -235,8 +235,10 @@ fn think(
         let back = d.border.as_deref().and_then(|z| crate::rules::leash(sc, z, d.home, tf.translation));
         let attacking = target.filter(|_| d.stance != Stance::Persistent);
         let goal = if flees {
-            let k = (now * 7.3 + e.index().index() as f32 * 1.7).sin_cos();
-            let r = ((now * 3.1 + e.index().index() as f32).sin().abs()) * 10.0;
+            // Each dragon its own wobble, by its spawn number (not the entity id, #369 section 3).
+            let n = number.map_or(0, |n| n.0) as f32;
+            let k = (now * 7.3 + n * 1.7).sin_cos();
+            let r = ((now * 3.1 + n).sin().abs()) * 10.0;
             Some(d.home.unwrap_or(tf.translation + tf.forward() * 100.0) + Vec3::new(k.0, 0.0, k.1) * r)
         } else if let Some(b) = back {
             Some(b)

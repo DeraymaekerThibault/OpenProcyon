@@ -124,7 +124,7 @@ pub(in crate::rules) fn apply(
             Fx::Primary(units) => {
                 if let Some(e) = units.first().copied() {
                     commands.queue(move |w: &mut World| {
-                        crate::ship::promote(w, e, true);
+                        crate::ship::promote(w, crate::commands::local_player(w), e, true);
                     });
                 }
             }
