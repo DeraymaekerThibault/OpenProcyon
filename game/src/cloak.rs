@@ -220,16 +220,17 @@ fn ai(
     lib: Res<Library>,
     fleets: Res<Fleets>,
     targets: Option<Res<crate::ship::CaptainTargets>>,
-    mut ships: Query<(Entity, &mut Cloak, &Ship, &Transform, &Health, Has<crate::commands::Commander>, Option<&ScanFactor>)>,
+    mut ships: Query<(Entity, &mut Cloak, &Ship, &Transform, &Health, Has<crate::commands::Commander>, Option<&ScanFactor>, Option<&crate::scenario::SpawnIndex>)>,
     others: Query<(Entity, &Ship, &Transform, &Health)>,
     table: crate::alliance::Hostility,
 ) {
-    for (e, mut c, ship, tf, health, primary, scan) in &mut ships {
+    for (e, mut c, ship, tf, health, primary, scan, number) in &mut ships {
         c.ai_in -= time.delta_secs();
         if c.ai_in > 0.0 || !c.ai_modify || primary || health.destroyed || fleets.roster().contains(&e) {
             continue;
         }
-        c.ai_in = AI_PERIOD + (e.index().index() % 5) as f32 * 0.1; // staggered by ship
+        // Staggered by ship: by its spawn number, which every machine and build shares (not the entity id, #369 section 3).
+        c.ai_in = AI_PERIOD + (number.map_or(0, |n| n.0) % 5) as f32 * 0.1;
         let class = &lib.classes[ship.class];
         let scan_range = class.sight * scan.map_or(1.0, |s| s.0);
         let hostile: Vec<Entity> = others
