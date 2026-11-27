@@ -284,9 +284,9 @@ boost (below), not by the crew.
   measured). Remake: `ship::Helm`, one phase for every ship; a ship with no course re-arms it so a new course acts on the next step.
   Unchecked: how long a fresh player order waits for its first think, and the roll amplitude of the weave.
 - **Torque boost (computer only):** while the error is at least 11.25°, the ship's maximum angular acceleration is raised by
-  1 + 3 × (error − 11.25°) / (180° − 11.25°): × 1.16 at 20°, × 1.33 at 30°, × 1.6 at 45°, × 2.4 at 90°, × 4 at 180°. Ships
-  of the human's on an ordinary move order never get it. So a circling computer ship turns faster than its crew factor says:
-  the Carrack's 8.23°/s at a steady error of about 25° (× 1.25).
+  1 + 3 × (error − 11.25°) / (180° − 11.25°): × 1.16 at 20°, × 1.33 at 30°, × 1.6 at 45°, × 2.4 at 90°, × 4 at 180°. A human's
+  command ship on an ordinary move order never gets it; its secondaries, computer-captained, do. So a circling computer ship turns
+  faster than its crew factor says: the Carrack's 8.23°/s at a steady error of about 25° (× 1.25).
 - **Crew:** the navigator factor scales the rudder once, linearly, for every ship ([crew.md](crew.md)); computer ships use their
   navigator factor as is (`ship::COMPUTER_CREW` for ships without named crew), not squared.
 - **Throttle:** the boost step also asks for a low throttle (0.2 down to 0.1 with the error), but the ship's minimum throttle
@@ -316,8 +316,9 @@ importer: a Procyon Minelayer (7.5 units/s) and a Procyon Frigate (6.6) on their
 Static analysis of the original's AI, written as rules; it explains the island behaviour above with the same mechanism for ships.
 - **One avoider for every computer-captained ship:** every AI-steered ship (attacks, ram, board, tow, dock, formation, explore) runs the same
   local avoider while it follows its course. The avoider runs only while the computer controls the ship: a ship whose captain is the human
-  skips it on every routine except a dock order and a scripted path, so a move order the human clicks is sailed in straight lines into
-  ships, rocks and land alike (unchecked against play, 2026-11-20). There is no route planner: a course is a list of points, and only the avoider bends it.
+  (each human's command ship only; a human's secondaries have computer captains, [fleet-controls.md](fleet-controls.md)) skips it on
+  every routine except a dock order and a scripted path, so a move order the human clicks is sailed in straight lines into ships, rocks
+  and land alike (unchecked against play, 2026-11-20). There is no route planner: a course is a list of points, and only the avoider bends it.
 - **Obstacles:** ships, asteroids, black holes, torpedoes, mines, dragons, islands and nebulae (not currents, guns, shells or whales). Every ship counts,
   whatever its side or owner; only a lifeboat ignores other lifeboats. Friendly mines are skipped.
 - **When:** twice a second per ship, spread over 0.05 s steps.
@@ -333,10 +334,10 @@ Static analysis of the original's AI, written as rules; it explains the island b
 - **Turning away:** the present heading is turned in steps of the hull's angular width (2 x atan(half width / length)), up to half a circle each way;
   the smallest turn whose 10 s look-ahead is clear wins, a tie goes away from the destination. The ship sails to a point max(4r, look distance)
   ahead on that heading, then on to its course point. The detour is dropped once the straight line to the course point is clear for 17.5 s.
-- **Right of way:** after the same obstacle six thinks in a row (about 3 s), each side's priority is its speed, plus 50 for a moving ship commanded by the
-  human; anything that is not a ship has 0. If the obstacle's priority is at least the ship's own, the ship stops for 4 s, again while it persists.
-  So computer ships give way to the human's moving ships, the slower of two computer ships stops, and a moving ship never stops for land. A ship
-  at exactly zero speed has priority 0, the same as land, so one at rest facing land stops and waits 4 s, again and again.
+- **Right of way:** after the same obstacle six thinks in a row (about 3 s), each side's priority is its speed, plus 50 for a moving human-captained ship
+  (a human's command ship, not its secondaries); anything that is not a ship has 0. If the obstacle's priority is at least the ship's
+  own, the ship stops for 4 s, again while it persists. So computer ships, a human's secondaries included, give way to a human's moving
+  command ship, the slower of two computer ships stops, and a moving ship never stops for land. A ship at exactly zero speed has priority 0, the same as land, so one at rest facing land stops and waits 4 s, again and again.
 - **Inside a black hole or nebula:** straight out to 2r beyond its rim. **Wedged** (unchecked against play): when the same obstacle has been
   found on more than ten thinks in a row (about 5.5 s), the ship overlaps its bounding sphere (gap under 1 unit) and it barely moves, the
   avoider drops the detour and turns the ship in place toward the side of the smaller clear turn (a tie, or no clear side: the original's sign
@@ -350,10 +351,10 @@ Static analysis of the original's AI, written as rules; it explains the island b
   changes it), so a ship released while the count is still 11 or more is wedged again on its next think when it meets the same land and
   barely moves. Retail saves never caught a ship in it: a last resort, since a moving ship's look-ahead keeps it off land. At a standstill
   the look-ahead covers only obstacles the ship already touches. (Static reading, 2026-11-27; not yet checked in play.)
-- Fits play: computer ships keep clear of each other (both sides steer) but meet the human's ships, which do not steer for them, and stop in front of a
-  moving one of them.
-- Remake: `collision/avoid.rs`, run from `collision::sail` for every computer-captained ship and for the human's ships on their dock routine; it sets
-  `Ship::avoid` (the speed fraction `ship::step` multiplies in) and puts the detour point in front of the course. PROVISIONAL (not ported yet):
+- Fits play: computer ships keep clear of each other (both sides steer) but meet the human's command ship, which does not steer for them, and stop in
+  front of it while it moves.
+- Remake: `collision/avoid.rs`, run from `collision::sail` for every ship but a `commands::Commander` (every computer-captained ship) and for a
+  `Commander` on its dock routine; it sets `Ship::avoid` (the speed fraction `ship::step` multiplies in) and puts the detour point in front of the course. PROVISIONAL (not ported yet):
   mines, torpedoes, dragons, black holes and nebulae as obstacles (black holes and storms are left to `ship::flee`), the sight-range limit.
   `collision::sail` records each ship's last position change for the wedged test. PROVISIONAL: the layer range the land test walks (all of an
   island's layers is inferred, not read). Before 2026-11-27 the remake's look-ahead tested islands by their triangles while the contact pass used

@@ -461,9 +461,7 @@ pub fn sail(
     currents: Query<&crate::environment::Current>,
     mut rams: Option<ResMut<Messages<Ram>>>,
     captains: Query<&crate::campaign::MissionShip>,
-    (fleets, members, mut avoiders, mut rammed, mut moved, dying, mut broken, spawn_order): (
-        Option<Res<crate::ship::Fleets>>,
-        Query<&crate::ship::FleetMember>,
+    (mut avoiders, mut rammed, mut moved, dying, mut broken, spawn_order): (
         Local<HashMap<Entity, avoid::Avoid>>,
         Local<HashMap<Entity, f32>>,
         Local<HashMap<Entity, Vec3>>,
@@ -535,13 +533,13 @@ pub fn sail(
         }
     }
     let tow_masses: HashMap<Entity, f32> = tows.iter().filter_map(|&(tower, towee)| Some((tower, lib.classes[ships.get(towee).ok()?.1.class].phys.mass))).collect();
-    let local = fleets.as_ref().map(|f| f.local.as_str());
-    // The human's ships (`Captain_Human` in the original): the player ship and the human's fleet; allied computer fleets share the side.
-    let humans = |e: Entity, side: crate::Side| side == crate::Side::Player && (human.contains(e) || members.get(e).ok().is_none_or(|m| Some(m.0.as_str()) == local));
+    // A human-captained ship (`Captain_Human` in the original) is a human's command ship only; every other ship, a human's secondaries
+    // included, has a computer captain and avoids, gives way and turns like any computer ship (docs/re/fleet-controls.md).
+    let humans = |e: Entity| human.contains(e);
     // The original's collision avoider (`avoid`) for every computer-captained ship; the human's ships run it only on their dock routine.
     {
         use avoid::{Avoid, Key, Me, Other, Shape};
-        let priority = |e: Entity, s: &crate::Ship| s.speed.abs() + if s.speed.abs() >= 0.001 && humans(e, s.side) { avoid::HUMAN_PRIORITY } else { 0.0 };
+        let priority = |e: Entity, s: &crate::Ship| s.speed.abs() + if s.speed.abs() >= 0.001 && humans(e) { avoid::HUMAN_PRIORITY } else { 0.0 };
         let mut others: Vec<Other> = vec![];
         for (oe, o, v) in &obstacles {
             if v != Some(&Visibility::Hidden) && !ghost(oe) {
@@ -574,7 +572,7 @@ pub fn sail(
             let Ok((_, mut s, tf, health, _, docker)) = ships.get_mut(e) else { continue };
             // A human-captained ship skips the avoider on a move order: the original gates it on "the computer controls this ship",
             // true for the human's ships only on a dock order or a scripted path, so a click course runs straight into ships and rocks.
-            if health.destroyed || docker.map_or(humans(e, s.side), |d| !d.avoids()) || pinned(e) {
+            if health.destroyed || docker.map_or(humans(e), |d| !d.avoids()) || pinned(e) {
                 s.avoid = 1.0;
                 continue;
             }
@@ -662,7 +660,7 @@ pub fn sail(
             crate::ship::helm_step(&mut s, &mut tf, class, &wreck, substep, true);
             tf.rotation = Quat::from_rotation_y(s.heading); // the roll of a sinking hull is the break-up clip's, not the helm's
         } else {
-            let ai = sinking.is_some() || !humans(e, s.side);
+            let ai = sinking.is_some() || !humans(e);
             crate::ship::helm_step(&mut s, &mut tf, class, health, substep, ai);
             if sinking.is_some() {
                 tf.rotation = Quat::from_rotation_y(s.heading);
