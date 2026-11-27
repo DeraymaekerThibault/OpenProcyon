@@ -100,7 +100,7 @@ def layer_offsets(root, scene):
 
 def with_layer_offset(offsets, nodes, n):
     """A scene point (dock, gun) in its scenery mesh layer's frame moves with that layer: n.pos plus its parent layer's
-    offset (layer_offsets). ponytail: immediate parent only; a point under a sub-layer of a layer misses the outer offset."""
+    offset (layer_offsets). PROVISIONAL: immediate parent only; a point under a sub-layer of a layer misses the outer offset."""
     parent = nodes.get(n.parent)
     off = offsets.get(parent.name.lower(), (0, 0, 0)) if parent else (0, 0, 0)
     return tuple(a + b for a, b in zip(n.pos, off, strict=True))

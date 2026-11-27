@@ -44,6 +44,27 @@ MUSIC = ["BTL_NavyBig_Full02.ogg", "FrontEndMusic.ogg"]
 # Layout version of the files an import writes, recorded in <assets>/importer.json (the game does not read it; tools and mods can).
 # Raise it when a file's meaning or location changes. JSON is written by tools.jsonio: indent 2, number lists on one line.
 FORMAT = 1
+# The stamp the game reads (game/src/setup/import.rs): which game version converted this folder, and from which install. Without
+# it the game takes the folder for an outdated import and converts again on first start.
+STAMP = "import.json"
+# The release build bundles the game's version next to the frozen importer (tools/package_release.py); a checkout has none.
+VERSION_FILE = "game_version.txt"
+
+
+def game_version():
+    """The game version this frozen importer was packaged with, or None (running from a checkout)."""
+    bundled = Path(getattr(sys, "_MEIPASS", ""), VERSION_FILE)
+    return (
+        bundled.read_text(encoding="utf-8").strip()
+        if FROZEN and bundled.is_file()
+        else None
+    )
+
+
+def write_stamp(out, version, game):
+    """<out>/import.json in the shape of the game's `setup::write_stamp`, so the game takes the folder as current."""
+    text = json.dumps(dict(version=version, game=str(game)), indent=2)
+    (Path(out) / STAMP).write_text(text + "\n", encoding="utf-8")
 
 
 class StepFailed(Exception):
@@ -384,6 +405,8 @@ def main(argv):
         except StepFailed as e:
             sys.exit(f"import failed at step {name!r}: {e}")
     write(target / "importer.json", dict(format=FORMAT))
+    if version := game_version():
+        write_stamp(target, version, root)
     if target != out:
         try:
             swap_in(target, out)

@@ -862,7 +862,7 @@ fn routine(
 }
 
 /// docs/re/docking-and-orders.md: a base or island whose damage section under a dock point is destroyed loses all its docks for good.
-/// ponytail: the crane parts of that point keep their clip; stopping them is cosmetic.
+/// PROVISIONAL: the crane parts of that point keep their clip; stopping them is cosmetic.
 fn docks_lost(mut q: Query<(&mut Dockable, &crate::combat::ArmedBase, &Health)>, lib: Res<Library>) {
     for (mut dk, base, h) in &mut q {
         if !dk.lost && section_under_dock_lost(&dk.layers, &lib.classes[base.class].sections, &h.sections) {

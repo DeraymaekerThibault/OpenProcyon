@@ -212,6 +212,14 @@ impl Checker<'_> {
                 }
             }
             self.out.extend(unknown_key_findings(schema, &doc, &name));
+            if schema_of(&name) == Some("map.schema.json") {
+                // The loader reads a value of the wrong type as absent (`"objects": "oops"` is an empty list): say so, naming file and field.
+                let mut wrong = vec![];
+                crate::data::shape_problems(schema, schema, &doc, "", &mut wrong);
+                for (at, why) in wrong {
+                    self.error(&name, json_path(&at), format!("{why}; the game reads a value of the wrong type as missing"));
+                }
+            }
         }
         if self.have_base {
             self.references(&files);
@@ -706,6 +714,24 @@ fn missing_required(root: &Value, node: &Value, value: &Value, at: &mut Vec<Stri
     }
 }
 
+/// A path as `shape_problems` writes it (`objects[0].pos[1]`) as a [`JsonPath`].
+fn json_path(dotted: &str) -> JsonPath {
+    let mut path = JsonPath::default();
+    for part in dotted.split('.').filter(|p| !p.is_empty()) {
+        let (key, mut rest) = part.split_once('[').map_or((part, ""), |(k, r)| (k, r));
+        if !key.is_empty() {
+            path = path.key(key);
+        }
+        while let Some((n, after)) = rest.split_once(']') {
+            if let Ok(i) = n.parse() {
+                path = path.index(i);
+            }
+            rest = after.strip_prefix('[').unwrap_or("");
+        }
+    }
+    path
+}
+
 fn schema_of(rel: &str) -> Option<&'static str> {
     match rel {
         "mod.json" => Some("mod.schema.json"),
@@ -714,7 +740,11 @@ fn schema_of(rel: &str) -> Option<&'static str> {
         "data/crew_nodes.json" => Some("crew_nodes.schema.json"),
         _ => {
             let parts: Vec<&str> = rel.split('/').collect();
-            (parts.len() == 3 && parts[0] == "ships" && parts[2] == "ship.json").then_some("ship.schema.json")
+            match parts[..] {
+                ["ships", _, "ship.json"] => Some("ship.schema.json"),
+                ["maps", _, "map.json"] => Some("map.schema.json"),
+                _ => None,
+            }
         }
     }
 }
@@ -954,6 +984,21 @@ mod tests {
         ] {
             assert!(has(&found, Level::Warning, file, path, needle), "missing {file} {path} {needle:?} in\n{all}");
         }
+        std::fs::remove_dir_all(mod_dir).unwrap();
+    }
+
+    /// #677: a map.json the loader reads silently (an unknown key; a string where a list is expected) is told to the modder.
+    #[test]
+    fn a_map_json_with_an_unknown_key_or_a_value_of_the_wrong_type_is_reported_with_file_and_field() {
+        let mod_dir = scratch("badmap");
+        put_json(&mod_dir, "maps/oops/map.json", json!({"objectz": [], "objects": "oops", "world_half": "wide", "extends": "no_such_map"}));
+        put_json(&mod_dir, "maps/fine/map.json", json!({"world_half": 100, "objects": [{"type": "Rock", "scene": "Rock", "pos": [0, 0, 0]}]}));
+        let found = check_mod_with(&mod_dir, None, &[]);
+        let all = lines(&found).join("\n");
+        assert!(has(&found, Level::Warning, "maps/oops/map.json", "objectz", "unknown key 'objectz'"), "{all}");
+        assert!(has(&found, Level::Error, "maps/oops/map.json", "objects", "is not array"), "{all}");
+        assert!(has(&found, Level::Error, "maps/oops/map.json", "world_half", "is not number"), "{all}");
+        assert!(!all.contains("maps/fine/map.json"), "a good map is left alone:\n{all}");
         std::fs::remove_dir_all(mod_dir).unwrap();
     }
 

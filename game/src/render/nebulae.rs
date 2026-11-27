@@ -36,8 +36,36 @@ pub const MAX_STEPS: f32 = 24.0;
 /// mesh, PROVISIONAL).
 const AXES: Vec3 = Vec3::new(1.0, 0.7, 0.99);
 
-/// Seconds a bolt's light lasts inside the cloud.
+/// PROVISIONAL: seconds a bolt's light lasts inside the cloud.
 const FLASH_SECONDS: f32 = 0.3;
+
+/// Values a `nebulae` rule takes when its block leaves a key out. All PROVISIONAL: tuned by eye, not read from the original.
+mod default {
+    use bevy::prelude::Vec3;
+
+    pub const DENSITY: f32 = 1.0;
+    pub const STEPS: f32 = 16.0;
+    pub const SCALE: f32 = 2.2;
+    pub const CHURN: f32 = 0.02;
+    pub const COLOR_LOW: Vec3 = Vec3::new(0.35, 0.15, 0.6);
+    pub const COLOR_HIGH: Vec3 = Vec3::new(1.0, 0.85, 1.0);
+    pub const SHELL: f32 = 0.5;
+    pub const INSIDE: f32 = 0.6;
+    pub const FLASH: f32 = 3.0;
+    pub const FLASH_REACH: f32 = 0.5;
+    pub const ABSORPTION: f32 = 3.0;
+    pub const DUST: f32 = 0.6;
+    pub const MAX_OPACITY: f32 = 0.6;
+    pub const LIGHT_STEPS: f32 = 2.0;
+    pub const SUN: f32 = 1.0;
+}
+
+/// PROVISIONAL: how far the cloud's breath may scale the ellipsoid the volume marches (the retail shell's own range is not measured).
+const BREATH_RANGE: (f32, f32) = (0.8, 1.2);
+
+/// PROVISIONAL: arbitrary per-axis weights that turn a cloud's origin into its place in the baked noise; any three unrelated small
+/// numbers do, they only keep clouds placed apart from looking alike.
+const PLACE_WEIGHTS: Vec3 = Vec3::new(0.0131, 0.0173, 0.0197);
 
 /// The `nebulae` block.
 #[derive(Clone, Debug, PartialEq)]
@@ -106,22 +134,22 @@ pub fn parse(v: &Value) -> Option<Nebulae> {
                     .filter_map(|r| {
                         Some(Rule {
                             matching: r["match"].as_str()?.to_lowercase(),
-                            density: num(&r["density"], 1.0).clamp(0.0, 8.0),
-                            steps: num(&r["steps"], 16.0).clamp(4.0, MAX_STEPS).round(),
-                            scale: num(&r["scale"], 2.2).clamp(0.2, 12.0),
-                            churn: num(&r["churn"], 0.02).clamp(0.0, 1.0),
-                            color_low: rgb(&r["color_low"]).unwrap_or(Vec3::new(0.35, 0.15, 0.6)).max(Vec3::ZERO),
-                            color_high: rgb(&r["color_high"]).unwrap_or(Vec3::new(1.0, 0.85, 1.0)).max(Vec3::ZERO),
-                            shell: num(&r["shell"], 0.5).clamp(0.0, 1.0),
-                            inside: num(&r["inside"], 0.6).clamp(0.0, 1.0),
-                            flash: num(&r["flash"], 3.0).max(0.0),
-                            flash_reach: num(&r["flash_reach"], 0.5).clamp(0.05, 2.0),
+                            density: num(&r["density"], default::DENSITY).clamp(0.0, 8.0),
+                            steps: num(&r["steps"], default::STEPS).clamp(4.0, MAX_STEPS).round(),
+                            scale: num(&r["scale"], default::SCALE).clamp(0.2, 12.0),
+                            churn: num(&r["churn"], default::CHURN).clamp(0.0, 1.0),
+                            color_low: rgb(&r["color_low"]).unwrap_or(default::COLOR_LOW).max(Vec3::ZERO),
+                            color_high: rgb(&r["color_high"]).unwrap_or(default::COLOR_HIGH).max(Vec3::ZERO),
+                            shell: num(&r["shell"], default::SHELL).clamp(0.0, 1.0),
+                            inside: num(&r["inside"], default::INSIDE).clamp(0.0, 1.0),
+                            flash: num(&r["flash"], default::FLASH).max(0.0),
+                            flash_reach: num(&r["flash_reach"], default::FLASH_REACH).clamp(0.05, 2.0),
                             replace: r["replace"].as_bool().unwrap_or(all),
-                            absorption: num(&r["absorption"], 3.0).clamp(0.0, 20.0),
-                            dust: num(&r["dust"], 0.6).clamp(0.0, 4.0),
-                            max_opacity: num(&r["max_opacity"], 0.6).clamp(0.05, 1.0),
-                            light_steps: num(&r["light_steps"], 2.0).clamp(0.0, 3.0).round(),
-                            sun: num(&r["sun"], 1.0).clamp(0.0, 4.0),
+                            absorption: num(&r["absorption"], default::ABSORPTION).clamp(0.0, 20.0),
+                            dust: num(&r["dust"], default::DUST).clamp(0.0, 4.0),
+                            max_opacity: num(&r["max_opacity"], default::MAX_OPACITY).clamp(0.05, 1.0),
+                            light_steps: num(&r["light_steps"], default::LIGHT_STEPS).clamp(0.0, 3.0).round(),
+                            sun: num(&r["sun"], default::SUN).clamp(0.0, 4.0),
                             core_glow: num(&r["core_glow"], 0.0).clamp(0.0, 12.0),
                             color_alt: rgb(&r["color_alt"]).unwrap_or(Vec3::ONE).max(Vec3::ZERO),
                             variation: num(&r["variation"], 0.0).clamp(0.0, 1.0),
@@ -197,7 +225,7 @@ pub type NebulaMaterial = ExtendedMaterial<StandardMaterial, NebulaGlow>;
 
 pub const VOLUME_SHADER: &str = "shaders/volume.wesl";
 
-/// How far the proxy box reaches past the ellipsoid (the shell breathes up to 1.15 times its size; the box bounds the march).
+/// PROVISIONAL: how far the proxy box reaches past the ellipsoid (the shell breathes up to 1.15 times its size; the box bounds the march).
 const BOX_MARGIN: f32 = 1.25;
 
 /// What the volume shader gets at `@group(MATERIAL_BIND_GROUP) @binding(100)`.
@@ -286,7 +314,7 @@ impl Default for SunLight {
 /// Where in the baked noise a cloud placed at `origin` looks (0..1): fixed for the cloud's life, so a storm that travels takes
 /// its gas along, and different for clouds placed apart, so they are not copies of each other.
 fn noise_place(origin: Vec3) -> f32 {
-    (origin.x * 0.0131 + origin.y * 0.0173 + origin.z * 0.0197).rem_euclid(1.0)
+    (origin.x * PLACE_WEIGHTS.x + origin.y * PLACE_WEIGHTS.y + origin.z * PLACE_WEIGHTS.z).rem_euclid(1.0)
 }
 
 impl Rule {
@@ -296,7 +324,7 @@ impl Rule {
         let reach = self.flash_reach * radius;
         VolumeUniform {
             centre: centre.extend(radius),
-            axes: (AXES * cloud.breath().clamp(0.8, 1.2)).extend(self.steps),
+            axes: (AXES * cloud.breath().clamp(BREATH_RANGE.0, BREATH_RANGE.1)).extend(self.steps),
             look: Vec4::new(self.density, self.scale, self.churn, self.absorption),
             low: self.color_low.extend(self.max_opacity),
             high: self.color_high.extend(self.dust),

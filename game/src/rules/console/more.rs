@@ -302,11 +302,11 @@ impl Script {
 
     /// One unit on a line: id, name, owner, groups, hull damage, position (game units), visibility, stance.
     fn describe_unit(&self, u: &Unit, env: &Env) -> String {
-        let (x, y, _) = game_pos(u.pos);
+        let (x, y, z) = game_pos(u.pos);
         let stance = env.ships.iter().find(|i| i.e == Some(u.e)).map_or("-", |i| i.stance.as_str());
         let groups: Vec<&str> = u.groups.iter().map(GroupName::as_str).filter(|g| *g != u.owner.as_str()).collect();
         format!(
-            "#{} {} [{}]{} dmg {:.0}% at ({x:.0}, {y:.0}){}{} {stance}",
+            "#{} {} [{}]{} dmg {:.0}% at ({x:.0}, {y:.0}, {z:.0}){}{} {stance}",
             u.id,
             if u.name.is_empty() { "(unnamed)" } else { &u.name },
             u.owner,
