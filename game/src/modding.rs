@@ -18,23 +18,22 @@ pub fn walk(dir: &Path, rel: &Path, out: &mut Vec<PathBuf>) {
 
 fn link(from: &Path, to: &Path) {
     let from = std::fs::canonicalize(from).expect("canonical asset path");
-    // Two game instances can build into the same `local/overlay` at once (#136): the other's remove and symlink interleave with ours,
-    // and it may delete the folder under us. An existing link is retried, and accepted when it already points where ours would (both
-    // build the same tree); a missing folder is made again.
+    // Two game instances can build into the same `local/overlay` at once (#136). The link is made under a name of our own and renamed
+    // over `to`: a rename replaces an existing link in one step, so no other builder's remove or symlink can come between. A folder
+    // the other instance deleted under us is made again.
     #[cfg(unix)]
-    for attempt in 0.. {
-        let _ = std::fs::remove_file(to);
-        match std::os::unix::fs::symlink(&from, to) {
-            Ok(()) => break,
-            Err(e) if attempt < 16 && e.kind() == std::io::ErrorKind::AlreadyExists => {
-                if std::fs::read_link(to).is_ok_and(|t| t == from) {
-                    break;
+    {
+        let name = to.file_name().map_or("link".into(), |n| n.to_string_lossy());
+        let tmp = to.with_file_name(format!(".{name}.{}.{:?}", std::process::id(), std::thread::current().id()));
+        for attempt in 0.. {
+            let _ = std::fs::remove_file(&tmp);
+            match std::os::unix::fs::symlink(&from, &tmp).and_then(|()| std::fs::rename(&tmp, to)) {
+                Ok(()) => break,
+                Err(e) if attempt < 16 && e.kind() == std::io::ErrorKind::NotFound => {
+                    let _ = std::fs::create_dir_all(to.parent().unwrap_or(Path::new(".")));
                 }
+                Err(e) => panic!("symlink {}: {e}", to.display()),
             }
-            Err(e) if attempt < 16 && e.kind() == std::io::ErrorKind::NotFound => {
-                let _ = std::fs::create_dir_all(to.parent().unwrap_or(Path::new(".")));
-            }
-            Err(e) => panic!("symlink {}: {e}", to.display()),
         }
     }
     #[cfg(not(unix))]
