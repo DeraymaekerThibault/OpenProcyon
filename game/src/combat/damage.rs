@@ -295,11 +295,11 @@ pub fn fires(
         Option<&crate::boarding::Boardable>,
     )>,
     mut fxq: Query<&mut fx::Fx>,
-    (fleets, table): (Option<Res<crate::ship::Fleets>>, crate::alliance::Hostility),
+    (fleets, table, players): (Option<Res<crate::ship::Fleets>>, crate::alliance::Hostility, Option<Res<crate::commands::Players>>),
 ) {
     let dt = time.delta_secs();
     for (me, _, ship, mut hp, mut fires, posts, mission, member, boarding) in &mut ships {
-        let humans = crate::ship::is_human_ship(ship.side, member, fleets.as_deref());
+        let humans = crate::ship::is_human_ship(ship.side, member, players.as_deref(), fleets.as_deref());
         let fires = &mut *fires;
         if hp.destroyed {
             for f in fires.list.drain(..) {

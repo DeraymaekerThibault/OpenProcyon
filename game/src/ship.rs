@@ -415,7 +415,11 @@ pub fn ai(
         crate::alliance::Hostility,
         Query<(&Transform, &combat::Asteroid), Without<Ship>>,
     ),
-    (dragons, mut latched): (Query<(Entity, &Transform, &crate::environment::SpaceAnimal, &crate::dragons::Dragon), Without<Ship>>, Local<std::collections::HashSet<Entity>>),
+    (dragons, mut latched, players): (
+        Query<(Entity, &Transform, &crate::environment::SpaceAnimal, &crate::dragons::Dragon), Without<Ship>>,
+        Local<std::collections::HashSet<Entity>>,
+        Option<Res<crate::commands::Players>>,
+    ),
 ) {
     if start.is_new() {
         (*explore, *breakoffs, *clocks, *courses, *latched) = Default::default();
@@ -452,7 +456,7 @@ pub fn ai(
         let sinking = dying.contains(e);
         let demo = me && !campaign && cfg.shot.is_some() && cfg.script.as_deref() != Some("fleet");
         let steered = me && !sinking && !demo;
-        let human = !sinking && !demo && (is_human_ship(s.side, member, Some(&fleets)) || scripted.get(e).is_ok_and(|m| m.human));
+        let human = !sinking && !demo && (is_human_ship(s.side, member, players.as_deref(), Some(&fleets)) || scripted.get(e).is_ok_and(|m| m.human));
         let script = scripted.get(e).ok().map(|m| (m.ordered, m.ram, m.follow.is_some()));
         if busy.contains(e) || scripted.get(e).is_ok_and(left_to_script) {
             // A dock, tow, grapple or board order (the player's, the script's, or a chosen repair dock) names the ship's target.
@@ -706,17 +710,27 @@ pub fn approach_speed(speed: f32, target: f32, rate: f32, dt: f32) -> f32 {
     if target == 0.0 && (next.abs() < 0.01 || speed.abs() >= STOP_SNAP && next.abs() < STOP_SNAP) { 0.0 } else { next }
 }
 
+/// The player a ship belongs to now: its mission owner, else its fleet's (a capture moves both); none for a ship of neither.
+pub fn owner_of(world: &World, e: Entity) -> Option<crate::names::Owner> {
+    world.get::<campaign::MissionShip>(e).map(|m| m.owner.clone()).or_else(|| world.get::<FleetMember>(e).map(|f| f.0.clone()))
+}
+
 /// Fleet identity is not allegiance: allied skirmish players have different owners.
 #[derive(Component, Clone)]
 pub struct FleetMember(pub crate::names::Owner, pub usize);
 
-/// Whether a ship is the human's own: on the player's side and, when fleets are tracked, in the local player's fleet (or in none).
-/// Allied computer fleets are NOT human. This is the "waits for orders / human scoring" question (captain AI, fire and ram damage
-/// scaling, the battle report). Not the same question as the alliance-table difficulty scaling of shells and blasts
-/// (`combat::shells::side_damage_scale`), nor collision's `humans` (it also counts the `Human` marker). MAINTAINER QUESTION:
-/// shells and blasts scale by alliance, fire and ramming by this ownership test; the original's rule is unconfirmed.
-pub fn is_human_ship(side: Side, member: Option<&FleetMember>, fleets: Option<&Fleets>) -> bool {
-    side == Side::Player && member.is_none_or(|m| fleets.is_none_or(|f| m.0 == f.local))
+/// Whether a ship belongs to a human player (#369 D, docs/re/fleet-controls.md): a fleet ship when a person plays its fleet
+/// (`commands::Players`), whatever its side, so a second human's ships count on any team. Without a table (unit tests, a battle
+/// before setup) the local fleet is the human's; a ship in no fleet counts when it is on the player's side. Allied computer fleets
+/// are not human. This is the "human player" question (the captain's repair docking and exploring, fire and ram damage scaling, the
+/// battle report); a human *captain* is a different one, the command ship only (`commands::Commander`, collision's `humans`). Not the
+/// alliance-table difficulty scaling of shells and blasts (`combat::shells::side_damage_scale`). MAINTAINER QUESTION: shells and
+/// blasts scale by alliance, fire and ramming by this ownership test; the original keys every hit on the owner (docs/re/movement.md).
+pub fn is_human_ship(side: Side, member: Option<&FleetMember>, players: Option<&crate::commands::Players>, fleets: Option<&Fleets>) -> bool {
+    match (member, players.filter(|p| !p.list.is_empty())) {
+        (Some(m), Some(p)) => p.human_owner(&m.0),
+        _ => side == Side::Player && member.is_none_or(|m| fleets.is_none_or(|f| m.0 == f.local)),
+    }
 }
 
 /// A fleet's formation. Named in command logs (`commands.rs`) in snake case.
@@ -981,8 +995,8 @@ pub fn reconcile_fleets(world: &mut World) {
             // original's handoff of the cap after a capture or loss has not been observed. Only a command ship that is still the human's
             // (sunk, not captured) hands its cap on, and never a 0: a captured ship's cap is the new owner's rules', and a 0 (an NIS stop)
             // would strand the player again. Otherwise the replacement gets full throttle.
-            let owner_of = |e: Entity| world.get::<campaign::MissionShip>(e).map(|m| m.owner.clone()).or_else(|| world.get::<FleetMember>(e).map(|f| f.0.clone()));
-            let cap = command.filter(|e| owner_of(*e).as_deref() == Some(owner.as_str())).and_then(|e| world.get::<Ship>(e)).map(|s| s.cap).filter(|c| *c > 0.0).unwrap_or(1.0);
+            let cap =
+                command.filter(|e| owner_of(world, *e).as_deref() == Some(owner.as_str())).and_then(|e| world.get::<Ship>(e)).map(|s| s.cap).filter(|c| *c > 0.0).unwrap_or(1.0);
             if let Some(e) = command {
                 world.entity_mut(e).remove::<Commander>();
             }

@@ -737,3 +737,53 @@ fn attack(app: &mut App, e: Entity, target: Entity) {
     app.world_mut().get_mut::<crate::ship::FleetPilot>(e).unwrap().attack();
     *app.world_mut().get_mut::<crate::ship::TargetSlot>(e).unwrap() = crate::ship::TargetSlot::order(Some(target), None);
 }
+
+/// #369 D: a ship captured by boarding follows its new owner at once. Every machine drops the old owner's order to it alike.
+#[test]
+fn a_captured_ship_takes_orders_from_its_new_owner_only() {
+    let mut app = battle();
+    app.add_message::<crate::docking::DockMsg>();
+    let (_, captain, _) = fleet(&mut app);
+    let player = |owner: &str, side| Player { owner: owner.into(), side, human: true };
+    app.world_mut().insert_resource(Players { list: [(PlayerId(0), player("Player", Side::Player)), (PlayerId(1), player("Enemy", Side::Enemy))].into(), local: PlayerId(0) });
+    app.world_mut().entity_mut(captain).insert(crate::ship::FleetMember("Player".into(), 1));
+    loaded(&mut app);
+    let push = |app: &mut App, player: u8, to: Vec3| {
+        app.world_mut().resource_mut::<Outbox>().0.push(PlayerCommand { player: PlayerId(player), kind: Kind::Move { ship: captain, to, append: false } })
+    };
+    let destination = |app: &App| app.world().get::<crate::ship::FleetPilot>(captain).unwrap().destination;
+    push(&mut app, 1, Vec3::Z);
+    frame(&mut app, 40);
+    assert_eq!(destination(&app), None, "another player's order to our ship is dropped");
+    push(&mut app, 0, Vec3::X);
+    frame(&mut app, 40);
+    assert_eq!(destination(&app), Some(Vec3::X), "the owner's goes through");
+    // Boarded and taken: the ship is the captor's now.
+    app.world_mut().entity_mut(captain).insert(crate::ship::FleetMember("Enemy".into(), 0));
+    push(&mut app, 0, Vec3::NEG_X);
+    frame(&mut app, 40);
+    assert_eq!(destination(&app), Some(Vec3::X), "after the capture the old owner's move is dropped");
+    push(&mut app, 1, Vec3::Z);
+    frame(&mut app, 40);
+    assert_eq!(destination(&app), Some(Vec3::Z), "and the new owner's is applied");
+}
+
+/// #369 D: "a human player" is per owner. A second human's ships count on any team; an allied computer fleet on the human's side
+/// does not. Without a players table the local fleet is the human's, as before.
+#[test]
+fn a_human_players_ships_are_human_on_any_team_and_an_allied_computers_are_not() {
+    use crate::ship::{FleetMember, Fleets, is_human_ship};
+    let entry = |owner: &str, side, human| Player { owner: owner.into(), side, human };
+    let players = Players {
+        list: [(PlayerId(0), entry("Hero", Side::Player, true)), (PlayerId(1), entry("Rival", Side(3), true)), (PlayerId(2), entry("Ally", Side::Player, false))].into(),
+        local: PlayerId(0),
+    };
+    let fleets = Fleets { local: "Hero".into(), ..default() };
+    let ship = |owner: &str| FleetMember(owner.into(), 0);
+    assert!(is_human_ship(Side::Player, Some(&ship("Hero")), Some(&players), Some(&fleets)));
+    assert!(is_human_ship(Side(3), Some(&ship("Rival")), Some(&players), Some(&fleets)), "the second human, on another team");
+    assert!(!is_human_ship(Side::Player, Some(&ship("Ally")), Some(&players), Some(&fleets)), "an allied computer fleet");
+    assert!(is_human_ship(Side::Player, None, Some(&players), Some(&fleets)), "a ship of no fleet on the player's side, as before");
+    assert!(!is_human_ship(Side(3), Some(&ship("Rival")), None, Some(&fleets)), "no table: only the local fleet");
+    assert!(is_human_ship(Side::Player, Some(&ship("Hero")), None, Some(&fleets)));
+}
