@@ -145,8 +145,18 @@ fn ecs_ship_contact_and_static_wall_do_not_pass_through() {
     }
     assert!(app.world().get::<Transform>(a).unwrap().translation.z >= -2.001, "bow must remain on this side of the wall");
 }
-/// Closest approach to a marker behind a wall for a cutter on a move order; `player` makes it the human's own ship.
-fn wall_run(player: bool) -> f32 {
+/// Who sails `wall_run`'s cutter.
+#[derive(PartialEq)]
+enum Captain {
+    Computer,
+    /// The human's command ship (`Captain_Human`).
+    Human,
+    /// Another ship of the human's fleet: on the player's side, in the human's fleet, captained by the computer.
+    Secondary,
+}
+
+/// Closest approach to a marker behind a wall for a cutter on a move order.
+fn wall_run(captain: Captain) -> f32 {
     let mut lib = crate::testutil::lib();
     let class = lib.index("Ship_Navy_Cutter");
     lib.classes[class].collision_bounds = [Vec3::new(-1.0, -1.0, -3.0), Vec3::new(1.0, 1.0, 3.0)];
@@ -165,11 +175,16 @@ fn wall_run(player: bool) -> f32 {
         speed: 8.0,
         order: EngineOrder::Full,
         waypoints: vec![goal],
-        ..crate::Ship::new(class, if player { crate::Side::Player } else { crate::Side::Enemy })
+        ..crate::Ship::new(class, if captain == Captain::Computer { crate::Side::Enemy } else { crate::Side::Player })
     };
     let e = app.world_mut().spawn((ship, health, Transform::default(), Drift::default())).id();
-    if player {
-        app.world_mut().entity_mut(e).insert(crate::PlayerShip);
+    match captain {
+        Captain::Computer => {}
+        Captain::Human => _ = app.world_mut().entity_mut(e).insert(crate::commands::Commander(crate::commands::PlayerId(0))),
+        Captain::Secondary => {
+            app.world_mut().entity_mut(e).insert(crate::ship::FleetMember(crate::names::Owner::from("Player0"), 1));
+            app.insert_resource(crate::ship::Fleets { local: "Player0".into(), ..default() });
+        }
     }
     let mut best = f32::INFINITY;
     for _ in 0..1500 {
@@ -182,14 +197,22 @@ fn wall_run(player: bool) -> f32 {
 #[test]
 #[ignore = "needs imported assets"]
 fn ai_ship_on_a_path_detours_round_a_wall_instead_of_grinding_into_it() {
-    let best = wall_run(false);
+    let best = wall_run(Captain::Computer);
     assert!(best < 10.0, "the ship reaches the marker behind the wall (closest {best})");
 }
 
 #[test]
 #[ignore = "needs imported assets"]
+fn a_humans_secondary_detours_round_a_wall_like_a_computer_ship() {
+    // The original's captain types: only the command ship has the human captain; a secondary runs the avoider.
+    let best = wall_run(Captain::Secondary);
+    assert!(best < 10.0, "the secondary reaches the marker behind the wall (closest {best})");
+}
+
+#[test]
+#[ignore = "needs imported assets"]
 fn the_humans_move_order_runs_straight_into_a_wall() {
-    let best = wall_run(true);
+    let best = wall_run(Captain::Human);
     assert!(best > 80.0, "the human's ship stops at the wall, no detour (closest {best})");
 }
 #[test]
