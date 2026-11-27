@@ -237,11 +237,16 @@ The rope also turns the towee about its tow point so it trails the rope: PROVISI
 - Inelastic response (zero restitution), positional separation, lateral damping, and the planar solver are stand-ins, not a recovered retail response. Contact torque is implemented with provisional box inertia; impact damage and collision sound are not.
 - Ordinary asteroid contacts are now finite-mass, but their retail restitution/torque response still needs tracing. The original never resolves rock/rock contacts (belt rocks pass through each other, docs/re/asteroids.md); rock/static push-out is not ported. Existing path motion occurs before the ship substeps, so fast moving belts still lack continuous collision detection. Whales/mines are not movement colliders in this pass.
 - Docking ignores only the assigned dockee during approach/docked/departure so repairs are not broken; the original collision rejection-list rules are unknown.
-  A ship waiting for a taken point (dock state 1, [docking-and-orders.md](docking-and-orders.md)) still collides with its dockee: it
-  stops within 80 units of the point with no course, so the avoider has nothing to steer for, and it can coast onto a base's hull and
-  rest there, pushed out every tick (Border Dispute, seed 2: a computer ManOWar waiting 16 s at the centre base). Unread: whether the original's
-  waiting docker collides with its dockee, and whether it stops so close to a base's hull. The battle check does not count that contact
-  as grinding (`smoke/report.rs` `on_scenery`). PROVISIONAL.
+  A ship waiting for a taken point (dock state 1, [docking-and-orders.md](docking-and-orders.md)) still collides with its dockee, as
+  in the original: docking never adds to the collision rejection list (only shell fire, lifeboat creation and the Mission 9 teleport
+  rule do), the dock routines leave the avoider's exclusion list empty, and the waiting state is an ordinary physics body, not the
+  dock glide (static reading, 2026-11-27). Inside 80 units of the point (centre to point, 3D, not a hull gap) the ship only stops:
+  course cleared, rudder and throttle 0, avoider reset and not run, no reverse, no hold distance, no hull clearance. It coasts on
+  toward the point until drag stops it, so it can come to rest against a base's hull, pushed out every tick (Border Dispute, seed 2:
+  a computer ManOWar waiting 16 s at the centre base). The battle check does not count that contact as grinding (`smoke/report.rs`
+  `on_scenery`). Not measured: how close a waiting ship really ends up (its coast past 80 and where the point sits against the hull);
+  one lab run with two ships ordered to the same base point, logging the second's distance to the point and its gap to the base, would
+  settle it.
 - Obstacle avoidance for AI ships: the original's avoider, see [movement.md](movement.md#collision-avoidance-read-from-the-originals-code-2026-10-31).
 - Course preview (`course.rs`) is clipped at the first pose whose box touches visible scenery (`collision::clear_prefix`). It still uses free motion (no drift, no steer-away) and 0.1 s samples, so very thin walls can be stepped over in the preview.
 - Collision sound: not wired. `audio.rs` has only the generic `Sfx` message and no collision event; the `Ship_Collision_*` pools stay unused until the response/sound trigger is recovered.
