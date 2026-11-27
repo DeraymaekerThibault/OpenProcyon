@@ -441,3 +441,33 @@ fn mission_tick_runs_between_rules_and_forces() {
 fn per_tick_rules_use_the_battle_step_length() {
     assert_eq!(crate::TICK_SECS, BATTLE_TICK.as_secs_f32());
 }
+
+#[derive(Resource, Default)]
+struct RanOn<const N: usize>(Vec<std::thread::ThreadId>);
+
+fn ran_on<const N: usize>(mut on: ResMut<RanOn<N>>) {
+    on.0.push(std::thread::current().id());
+}
+
+/// #536: the battle tick runs its systems one at a time in the schedule's sorted order (`battle_schedule`), not on the multithreaded
+/// executor, which orders two conflicting systems with no `before`/`after` by whichever is ready first and so let two runs of one
+/// seed roll the battle generator in another order. Systems that could run in parallel all run on the thread that runs the frame.
+#[test]
+fn the_battle_tick_runs_its_systems_one_at_a_time_on_the_frames_thread() {
+    let mut app = clock();
+    app.init_resource::<RanOn<0>>().init_resource::<RanOn<1>>().init_resource::<RanOn<2>>().init_resource::<RanOn<3>>();
+    app.add_systems(FixedUpdate, (ran_on::<0>, ran_on::<1>, ran_on::<2>, ran_on::<3>));
+    for _ in 0..10 {
+        frame(&mut app, 100);
+    }
+    let me = std::thread::current().id();
+    let threads: Vec<std::thread::ThreadId> = [
+        app.world().resource::<RanOn<0>>().0.clone(),
+        app.world().resource::<RanOn<1>>().0.clone(),
+        app.world().resource::<RanOn<2>>().0.clone(),
+        app.world().resource::<RanOn<3>>().0.clone(),
+    ]
+    .concat();
+    assert!(threads.len() >= 40, "the systems ran ({} times)", threads.len());
+    assert!(threads.iter().all(|t| *t == me), "every tick system ran on the frame's thread");
+}
