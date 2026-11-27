@@ -1,6 +1,6 @@
 //! PROCYON_REPORT=<game seconds> (tools/battle_check.py): watch a skirmish battle and, when one side is gone or the time is up, log one
 //! `battle report {json}` line and quit. Per side: ships, bursts fired, hits, game time of the first burst. Per ship: distance
-//! sailed, bursts fired, whether a computer commands it, and the longest unbroken scenery contact. Per fleet of a lobby skirmish:
+//! sailed, bursts fired, whether a computer commands it, and the longest unbroken scenery contact (`on_scenery`). Per fleet of a lobby skirmish:
 //! victory points spent against the budget. Plus the closest approach between hostile ships. The checker turns these
 //! into pass/fail expectations ("the computer engages", "nobody grinds on an island") so whole-battle regressions show up in
 //! `tools/check.sh` instead of in playtests.
@@ -124,9 +124,9 @@ fn watch(
     lib: Res<crate::Library>,
     mut report: ResMut<Report>,
     (cfg, sk): (Res<crate::Config>, Res<crate::menu::Skirmish>),
-    ships: Query<(Entity, &Ship, &Transform, &Health, Option<&crate::ship::FleetMember>)>,
+    ships: Query<(Entity, &Ship, &Transform, &Health, Option<&crate::ship::FleetMember>, Option<&crate::docking::Docker>)>,
     fleets: Res<crate::ship::Fleets>,
-    obstacles: Query<(&crate::collision::Obstacle, Option<&Visibility>), (Without<Ship>, Without<crate::combat::Asteroid>)>,
+    obstacles: Query<(Entity, &crate::collision::Obstacle, Option<&Visibility>), (Without<Ship>, Without<crate::combat::Asteroid>)>,
     mut fired: MessageReader<Fired>,
     mut hits: MessageReader<Hit>,
     mut exit: MessageWriter<AppExit>,
@@ -152,12 +152,12 @@ fn watch(
             report.sides.entry(side).or_default().hits += 1;
         }
     }
-    let scenery = crate::collision::scenery(obstacles.iter());
+    let scenery: Vec<_> = obstacles.iter().filter(|(.., v)| *v != Some(&Visibility::Hidden)).map(|(e, o, _)| (e, o)).collect();
     for line in report.sides.values_mut() {
         line.alive = 0;
     }
     let mut live: Vec<(Side, Vec3)> = vec![];
-    for (e, ship, tf, health, member) in &ships {
+    for (e, ship, tf, health, member, docker) in &ships {
         let side = side_name(ship.side);
         let class = &lib.classes[ship.class];
         if !report.ships.contains_key(&e) {
@@ -189,8 +189,7 @@ fn watch(
         }
         report.sides.entry(side).or_default().alive += 1;
         live.push((ship.side, tf.translation));
-        // The collision pass's own contact (the box tree for islands and bases), so a hull held off the shore does not count.
-        let touching = scenery.iter().any(|o| crate::collision::in_contact(class.collision_bounds, tf, o));
+        let touching = on_scenery(class.collision_bounds, tf, &scenery, docker.map(crate::docking::Docker::dockee));
         let line = report.ships.get_mut(&e).unwrap();
         line.sailed += tf.translation.distance(line.last);
         line.last = tf.translation;
@@ -231,9 +230,30 @@ fn watch(
     exit.write(crate::exit::app_exit(0));
 }
 
+/// Whether a ship touches scenery as the grinding judge counts it: the collision pass's own contact (the box tree for islands and
+/// bases), so a hull held off the shore does not count, with any visible obstacle but `dock`, the base its dock routine is for. A ship
+/// waiting for a taken dock point stops within 80 units of it (docs/re/docking-and-orders.md) and may coast onto the base and rest
+/// there, at its dock and not grinding. PROVISIONAL: whether the original keeps that contact at all is not read (docs/re/collision.md).
+fn on_scenery(bounds: [Vec3; 2], tf: &Transform, scenery: &[(Entity, &crate::collision::Obstacle)], dock: Option<Entity>) -> bool {
+    scenery.iter().any(|&(e, o)| Some(e) != dock && crate::collision::in_contact(bounds, tf, o))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn resting_against_its_own_dock_is_not_scenery_contact_but_any_other_land_is() {
+        let tri = [[Vec3::new(-10.0, 0.0, -10.0), Vec3::new(10.0, 0.0, -10.0), Vec3::new(0.0, 0.0, 10.0)]];
+        let (base, island) = (crate::collision::Obstacle::from_triangles(&tri), crate::collision::Obstacle::from_triangles(&tri));
+        let (b, i) = (Entity::from_raw_u32(1).unwrap(), Entity::from_raw_u32(2).unwrap());
+        let hull = [Vec3::new(-1.0, -1.0, -3.0), Vec3::new(1.0, 1.0, 3.0)];
+        let tf = Transform::default();
+        assert!(on_scenery(hull, &tf, &[(b, &base)], None), "a ship on a base it is not docking at touches scenery");
+        assert!(!on_scenery(hull, &tf, &[(b, &base)], Some(b)), "a ship at its own dock does not");
+        assert!(on_scenery(hull, &tf, &[(b, &base), (i, &island)], Some(b)), "other land still counts while it docks");
+        assert!(!on_scenery(hull, &Transform::from_xyz(100.0, 0.0, 0.0), &[(b, &base)], None), "clear of everything");
+    }
 
     #[test]
     fn a_position_is_sane_when_finite_and_its_reach_is_the_largest_axis() {
