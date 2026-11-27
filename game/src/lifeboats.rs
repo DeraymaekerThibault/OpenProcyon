@@ -4,7 +4,7 @@
 use crate::EngineOrder;
 use crate::campaign::{Mission, MissionShip};
 use crate::combat::{Health, Library};
-use crate::{PlayerShip, Ship, Side};
+use crate::{Ship, Side};
 use bevy::prelude::*;
 
 /// A lifeboat. `owner` is the rules' player name of the ship that left it; pre-placed boats (mission 4) also carry a `MissionShip`,
@@ -145,7 +145,7 @@ fn launch(
         let to = Vec3::new(offset.x, 0.0, -offset.y);
         let heading = if to.length_squared() > 1e-6 { crate::geom::heading_of(to) } else { ship.heading };
         let id = crate::spawn_ship(commands, assets, lib, fxl, &boat.name, Side::Player, tf.translation, heading, None);
-        commands.entity(id).remove::<PlayerShip>().remove::<crate::boarding::Boardable>().insert((
+        commands.entity(id).remove::<crate::boarding::Boardable>().insert((
             Lifeboat { owner: ms.owner.clone() },
             Ship {
                 heading,

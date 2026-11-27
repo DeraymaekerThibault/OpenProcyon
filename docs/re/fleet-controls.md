@@ -227,6 +227,22 @@ Implementation followed this order; §6 records the completed paths and explicit
 - **Per-member following and commands:** hold belongs only to followers. A matching button releases only if all secondaries hold; a partial fleet reassembles. Yellow feedback likewise requires matching type/all-held. Busy docking/towing/grappling/boarding actors detach without releasing siblings; those routines retain movement ownership. Fleet attack copies only a valid primary target and can attack while following; targetless attack is a no-op. Cease/resume fire affects secondaries, not primary, and is not formation or position lock. UI-05's position-lock placeholder is unchanged.
 - **Lifecycle:** reconcile removes dead/despawned/transferred members, stale selections and invalid captain targets; stale destroyed/despawned camera focus clears. Restart and battle exit reset fleet/UI/target/focus state; the next scenario selects its new command ship. Capture transfers skirmish FleetMember ownership as well as side, and mission owner remains authoritative.
 
+### Several human players (remake, #369 phase 2; PROVISIONAL)
+
+The original's multiplayer fleet rules have not been observed. Until they are, the remake applies its single-player rules to each
+human player separately:
+
+- **One command ship per human.** Each human player commands one fleet (its lobby slot's) and has one command ship in it, the
+  ship that player steers directly (`commands::Commander`). An order is direct only when it names its sender's command ship;
+  to any other ship of the sender's fleet it is a captain's order. Selection, camera focus and the view's marker (`PlayerShip`)
+  belong to the player at this machine only.
+- **Fleet orders act on the sender's fleet.** Formations, Attack and Cease Fire command the fleet of the player who gave them.
+  P promotes a ship of the sender's own fleet only, and only the local player's selection follows it.
+- **Who counts as `Captain_Human`.** Each human's command ship is under human control (the rules' `HUMAN CONTROLLED COMMAND SHIP`,
+  `Set Group/Unit AI Captain` with `Captain_Human`); every other ship, a human's secondaries included, has a computer captain.
+- **Hand-over.** When a human's command ship sinks or is captured, the first living ship left in that player's fleet becomes the
+  command ship (fallback 2 below, for every human). A fleet with no ship left has none.
+
 ### Explicit provisional fallbacks / remaining work
 
 1. Backquote / 0 stay the existing rebindable defaults; the manual's apostrophe and the original tenth-slot default remain unresolved. Camera follow is always on for a new valid selection; no speculative preference/rebinding framework was added. Existing named modal gates are used, not a guessed mapping of all three retail gates.

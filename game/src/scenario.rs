@@ -188,6 +188,8 @@ impl Race {
 #[derive(Debug, PartialEq, Default, Clone)]
 pub struct Group {
     pub player: usize,
+    /// The lobby slot (`commands::PlayerId`) that plays this fleet; none for a fleet that is no player's (a map script's).
+    pub slot: Option<u8>,
     pub side: Side,
     pub human: bool,
     /// Fleet type: which base the fleet defends.

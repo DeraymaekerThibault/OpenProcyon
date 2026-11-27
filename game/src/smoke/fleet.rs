@@ -316,7 +316,7 @@ fn fleet(world: &mut World, frame: u32, previous: &mut Option<Entity>) {
             assert_eq!(world.resource::<ship::Fleets>().roster().len(), 4, "fleet smoke requires three --allies (for example Ship_Navy_Cutter,Ship_Navy_Cutter,Ship_Navy_Cutter)");
             let local = world.resource::<ship::Fleets>().local.clone();
             let ally = world.query::<(Entity, &Ship, &ship::FleetMember)>().iter(world).find(|(_, s, m)| s.side == Side::Player && m.0 != local).map(|s| s.0).unwrap();
-            assert!(!ship::promote(world, ally, false));
+            assert!(!ship::promote(world, crate::commands::PlayerId(0), ally, false));
         }
         204 => assert!(world.resource::<options_menu::OptionsMenu>().is_open(), "bar right click must open the shared object menu"),
         208 => assert!(!world.resource::<options_menu::OptionsMenu>().is_open(), "repeat bar right click must toggle the same object menu closed"),

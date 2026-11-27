@@ -139,6 +139,10 @@ measured bank limit above.
   (scripted hits, fires) never counts as the local player's, so it is scaled only when the victim is the local player's ship. The factor
   multiplies the whole damage table (low, high, spill values) before any roll. Remake: only single-player exists, so "always applied" is
   right today. Build: small, when networked play exists skip `side_damage_scale` (`combat/shells.rs`) when the game is networked.
+  Remake multiplayer (#369 phase 2, decided 2026-11-26, PROVISIONAL): one difficulty for the whole match, from the lobby setup, and
+  "the local player" in the rule above reads as "a human player": every human's ships are scaled the same way on every machine, which
+  lock-step needs. With one human that is today's behaviour. It departs from the static reading above (no scaling at all in a
+  networked game); which one holds is open until retail multiplayer is observed.
 - **A hull with no vital section is never sunk by damage.** After every hit, if the ship is not already dying and its core hit
   points are exactly 0: it counts the sections that are vital to the ship (alive or dead). One or more: the death sequence starts.
   None: the ship goes to an inert "disabled" state that nothing ever leaves (dragons are exempt even from that and just stay as

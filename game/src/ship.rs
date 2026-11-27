@@ -1,4 +1,5 @@
 //! Shared ship state, movement integration and skirmish AI.
+use crate::commands::{Commander, PlayerId};
 use crate::*;
 
 /// A ship's engine order: All Stop, Ahead Slow, Ahead Full, Emergency Speed. The discriminants are the retail dial and sound
@@ -160,16 +161,23 @@ impl Ship {
 }
 
 /// The local player's ship, for the view (camera, HUD, crew lines). The simulation's mark of a human's command ship is
-/// `commands::Commander`: in single-player it follows this marker (player 0), in every world, by these hooks.
+/// `commands::Commander`, and this marker follows the local player's (its hooks, `commands.rs`). A ship marked with this alone
+/// (a world built by hand: tests, smokes) gets the local player's `Commander`, and loses it with this marker.
 #[derive(Component)]
 #[component(on_add = command_ship_added, on_remove = command_ship_removed)]
 pub struct PlayerShip;
 
 fn command_ship_added(mut world: bevy::ecs::world::DeferredWorld, ctx: bevy::ecs::lifecycle::HookContext) {
-    world.commands().entity(ctx.entity).try_insert(crate::commands::Commander(crate::commands::PlayerId(0)));
+    if world.get::<Commander>(ctx.entity).is_none() {
+        let local = crate::commands::local_player(&world);
+        world.commands().entity(ctx.entity).try_insert(Commander(local));
+    }
 }
 fn command_ship_removed(mut world: bevy::ecs::world::DeferredWorld, ctx: bevy::ecs::lifecycle::HookContext) {
-    world.commands().entity(ctx.entity).try_remove::<crate::commands::Commander>();
+    let local = crate::commands::local_player(&world);
+    if world.get::<Commander>(ctx.entity).is_some_and(|c| c.0 == local) {
+        world.commands().entity(ctx.entity).try_remove::<Commander>();
+    }
 }
 
 /// 'AI_LOCK_POSITION' (right-click menu Hold): the ship's captain keeps it where it is; it still fires.
@@ -394,8 +402,9 @@ pub fn ai(
     let now = time.elapsed_secs();
     // (entity, position, side, afloat, radius, fleet, the aim point seen from a position, its ordered or aimed target, visible)
     type Snap = (Entity, Vec3, Side, bool, f32, Option<crate::names::Owner>, (Transform, usize, Vec<f32>), Option<Entity>, bool);
-    let snap: Vec<Snap> = ships
-        .iter()
+    // In spawn order: a ship adopts the first fleet mate's or ally's target in this list, which must not follow query order (#369 section 3).
+    let snap: Vec<Snap> = crate::scenario::in_spawn_order(&spawn_order, ships.iter(), |x| x.0)
+        .into_iter()
         .map(|(e, t, s, h, me, p, m, _)| {
             let aimed = p.and_then(|p| p.target).or(aim.as_ref().filter(|_| me).and_then(|a| a.0));
             let visible = !scripted.get(e).is_ok_and(|m| !m.visible) && !cloaks.get(e).is_ok_and(|c| c.state == crate::cloak::State::Full);
@@ -897,6 +906,7 @@ fn captain_target_valid(world: &World, actor: Entity, target: Entity) -> bool {
 /// Reconcile live ownership, retaining roster order. PROVISIONAL loss fallback: first living member;
 /// first surviving member becomes command ship after death/capture; empty fleets have no command ship.
 pub fn reconcile_fleets(world: &mut World) {
+    let humans = crate::commands::humans(world);
     let mut live: Vec<_> = world
         .query::<(Entity, &Ship, &Health, &FleetMember, Option<&campaign::MissionShip>, Option<&crate::scenario::SpawnIndex>)>()
         .iter(world)
@@ -919,33 +929,36 @@ pub fn reconcile_fleets(world: &mut World) {
                 world.entity_mut(*e).insert(FleetPilot { hold_fire: f.cease_fire, ..default() });
             }
         }
-        let command = world.query_filtered::<Entity, With<PlayerShip>>().iter(world).next();
-        let valid = command.filter(|e| live.iter().any(|s| s.0 == *e && s.1 == fleets.local));
-        let local = fleets.local.clone();
-        if let Some(e) = valid
-            && let Some(f) = fleets.groups.get_mut(&local)
-        {
-            f.members.retain(|m| *m != e);
-            f.members.insert(0, e);
-        }
-        if valid.is_none() {
+        // Each human's command ship heads its fleet; one lost (sunk, captured) hands over to the fleet's first ship.
+        for (player, owner) in &humans {
+            let command = world.query::<(Entity, &Commander)>().iter(world).find(|(_, c)| c.0 == *player).map(|(e, _)| e);
+            let valid = command.filter(|e| live.iter().any(|s| s.0 == *e && s.1 == *owner));
+            if let Some(e) = valid
+                && let Some(f) = fleets.groups.get_mut(owner)
+            {
+                f.members.retain(|m| *m != e);
+                f.members.insert(0, e);
+            }
+            if valid.is_some() {
+                continue;
+            }
             // The script's throttle cap on the command ship ("HUMAN CONTROLLED COMMAND SHIP") belongs to the command, not the hull: the
             // replacement takes it over, instead of keeping whatever cap a rule set on it before (a ship captured from a capped enemy
             // group, a stationary escort), which could leave the player with a ship that cannot move. PROVISIONAL: the
             // original's handoff of the cap after a capture or loss has not been observed. Only a command ship that is still the human's
             // (sunk, not captured) hands its cap on, and never a 0: a captured ship's cap is the new owner's rules', and a 0 (an NIS stop)
             // would strand the player again. Otherwise the replacement gets full throttle.
-            let owner = |e: Entity| world.get::<campaign::MissionShip>(e).map(|m| m.owner.clone()).or_else(|| world.get::<FleetMember>(e).map(|f| f.0.clone()));
-            let cap = command.filter(|e| owner(*e).as_deref() == Some(local.as_str())).and_then(|e| world.get::<Ship>(e)).map(|s| s.cap).filter(|c| *c > 0.0).unwrap_or(1.0);
+            let owner_of = |e: Entity| world.get::<campaign::MissionShip>(e).map(|m| m.owner.clone()).or_else(|| world.get::<FleetMember>(e).map(|f| f.0.clone()));
+            let cap = command.filter(|e| owner_of(*e).as_deref() == Some(owner.as_str())).and_then(|e| world.get::<Ship>(e)).map(|s| s.cap).filter(|c| *c > 0.0).unwrap_or(1.0);
             if let Some(e) = command {
-                world.entity_mut(e).remove::<PlayerShip>();
+                world.entity_mut(e).remove::<Commander>();
             }
-            if let Some(e) = fleets.primary() {
+            if let Some(e) = fleets.groups.get(owner).and_then(|f| f.members.first()).copied() {
                 let target = world.get::<FleetPilot>(e).and_then(|p| p.target);
                 if let Some(mut s) = world.get_mut::<Ship>(e) {
                     s.cap = cap;
                 }
-                install_primary(world, e, target);
+                install_primary(world, e, *player, target);
             }
         }
         if fleets.selected.is_none_or(|e| !fleets.roster().contains(&e)) {
@@ -964,12 +977,6 @@ pub fn reconcile_fleets(world: &mut World) {
         let stale_focus = world.resource::<Orbit>().focus.is_some_and(|e| world.get_entity(e).is_err() || world.get::<Health>(e).is_some_and(|h| h.destroyed));
         if stale_focus {
             world.resource_mut::<Orbit>().focus = None;
-        }
-        let primaries: Vec<_> = world.query_filtered::<Entity, With<PlayerShip>>().iter(world).collect();
-        for e in primaries {
-            if live.iter().any(|s| s.0 == e && s.1 != fleets.local) {
-                world.entity_mut(e).remove::<PlayerShip>();
-            }
         }
     });
 }
@@ -1011,28 +1018,36 @@ pub fn set_formation(world: &mut World, owner: &str, kind: Option<Formation>, ho
     }
 }
 
-fn install_primary(world: &mut World, candidate: Entity, target: Option<Entity>) {
+/// `candidate` becomes `player`'s command ship (`Commander`), at the speed it sails now. The manual target is the local player's
+/// (one `Target` until #369 phase 2 PR C), so another player's hand-over leaves it alone.
+fn install_primary(world: &mut World, candidate: Entity, player: PlayerId, target: Option<Entity>) {
     let max = world.get::<Ship>(candidate).zip(world.get::<Health>(candidate)).map_or(0.0, |(s, h)| max_speed(s, &world.resource::<Library>().classes[s.class], h));
     if let Some(mut s) = world.get_mut::<Ship>(candidate) {
         s.throttle = Some(speed_fraction(s.speed, max));
         s.order = EngineOrder::Full;
     }
-    world.entity_mut(candidate).insert((PlayerShip, FleetPilot::default()));
+    world.entity_mut(candidate).insert((Commander(player), FleetPilot::default()));
     if let Some(mut m) = world.get_mut::<campaign::MissionShip>(candidate) {
         m.hold_fire = false;
         m.ordered = None;
         m.attack.clear();
+    }
+    if player != crate::commands::local_player(world) {
+        return;
     }
     world.resource_mut::<Target>().0 = target;
     world.resource_mut::<Target>().1 = None;
     world.resource_mut::<Target>().2 = Default::default();
 }
 
-pub fn promote(world: &mut World, candidate: Entity, scripted: bool) -> bool {
+/// P (Change Primary): `candidate` becomes `player`'s command ship, its old one a captain again (skirmish only, unless `scripted`: a
+/// rule's hand-over, which may also move a ship of another group into the player's fleet). Only the local player's selection follows.
+pub fn promote(world: &mut World, player: PlayerId, candidate: Entity, scripted: bool) -> bool {
     if !scripted && world.contains_resource::<campaign::Mission>() {
         return false;
     }
-    let owner = world.resource::<Fleets>().local.clone();
+    let Some(owner) = crate::commands::fleet_of(world, player) else { return false };
+    let local = player == crate::commands::local_player(world);
     if scripted && world.get::<Health>(candidate).is_some_and(|h| !h.destroyed) {
         // PROVISIONAL cross-group script handoff: transfer candidate to the local fleet, retaining other group members.
         if let Some(mut m) = world.get_mut::<campaign::MissionShip>(candidate) {
@@ -1040,15 +1055,17 @@ pub fn promote(world: &mut World, candidate: Entity, scripted: bool) -> bool {
         }
     }
     reconcile_fleets(world);
-    if !world.resource::<Fleets>().roster().contains(&candidate) {
+    if !world.resource::<Fleets>().groups.get(&owner).is_some_and(|f| f.members.contains(&candidate)) {
         return false;
     }
-    let next_target = if world.get::<PlayerShip>(candidate).is_some() { world.resource::<Target>().0 } else { world.get::<FleetPilot>(candidate).and_then(|p| p.target) };
-    let old_target = world.resource::<Target>().0;
+    // The manual target is the local player's (one `Target` until #369 phase 2 PR C); another player's goes with the captains'.
+    let manual = |world: &World, e: Entity| if local { world.resource::<Target>().0 } else { world.get::<FleetPilot>(e).and_then(|p| p.target) };
+    let old: Vec<Entity> = world.query::<(Entity, &Commander)>().iter(world).filter(|(_, c)| c.0 == player).map(|(e, _)| e).collect();
+    let next_target = if old.contains(&candidate) { manual(world, candidate) } else { world.get::<FleetPilot>(candidate).and_then(|p| p.target) };
+    let old_target = old.first().map_or_else(|| manual(world, candidate), |e| manual(world, *e));
     let mut retired = Vec::new();
-    let old = world.query_filtered::<Entity, With<PlayerShip>>().iter(world).collect::<Vec<_>>();
     for e in old {
-        world.entity_mut(e).remove::<PlayerShip>();
+        world.entity_mut(e).remove::<Commander>();
         if scripted && e != candidate && world.get::<campaign::MissionShip>(e).is_some_and(|m| m.id == -1) {
             world.entity_mut(e).despawn();
             retired.push(e);
@@ -1059,13 +1076,15 @@ pub fn promote(world: &mut World, candidate: Entity, scripted: bool) -> bool {
             p.target = old_target;
         }
     }
-    install_primary(world, candidate, next_target);
+    install_primary(world, candidate, player, next_target);
     let f = {
         let mut fleets = world.resource_mut::<Fleets>();
         let f = fleets.groups.get_mut(&owner).unwrap();
         f.members.retain(|e| *e != candidate && !retired.contains(e));
         f.members.insert(0, candidate);
-        fleets.selected = Some(candidate);
+        if local {
+            fleets.selected = Some(candidate);
+        }
         fleets.groups.get(&owner).unwrap().clone()
     };
     let slots = laid_out_slots(world, &f);

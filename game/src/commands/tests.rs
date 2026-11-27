@@ -1,6 +1,7 @@
 use super::*;
 use crate::Side;
 use crate::scenario::SpawnIndex;
+use bevy::ecs::system::RunSystemOnce;
 use bevy::time::TimeUpdateStrategy;
 
 /// The production battle clock with the command path, in a battle that is still loading until `loaded` (as `loading::wait` lifts it:
@@ -582,4 +583,105 @@ fn an_attack_or_fire_when_possible_order_makes_the_ship_aggressive() {
     send(&mut app, Kind::CeaseFire);
     frame(&mut app, 40);
     assert_eq!(stance(&app), Stance::Aggressive, "fire when possible");
+}
+
+/// `fleet_world` with a second human: player 1 commands the "Ally" fleet (`ids[3]`, `ids[4]`; `ids[4]` its command ship), player 0
+/// (local) the "Player" fleet (`ids[0]` its command ship, `ids[1]`, `ids[2]`).
+fn two_humans() -> (World, [Entity; 6]) {
+    let (mut w, ids) = crate::ship::movement_tests::fleet_world();
+    let player = |owner: &str| Player { owner: owner.into(), side: Side::Player, human: true };
+    w.insert_resource(Players { list: [(PlayerId(0), player("Player")), (PlayerId(1), player("Ally"))].into(), local: PlayerId(0) });
+    w.entity_mut(ids[3]).insert(crate::ship::FleetMember("Ally".into(), 1));
+    w.entity_mut(ids[4]).insert(crate::ship::FleetMember("Ally".into(), 0));
+    w.init_resource::<crate::ship::CaptainTargets>();
+    crate::ship::reconcile_fleets(&mut w);
+    (w, ids)
+}
+
+fn commander(w: &mut World, player: u8) -> Vec<Entity> {
+    w.query::<(Entity, &Commander)>().iter(w).filter(|(_, c)| c.0 == PlayerId(player)).map(|(e, _)| e).collect()
+}
+
+#[test]
+#[ignore = "needs imported assets"]
+fn each_human_has_a_command_ship_and_the_view_marks_only_the_local_ones() {
+    let (mut w, ids) = two_humans();
+    assert_eq!(commander(&mut w, 0), [ids[0]]);
+    assert_eq!(commander(&mut w, 1), [ids[4]], "player 1's fleet gets its own command ship");
+    let marked: Vec<Entity> = w.query_filtered::<Entity, With<crate::PlayerShip>>().iter(&w).collect();
+    assert_eq!(marked, [ids[0]], "the view's marker stays on the local player's");
+    assert_eq!(w.resource::<crate::ship::Fleets>().groups["Ally"].members, [ids[4], ids[3]]);
+    // Player 1's command ship sinks: the next ship of its fleet takes over, player 0's stays.
+    w.get_mut::<crate::combat::Health>(ids[4]).unwrap().destroyed = true;
+    crate::ship::reconcile_fleets(&mut w);
+    assert_eq!(commander(&mut w, 1), [ids[3]]);
+    assert_eq!(commander(&mut w, 0), [ids[0]]);
+    assert!(w.get::<crate::PlayerShip>(ids[3]).is_none());
+}
+
+#[test]
+#[ignore = "needs imported assets"]
+fn another_players_fleet_orders_and_p_leave_the_local_fleet_and_selection_alone() {
+    let (mut w, ids) = two_humans();
+    let selected = w.resource::<crate::ship::Fleets>().selected;
+    apply(&mut w, PlayerId(1), &Kind::Promote { ship: ids[3] });
+    assert_eq!(commander(&mut w, 1), [ids[3]], "P moves player 1's command ship");
+    assert_eq!(commander(&mut w, 0), [ids[0]]);
+    assert_eq!(w.resource::<crate::ship::Fleets>().selected, selected, "only the local player's selection follows a P");
+    assert_eq!(w.resource::<crate::ship::Fleets>().roster(), &[ids[0], ids[1], ids[2]]);
+    assert!(w.get::<crate::PlayerShip>(ids[3]).is_none() && w.get::<crate::PlayerShip>(ids[0]).is_some());
+    apply(&mut w, PlayerId(1), &Kind::Promote { ship: ids[1] });
+    assert_eq!(commander(&mut w, 0), [ids[0]], "a P naming another player's ship does nothing");
+    apply(&mut w, PlayerId(1), &Kind::Formation { formation: crate::ship::Formation::Diamond, hold: true });
+    let fleets = w.resource::<crate::ship::Fleets>();
+    assert_eq!(fleets.groups["Ally"].formation, crate::ship::Formation::Diamond);
+    assert_eq!(fleets.groups["Player"].formation, crate::ship::Formation::None, "the sender's fleet takes the formation");
+    assert!(w.get::<crate::ship::FleetPilot>(ids[4]).unwrap().hold);
+    assert!(!w.get::<crate::ship::FleetPilot>(ids[1]).unwrap().hold);
+    apply(&mut w, PlayerId(1), &Kind::CeaseFire);
+    assert!(w.resource::<crate::ship::Fleets>().groups["Ally"].cease_fire);
+    assert!(!w.resource::<crate::ship::Fleets>().groups["Player"].cease_fire);
+    // A player with no fleet orders nothing.
+    apply(&mut w, PlayerId(7), &Kind::CeaseFire);
+    assert!(!w.resource::<crate::ship::Fleets>().groups["Player"].cease_fire);
+}
+
+#[test]
+#[ignore = "needs imported assets"]
+fn in_single_player_the_command_ship_carries_both_marks() {
+    let (mut w, ids) = crate::ship::movement_tests::fleet_world();
+    let both = |w: &mut World| {
+        let a: Vec<Entity> = w.query_filtered::<Entity, With<Commander>>().iter(w).collect();
+        let b: Vec<Entity> = w.query_filtered::<Entity, With<crate::PlayerShip>>().iter(w).collect();
+        assert_eq!(a, b);
+        assert_eq!(a.len(), 1);
+        a[0]
+    };
+    assert_eq!(both(&mut w), ids[0]);
+    assert!(crate::ship::promote(&mut w, PlayerId(0), ids[2], false));
+    assert_eq!(both(&mut w), ids[2]);
+    w.get_mut::<crate::combat::Health>(ids[2]).unwrap().destroyed = true;
+    crate::ship::reconcile_fleets(&mut w);
+    assert_eq!(both(&mut w), ids[0], "the hand-over after a loss moves both");
+    w.entity_mut(ids[0]).insert(crate::ship::FleetMember("Enemy".into(), 1));
+    crate::ship::reconcile_fleets(&mut w);
+    assert_eq!(both(&mut w), ids[1], "and so does the one after a capture");
+}
+
+#[test]
+fn orders_are_the_local_players_and_a_tick_applies_them_by_player() {
+    let mut app = battle();
+    let (me, ..) = fleet(&mut app);
+    let them = app.world_mut().spawn((Ship::new(0, Side::Enemy), SpawnIndex(3), Commander(PlayerId(1)))).id();
+    app.world_mut().resource_mut::<Players>().local = PlayerId(1);
+    app.world_mut().run_system_once(|mut orders: Orders| orders.send(Kind::Engine { ship: Entity::PLACEHOLDER, engine: Engine::Faster })).unwrap();
+    assert_eq!(app.world().resource::<Outbox>().0[0].player, PlayerId(1), "an order is stamped with the local player");
+    app.world_mut().resource_mut::<Outbox>().0.clear();
+    loaded(&mut app);
+    // Player 1 sent first, but player 0 goes first: Slow, then one step up.
+    app.world_mut().resource_mut::<Outbox>().0.push(PlayerCommand { player: PlayerId(1), kind: Kind::Engine { ship: them, engine: Engine::Faster } });
+    app.world_mut().resource_mut::<Outbox>().0.push(PlayerCommand { player: PlayerId(0), kind: Kind::Engine { ship: them, engine: Engine::To(EngineOrder::Slow) } });
+    frame(&mut app, 40);
+    assert_eq!(order(&app, them), EngineOrder::Full, "player 0's Slow, then player 1's step up");
+    assert_eq!(order(&app, me), EngineOrder::Stop);
 }

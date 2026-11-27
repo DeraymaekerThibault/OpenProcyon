@@ -73,9 +73,6 @@ pub fn spawn_ship(commands: &mut Commands, assets: &AssetServer, lib: &Library, 
         WorldAssetRoot(assets.load(GltfAssetLabel::Scene(0).from_asset(class.glb.clone()))),
         Transform::from_translation(pos).with_rotation(Quat::from_rotation_y(heading)),
     ));
-    if side == Side::Player {
-        e.insert(PlayerShip);
-    }
     if let Some(label) = label {
         e.insert(ShipName(label));
     }
@@ -194,8 +191,9 @@ pub fn spawn_scenario(commands: &mut Commands, assets: &AssetServer, lib: &Libra
         commands.entity(m).insert(Scenario);
     }
     let ours: Vec<String> = std::iter::once(cfg.player.clone()).chain(cfg.allies.iter().cloned()).collect();
-    // Each battle starts with its own alliance table (the mission's or the lobby's replace this one).
+    // Each battle starts with its own alliance table (the mission's or the lobby's replace this one) and its own players.
     commands.insert_resource(alliance::Alliances::default());
+    commands.insert_resource(crate::commands::Players::default());
     if let Some(map) = &map {
         let bases = spawn_map_objects(commands, assets, fxl, shapes, asteroids, map);
         nebula::spawn(commands, assets, fxl, map);
@@ -271,6 +269,7 @@ fn spawn_skirmish(
         vec![
             Group {
                 player: 0,
+                slot: Some(0),
                 side: Side::Player,
                 human: true,
                 race: Race::from_twt(players[0]["race"].as_u64().unwrap_or(4)),
@@ -280,6 +279,7 @@ fn spawn_skirmish(
             },
             Group {
                 player: them,
+                slot: Some(1),
                 side: Side::Enemy,
                 race: Race::from_twt(players[them]["race"].as_u64().unwrap_or(4)),
                 team: players[them]["team"].as_i64().unwrap_or(-1) as i32,
@@ -353,10 +353,17 @@ fn spawn_skirmish(
             roster.rows.push(alliance::Row::new(owner.clone(), name.clone(), *flag, colour, g.side));
         }
         alliances.add_player(&owner, g.side);
-        if g.human {
-            let owner = owner.clone();
+        let player = g.slot.map(crate::commands::PlayerId);
+        if g.human || player.is_some() {
+            let (owner, side, human) = (owner.clone(), g.side, g.human);
             commands.queue(move |w: &mut World| {
-                w.resource_mut::<ship::Fleets>().local = owner;
+                let mut players = w.resource_mut::<crate::commands::Players>();
+                let id = player.unwrap_or_default();
+                players.list.insert(id, crate::commands::Player { owner: owner.clone(), side, human });
+                if human {
+                    players.local = id;
+                    w.resource_mut::<ship::Fleets>().local = owner;
+                }
             });
         }
         for (i, ((name, at, label), slot)) in g.ships.iter().zip(slots).enumerate() {
@@ -390,8 +397,8 @@ fn spawn_skirmish(
                 let scan = crate::crew_arms::CrewPosts(Default::default()).scan(&crate::boarding::counts(name));
                 commands.entity(e).insert(crate::environment::ScanFactor(scan));
             }
-            if g.side == Side::Player && !(g.human && i == 0) {
-                commands.entity(e).remove::<PlayerShip>();
+            if g.human && i == 0 {
+                commands.entity(e).insert(crate::commands::Commander(player.unwrap_or_default()));
             }
         }
         let owner = owner.clone();
@@ -526,13 +533,14 @@ fn spawn_bases(
 fn spawn_arena(commands: &mut Commands, assets: &AssetServer, lib: &Library, fxl: &fx::FxLib, cfg: &Config, ours: &[String]) {
     commands.queue(|w: &mut World| {
         w.resource_mut::<ship::Fleets>().local = "Player".into();
+        crate::commands::Players::single(w, "Player".into());
     });
     let mut namer = Namer::new();
     for (i, name) in ours.iter().enumerate() {
         let e = spawn_ship(commands, assets, lib, fxl, name, Side::Player, Vec3::new(40.0 * i as f32, 0.0, 0.0), 0.0, namer.pick(lib, name));
         commands.entity(e).insert(ship::FleetMember("Player".into(), i));
-        if i > 0 {
-            commands.entity(e).remove::<PlayerShip>();
+        if i == 0 {
+            commands.entity(e).insert(crate::commands::Commander::default());
         }
     }
     for (i, name) in cfg.enemies.iter().enumerate() {

@@ -1,6 +1,6 @@
 //! Mission 1 setup: retail ship placements and the HUD text nodes. All behaviour comes from the data-driven rule interpreter in
 //! rules.rs (World/SinglePlayer/Mission01.twt); this file only spawns the units and holds their mission state.
-use crate::{PlayerShip, Side, assets_dir, combat::Library, game_to_bevy};
+use crate::{Side, assets_dir, combat::Library, game_to_bevy};
 use bevy::prelude::*;
 use serde_json::Value;
 use std::collections::HashMap;
@@ -559,7 +559,8 @@ pub fn spawn(commands: &mut Commands, assets: &AssetServer, lib: &Library, fxl: 
     }
     let local_owner: crate::names::Owner = player_group.as_str().unwrap_or_default().into();
     commands.queue(move |w: &mut World| {
-        w.resource_mut::<crate::ship::Fleets>().local = local_owner;
+        w.resource_mut::<crate::ship::Fleets>().local = local_owner.clone();
+        crate::commands::Players::single(w, local_owner);
     });
     for (slot, s) in ships.iter().enumerate() {
         let id = s["id"].as_i64().unwrap();
@@ -587,8 +588,8 @@ pub fn spawn(commands: &mut Commands, assets: &AssetServer, lib: &Library, fxl: 
         let f = skill.handling();
         commands.entity(e).entry::<crate::Ship>().and_modify(move |mut ship| (ship.crew_speed, ship.crew_turn) = (f, f));
         commands.entity(e).insert(crate::environment::ScanFactor(skill.scan()));
-        if !primary {
-            commands.entity(e).remove::<PlayerShip>();
+        if primary && side == Side::Player {
+            commands.entity(e).insert(crate::commands::Commander::default());
         }
     }
     crate::environment::spawn(commands, assets, &mission.data, false);

@@ -36,15 +36,79 @@ pub const FORMAT: u32 = 2;
 const OLDEST_FORMAT: u32 = 1;
 
 /// The player who gave an order: a lobby slot. Single-player has one, 0.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct PlayerId(pub u8);
 
 /// The simulation's mark of a human's command ship: the ship that player commands directly (its engines, its own target, panic fire,
-/// indirect shots), where an order to any other ship of the fleet is a captain's order. `PlayerShip` stays the local player's
-/// ship, for the view. Single-player has one human, player 0, so `Commander(PlayerId(0))` follows `PlayerShip` (its hooks, `ship.rs`).
-/// PROVISIONAL until lock-step gives each human's command ship its own.
-#[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
+/// indirect shots), where an order to any other ship of the fleet is a captain's order. Battle setup and `ship::reconcile_fleets` set
+/// it, one per human player; `PlayerShip` (the local player's ship, for the view) follows it on the local player's ship (the hooks
+/// here). A world built by hand that marks only `PlayerShip` (tests, smokes) gets `Commander` of the local player (`ship.rs`).
+#[derive(Component, Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[component(on_insert = commander_set, on_remove = commander_removed)]
 pub struct Commander(pub PlayerId);
+
+fn commander_set(mut world: bevy::ecs::world::DeferredWorld, ctx: bevy::ecs::lifecycle::HookContext) {
+    let local = world.get::<Commander>(ctx.entity).is_some_and(|c| c.0 == local_player(&world));
+    let mut commands = world.commands();
+    let mut e = commands.entity(ctx.entity);
+    if local {
+        e.try_insert(crate::PlayerShip);
+    } else {
+        e.try_remove::<crate::PlayerShip>();
+    }
+}
+fn commander_removed(mut world: bevy::ecs::world::DeferredWorld, ctx: bevy::ecs::lifecycle::HookContext) {
+    world.commands().entity(ctx.entity).try_remove::<crate::PlayerShip>();
+}
+
+/// One player of the battle: the fleet it commands (`ship::Fleets` key), its side, and whether a person plays it.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Player {
+    pub owner: crate::names::Owner,
+    pub side: crate::Side,
+    pub human: bool,
+}
+
+/// The battle's players by id (#369 phase 2), built at battle setup where `Fleets.local` is set, and which one this machine plays.
+/// Skirmish: one per lobby slot in the battle (command line: the human 0, the enemy 1). Campaign and the test arena: the human, 0.
+#[derive(Resource, Default, Debug, Clone)]
+pub struct Players {
+    pub list: std::collections::BTreeMap<PlayerId, Player>,
+    pub local: PlayerId,
+}
+
+impl Players {
+    /// A battle with one human, player 0, commanding `owner`'s fleet (campaign missions, the test arena).
+    pub fn single(world: &mut World, owner: crate::names::Owner) {
+        let list = [(PlayerId(0), Player { owner, side: crate::Side::Player, human: true })].into();
+        world.insert_resource(Players { list, local: PlayerId(0) });
+    }
+}
+
+/// The player this machine plays (0 without a table).
+pub fn local_player(world: &World) -> PlayerId {
+    world.get_resource::<Players>().map_or_else(PlayerId::default, |p| p.local)
+}
+
+/// The fleet `player` commands: its table entry, else (a world without one: unit tests, a battle before setup) the local fleet for the
+/// local player, none for any other.
+pub fn fleet_of(world: &World, player: PlayerId) -> Option<crate::names::Owner> {
+    match world.get_resource::<Players>().and_then(|p| p.list.get(&player)) {
+        Some(p) => Some(p.owner.clone()),
+        None if player == local_player(world) => world.get_resource::<crate::ship::Fleets>().map(|f| f.local.clone()),
+        None => None,
+    }
+}
+
+/// The human players and their fleets, by id. A world without a table has one: the local player with the local fleet.
+pub fn humans(world: &World) -> Vec<(PlayerId, crate::names::Owner)> {
+    let listed: Vec<_> = world.get_resource::<Players>().into_iter().flat_map(|p| p.list.iter()).filter(|(_, p)| p.human).map(|(id, p)| (*id, p.owner.clone())).collect();
+    if !listed.is_empty() {
+        return listed;
+    }
+    let local = local_player(world);
+    fleet_of(world, local).map(|owner| (local, owner)).into_iter().collect()
+}
 
 /// An engine order: a step up or down the dial (the speed keys) or straight to one setting (the dial, its tabs).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -123,12 +187,14 @@ pub struct Outbox(Vec<PlayerCommand>);
 #[derive(bevy::ecs::system::SystemParam)]
 pub struct Orders<'w> {
     outbox: ResMut<'w, Outbox>,
+    players: Option<Res<'w, Players>>,
 }
 
 impl Orders<'_> {
     /// An order from the local player.
     pub fn send(&mut self, kind: Kind) {
-        self.outbox.0.push(PlayerCommand { player: PlayerId(0), kind });
+        let player = self.players.as_ref().map_or_else(PlayerId::default, |p| p.local);
+        self.outbox.0.push(PlayerCommand { player, kind });
     }
 }
 
@@ -153,15 +219,17 @@ pub fn apply(world: &mut World, player: PlayerId, kind: &Kind) {
         Kind::Stop { .. } | Kind::Hold { .. } | Kind::Cloak { .. } => apply_menu(world, kind),
         Kind::Dock { .. } | Kind::Tow { .. } | Kind::Board { .. } | Kind::Grapple { .. } | Kind::CancelDock { .. } | Kind::DropGrapple { .. } => apply_links(world, kind),
         Kind::Formation { formation, hold } => {
-            let owner = local_fleet(world);
-            crate::ship::set_formation(world, &owner, Some(formation), hold);
+            if let Some(owner) = fleet_of(world, player) {
+                crate::ship::set_formation(world, &owner, Some(formation), hold);
+            }
         }
         Kind::FleetAttack | Kind::CeaseFire => {
-            let owner = local_fleet(world);
-            crate::ship::fleet_help(world, &owner, *kind == Kind::FleetAttack);
+            if let Some(owner) = fleet_of(world, player) {
+                crate::ship::fleet_help(world, &owner, *kind == Kind::FleetAttack);
+            }
         }
         Kind::Promote { ship } => {
-            crate::ship::promote(world, ship, false);
+            crate::ship::promote(world, player, ship, false);
         }
         Kind::PanicFire { ship } => {
             if direct(world, ship, player)
@@ -211,11 +279,6 @@ fn attackable(world: &World, ship: Entity, target: Entity) -> bool {
     let table = world.get_resource::<crate::alliance::Alliances>().unwrap_or(crate::alliance::empty());
     let side = |e: Entity| world.get::<Ship>(e).map(|s| s.side).or_else(|| table.base_side(world.get(e), world.get(e)));
     side(ship).zip(side(target)).is_none_or(|(a, b)| table.hostile(a, b))
-}
-
-/// The fleet a fleet order commands: the local player's (single-player; #369 phase 2 makes it the command's player's).
-fn local_fleet(world: &World) -> crate::names::Owner {
-    world.get_resource::<crate::ship::Fleets>().map(|f| f.local.clone()).unwrap_or_default()
 }
 
 /// Direct control: `ship` is the command ship of the player who gave the order (`Commander`); an order to any other ship is a
@@ -428,7 +491,9 @@ pub fn apply_tick(world: &mut World) {
     };
     let sent = std::mem::take(&mut world.resource_mut::<Outbox>().0);
     if live {
-        let todo = replayed(world, At::Tick(tick)).unwrap_or(sent);
+        let mut todo = replayed(world, At::Tick(tick)).unwrap_or(sent);
+        // Every machine applies a tick's commands in one order: by player, then in the order that player sent them (#369 section 3).
+        todo.sort_by_key(|c| c.player);
         for c in todo {
             record(world, At::Tick(tick), &c);
             apply(world, c.player, &c.kind);
@@ -1017,6 +1082,7 @@ fn mismatch(header: &Header, args: &[String], seed: u64, mods: &[String]) -> Opt
 pub fn plugin(app: &mut App) {
     app.init_resource::<Outbox>()
         .init_resource::<Clock>()
+        .init_resource::<Players>()
         .add_systems(RunFixedMainLoop, frame_start.in_set(bevy::app::RunFixedMainLoopSystems::BeforeFixedMainLoop))
         .add_systems(FixedUpdate, apply_tick.in_set(crate::BattleSet::Tick).after(crate::tick_start))
         .add_systems(PostUpdate, apply_paused)

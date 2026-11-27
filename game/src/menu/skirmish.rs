@@ -917,8 +917,9 @@ impl Skirmish {
         let mut computers = 0;
         self.slots
             .iter()
-            .filter(|s| s.kind.live())
-            .map(|s| {
+            .enumerate()
+            .filter(|(_, s)| s.kind.live())
+            .map(|(slot, s)| {
                 let (ships, ids, computer_build) = if !open {
                     let (ships, ids) = self.placed_fleet(s, lib);
                     (ships, ids, None)
@@ -945,6 +946,7 @@ impl Skirmish {
                 };
                 crate::Group {
                     player: s.player,
+                    slot: u8::try_from(slot).ok(),
                     side,
                     human: s.kind == Kind::Human,
                     race: if s.race == Race::Unchosen { crate::scenario::faction(&s.name).unwrap_or(Race::Unchosen) } else { s.race },
