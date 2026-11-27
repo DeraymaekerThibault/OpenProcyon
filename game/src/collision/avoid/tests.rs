@@ -3,8 +3,9 @@ use crate::collision::{Bounds, BoxBody, Triangle};
 
 // A Frigate-sized hull: 6 wide, 30 long, sphere radius 15 (hand-authored, not imported data).
 const BOUNDS: [Vec3; 2] = [Vec3::new(-3.0, -2.0, -15.0), Vec3::new(3.0, 2.0, 15.0)];
+/// A ship at `speed`, its last position change one tick of that speed.
 fn me(speed: f32) -> Me {
-    Me { pos: Vec3::ZERO, heading: 0.0, speed, bounds: BOUNDS, radius: 15.0, priority: speed, lifeboat: false }
+    Me { pos: Vec3::ZERO, heading: 0.0, speed, bounds: BOUNDS, radius: 15.0, priority: speed, lifeboat: false, moved: (speed * crate::TICK_SECS).powi(2) }
 }
 /// A wall across the course `z` units ahead (heading 0 sails toward -z), `half` units either side of the line, offset by `x`.
 fn wall(z: f32, x: f32, half: f32) -> Obstacle {
@@ -100,14 +101,14 @@ fn a_computer_ship_gives_way_to_the_humans_moving_ship_but_never_stops_for_land(
 }
 
 #[test]
-fn a_ship_wedged_against_land_turns_in_place_after_eleven_thinks_toward_the_smaller_clear_turn() {
+fn a_ship_wedged_against_land_turns_in_place_once_the_same_land_was_met_on_more_than_ten_thinks() {
     // The bow 1 unit into a wide wall dead ahead, creeping at 0.5 units/s.
     let w = wall(14.0, 0.0, 400.0);
     let mut a = Avoid::new(0.0);
-    for _ in 0..11 {
+    for _ in 0..12 {
         a.think(&me(0.5), FAR, &[island(&w)], key(SELF));
     }
-    assert_eq!(a.stuck, None, "not before the twelfth think on the same obstacle");
+    assert_eq!(a.stuck, None, "the count reaches 11 on the twelfth think; the wedged test reads it on the next");
     a.think(&me(0.5), FAR, &[island(&w)], key(SELF));
     assert_eq!(a.stuck, Some(-1.0), "both sides clear at the same turn: the minus side, as the original");
     let free = Me { heading: -PI / 2.0, ..me(0.5) };
@@ -148,4 +149,37 @@ fn the_same_rock_counts_as_the_same_wherever_it_is_listed() {
     a.think(&me(6.6), FAR, &[rock(&near, 5), rock(&beside, 6)], key(SELF));
     a.think(&me(6.6), FAR, &[rock(&beside, 6), rock(&near, 5)], key(SELF));
     assert_eq!((a.last, a.same), (Some(key(5)), 1), "met twice in a row");
+}
+
+/// The original's release (docs/re/movement.md "Wedged"): only a failing condition ends it. A push-out over 0.1 units is a position
+/// change that does, and since the wedged test leaves the same-obstacle count alone, the ship is wedged again on its next think
+/// against the same land while it barely moves.
+#[test]
+fn a_push_out_releases_a_wedged_ship_and_the_kept_count_wedges_it_again_at_once() {
+    let w = wall(14.0, 0.0, 400.0);
+    let mut a = Avoid::new(0.0);
+    for _ in 0..13 {
+        a.think(&me(0.5), FAR, &[island(&w)], key(SELF));
+    }
+    assert!(a.stuck.is_some());
+    let count = a.same;
+    for _ in 0..5 {
+        a.think(&me(0.5), FAR, &[island(&w)], key(SELF));
+    }
+    assert_eq!(a.same, count, "the wedged test leaves the count alone");
+    a.think(&Me { moved: 0.15 * 0.15, ..me(0.5) }, FAR, &[island(&w)], key(SELF));
+    assert_eq!(a.stuck, None, "pushed 0.15 units: released");
+    a.think(&me(0.5), FAR, &[island(&w)], key(SELF));
+    assert!(a.stuck.is_some(), "the count is still above ten: wedged again on the next think");
+}
+
+/// A ship at the speed it keeps while turning in place is not "barely moving" by its speed: only its last position change counts.
+#[test]
+fn barely_moving_is_the_last_position_change_not_the_speed() {
+    let w = wall(14.0, 0.0, 400.0);
+    let mut a = Avoid::new(0.0);
+    for _ in 0..20 {
+        a.think(&Me { moved: 0.0, ..me(1.2) }, FAR, &[island(&w)], key(SELF));
+    }
+    assert!(a.stuck.is_some(), "1.2 units/s kept but not moving: wedged");
 }

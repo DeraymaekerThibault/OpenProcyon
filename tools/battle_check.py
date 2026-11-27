@@ -33,8 +33,9 @@ from tools.rungame import (
 REPORT = re.compile(r"battle report (\{.*\})")
 FLEETS = ["--ship", "Ship_Navy_Cutter", "--allies", "Ship_Navy_Cutter",
           "--enemies", "Ship_Pirate_Barque,Ship_Pirate_Sloop"]  # fmt: skip
-# Seconds a ship may stay in contact with scenery without a break before it counts as grinding. A wedged computer ship first waits
-# for the original's unstick (the same obstacle for 5.5 s), then turns in place until it is free (docs/re/movement.md).
+# Seconds a computer ship may stay in contact with scenery without a break before it counts as grinding. A wedged computer ship first
+# waits for the original's unstick (the same obstacle for 5.5 s), then turns in place until it is free (docs/re/movement.md). The
+# human's ships are not judged: they skip the avoider on attack and move orders and sail into land as in the original.
 GRIND = 10.0
 # Frames over 50 ms a battle may have (after the first second) before it counts as stuttering; healthy runs have 0-1.
 STUTTER = 10
@@ -217,7 +218,7 @@ def evaluate(report, expect, fire_by=FIRE_BY):
             f"stutter: {frames['over_50']} frames over 50 ms (worst {frames['worst']:.0f} ms)"
         )
     for s in report["ships"]:
-        if s["worst_contact"] > GRIND:
+        if computer(s) and s["worst_contact"] > GRIND:
             fails.append(
                 f"{s['class']} ({s['side']}) ground on scenery for {s['worst_contact']} s"
             )

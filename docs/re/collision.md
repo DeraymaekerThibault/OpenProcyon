@@ -125,8 +125,11 @@ the same depth. The deepest level the contact test is allowed to use is 6, so on
 **Where the tree is.** The tree lives in the mesh's own frame. The mesh layer sits at the island object's position plus an offset of
 (scene node position - scene node pivot) in the island's frame. Island 8: node position z +0.45, pivot z -6.6, so the whole tree is 7.05 u
 above the object's origin (the fit to the measurements gives 7.05 to within 0.02, and the arithmetic gives exactly 7.05). Island 6: node 0, pivot 0, no offset. Of the retail
-scenes' 80 island layers and 250 base layers, 15 and 49 have a non-zero offset (none of the 12 asteroid layers). Islands tested had no rotation; the object's rotation applies to the
-tree the same way it does to the render (unmeasured).
+scenes' 80 island layers and 250 base layers, 15 and 49 have a non-zero offset (none of the 12 asteroid layers). Islands tested had no rotation. Static reading (2026-11-27, not measured): each layer is tested in its scene node's world pose, the
+same composed pose the renderer draws, so the object's rotation applies to the tree as to the render; the contact pass adds the layers'
+pushes, the avoider stops at the first layer with contact; both stop at level 6 (Island_Mega_05's trees end at level 5). A leaf's triangle
+list indexes the collision-detail mesh (model 1: 274/330/418/336 faces in Island_Mega_05's four layers, the 1358 of `collision.json`);
+ships never read these lists, and a leaf's listed triangles are often not inside that leaf's box, so what the lists mean is unresolved.
 
 **The ship's box.** The ship's physics box (its `MinExtents` / `MaxExtents`, game axes: x starboard, y bow, z up) at the ship's position and
 heading, centred at the middle of the extents. Man-O-War (-3, -17, -3) to (3, 14, 6); Cutter (-2.25, -7, -1.5) to (2.25, 6.5, 2). The ship's
@@ -156,7 +159,8 @@ as the unit vector): start (-467.6, -1262.5) facing (-0.159, 0.987) ends at (-46
 (0.160, -0.987) ends at (-541.17, -1271.78); island 6, Man-O-War start (318.3, -184.4) facing (-0.447, 0.894) ends at (322.87, -178.26).
 These are test vectors for the rule; they need the imported island meshes.
 
-**Remake status.** Built: `collision/tree.rs` (the rule as pure functions), the layer offset applied to the rendered mesh, the shell triangles and the tree, and the tree exported per mesh layer by `tools/export_collision.py`. Ships touch islands and bases by the tree; the collision avoider, course preview and shells still use triangles. The push runs once per physics substep rather than once per 1/30 s tick. The 12 test vectors above reproduce to 0.01 u iterating the push once per tick; four of them also through the game's own scheduler.
+**Remake status.** Built: `collision/tree.rs` (the rule as pure functions), the layer offset applied to the rendered mesh, the shell triangles and the tree, and the tree exported per mesh layer by `tools/export_collision.py`. Ships touch islands and bases by the tree, and the collision avoider's look-ahead tests them by the tree too (yes or no, as the original:
+[movement.md](movement.md)); the course preview and shells still use triangles. PROVISIONAL: what the original's course preview tests is not read. The push runs once per physics substep rather than once per 1/30 s tick. The 12 test vectors above reproduce to 0.01 u iterating the push once per tick; four of them also through the game's own scheduler.
 
 **What differed before.** The remake tested ship boxes against the layer's triangles clipped to the ship's height and applied no node pivot to
 island meshes, so ships held a few units off the shore where the original holds 15 to 25 and islands with a pivot offset sat lower than

@@ -365,6 +365,23 @@ pub fn touches(bounds: [Vec3; 2], tf: &Transform, scenery: &[&Obstacle]) -> bool
     scenery.iter().any(|o| hits(&body, o))
 }
 
+/// Whether a ship box at `tf` is in contact with `obstacle` as the collision pass sees it: by the box tree when the obstacle has one
+/// (islands, bases), else by its triangles (the pass's push-out test).
+pub fn in_contact(bounds: [Vec3; 2], tf: &Transform, obstacle: &Obstacle) -> bool {
+    if obstacle.tree.is_empty() { hits(&box_body(bounds, tf), obstacle) } else { tree::land_contact(&obstacle.tree, &tree::Box3::placed(bounds, tf)).is_some() }
+}
+
+/// The avoider's land test (docs/re/movement.md, "Looking ahead"): the box tree, yes or no, for an object that has one (islands and
+/// bases, so it agrees with the collision pass's contact); else the object's single bounding box. Never its triangles.
+pub(crate) fn avoider_hits(bounds: [Vec3; 2], tf: &Transform, obstacle: &Obstacle) -> bool {
+    if obstacle.tree.is_empty() {
+        let body = box_body(bounds, tf);
+        body.bounds.overlaps(obstacle.body.bounds) && contact(&body.points, &obstacle.body.points).is_some()
+    } else {
+        tree::touches(&obstacle.tree, &tree::Box3::placed(bounds, tf))
+    }
+}
+
 /// Number of leading path poses that stay clear of scenery; the course preview stops drawing at this index.
 pub fn clear_prefix(bounds: [Vec3; 2], path: &[Transform], scenery: &[&Obstacle]) -> usize {
     path.iter().position(|tf| touches(bounds, tf, scenery)).unwrap_or(path.len())
@@ -444,11 +461,12 @@ pub fn sail(
     currents: Query<&crate::environment::Current>,
     mut rams: Option<ResMut<Messages<Ram>>>,
     captains: Query<&crate::campaign::MissionShip>,
-    (fleets, members, mut avoiders, mut rammed, dying, mut broken, spawn_order): (
+    (fleets, members, mut avoiders, mut rammed, mut moved, dying, mut broken, spawn_order): (
         Option<Res<crate::ship::Fleets>>,
         Query<&crate::ship::FleetMember>,
         Local<HashMap<Entity, avoid::Avoid>>,
         Local<HashMap<Entity, f32>>,
+        Local<HashMap<Entity, Vec3>>,
         Query<&crate::combat::Sinking>,
         Option<ResMut<Messages<crate::combat::Destroyed>>>,
         (Query<&crate::scenario::SpawnIndex>, crate::scenario::BattleStart),
@@ -459,6 +477,7 @@ pub fn sail(
         cables.clear();
         avoiders.clear();
         rammed.clear();
+        moved.clear();
     }
     let now = time.elapsed_secs();
     // The ram clock starts at creation: a new ship cannot be rammed for its first `RAM_COOLDOWN` s.
@@ -575,6 +594,7 @@ pub fn sail(
                     radius: class.radius,
                     priority: priority(e, &s),
                     lifeboat: boats.contains(e),
+                    moved: moved.get(&e).map_or(0.0, |m| m.length_squared()),
                 };
                 let ahead = |h: f32| tf.translation + Vec3::new(-h.sin(), 0.0, -h.cos()) * (s.speed.abs() * 2.0 * avoid::LOOK + class.radius + 1.0);
                 let dest = s.waypoints.first().copied().or(s.goal.map(ahead));
@@ -605,7 +625,9 @@ pub fn sail(
         tf.translation += delta;
         obstacle.translate(delta);
     }
+    moved.retain(|e, _| ships.contains(*e));
     for (e, mut s, mut tf, health, mut drift, docker) in &mut ships {
+        let before = tf.translation;
         // A destroyed hull still sails while it breaks up (docs/re/effects.md "Death drive"): the computer steers it with the
         // wrecked drive; once the break-up is over it no longer moves.
         let sinking = dying.get(e).ok();
@@ -653,6 +675,8 @@ pub fn sail(
         // PROVISIONAL lateral damping; the original has lateral drag but its full mapping is not recovered.
         drift.0 *= (-2.0 * substep).exp();
         tf.translation += drift.0 * substep;
+        // The ship's own move is its last position change unless a push below writes after it (the wedged test, avoid.rs).
+        moved.insert(e, tf.translation - before);
     }
     // The original's tow keeper (docs/re/collision.md Tow constraint): after both hulls ran their own step, a taut link moves the
     // pair back together along the line of centres, 25 % on the tower and 75 % on a movable towee (all on the tower when the towee is
@@ -672,10 +696,13 @@ pub fn sail(
         let stretch = separation / distance * (distance - length);
         if pinned(towee) {
             ta.translation += stretch;
+            moved.insert(tower, stretch);
             continue;
         }
         ta.translation += stretch * 0.25;
         tb.translation -= stretch * 0.75;
+        moved.insert(tower, stretch * 0.25);
+        moved.insert(towee, -stretch * 0.75);
         // PROVISIONAL rope torque on the towee (the original's constants are not decoded): the pull acts at its tow point, so the
         // hull swings to trail the rope. Only the angular part of the pull of that 75 % move is applied.
         let cb = &lib.classes[b.class];
@@ -704,6 +731,7 @@ pub fn sail(
                 let ship = tree::Box3::placed(class.collision_bounds, &tf);
                 if let Some(push) = tree::land_push(&obstacle.tree, &ship) {
                     tf.translation += push;
+                    moved.insert(e, push);
                 }
                 continue;
             }
@@ -715,6 +743,7 @@ pub fn sail(
                 // The original: land and bases only push the hull out along the horizontal normal; speed,
                 // turn, damage and sound are untouched, so a ship slides along the shore and can still turn free.
                 tf.translation += contact.push.with_y(0.0);
+                moved.insert(e, contact.push.with_y(0.0));
             }
         }
         // PROVISIONAL: native asteroid restitution/inertia remain unresolved.
@@ -740,6 +769,7 @@ pub fn sail(
             // (0.25 x the centres' offset per second), and both damaged every tick by the rock's mass x the closing speed.
             let push = contact.push.with_y(0.0);
             tf.translation += push * (a.inverse_mass / (a.inverse_mass + b.inverse_mass));
+            moved.insert(e, push * (a.inverse_mass / (a.inverse_mass + b.inverse_mass)));
             let delta = -push * (b.inverse_mass / (a.inverse_mass + b.inverse_mass));
             rock_tf.translation += delta;
             obstacle.translate(delta);
@@ -803,6 +833,8 @@ pub fn sail(
         // per 0.033 s, over a box's inertia (the own mass cancels: a light ship swings, a heavy one hardly turns).
         ta.translation += push * (a_body.inverse_mass / total);
         tb.translation -= push * (b_body.inverse_mass / total);
+        moved.insert(ea, push * (a_body.inverse_mass / total));
+        moved.insert(eb, -push * (b_body.inverse_mass / total));
         let (ma, mb) = (ca.phys.mass, cb.phys.mass);
         let common = (a_body.velocity * ma + b_body.velocity * mb) / (ma + mb);
         let kick = |body: &ContactBody, size: Vec3, dir: Vec3| {

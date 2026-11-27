@@ -94,6 +94,11 @@ pub fn land_contact(layers: &[Vec<BoxNode>], ship: &Box3) -> Option<Vec3> {
     layers.iter().filter(|l| !l.is_empty()).filter_map(|l| contact(l, 0, ship)).reduce(|a, b| a + b)
 }
 
+/// Whether the ship touches any layer: the avoider's yes/no land test, the first layer with contact deciding (docs/re/movement.md).
+pub fn touches(layers: &[Vec<BoxNode>], ship: &Box3) -> bool {
+    layers.iter().filter(|l| !l.is_empty()).any(|l| contact(l, 0, ship).is_some())
+}
+
 /// How far the ship moves for a contact `normal x depth` (remake axes, y up): depth x |cos| along the horizontal part of the normal,
 /// where cos is the angle between that horizontal direction and the full normal.
 pub fn push(contact: Vec3) -> Vec3 {

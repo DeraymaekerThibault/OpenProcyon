@@ -1,7 +1,8 @@
 //! The original's collision avoider for AI-steered ships (docs/re/movement.md, "Collision avoidance"): one local rule for land,
 //! ships and rocks alike, no route planning. Twice a second each ship looks up to 10 s ahead along its current heading; an obstacle
 //! in the way caps its speed by the gap, sends it to a detour point on the smallest clear turn, and after about 3 s of the same
-//! obstacle the lower-priority ship stops for 4 s; a ship wedged against an obstacle turns in place (`Avoid::stuck`). PROVISIONAL
+//! obstacle the lower-priority ship stops for 4 s; a ship wedged against an obstacle turns in place (`Avoid::stuck`). Land is tested
+//! with the same box tree as the contact (`collision::avoider_hits`), never its triangles. PROVISIONAL
 //! (not ported): mines, torpedoes, dragons, black holes and nebulae as obstacles, the scanner range limit, the avoider's exclusion list.
 use super::{BoxBody, Obstacle, box_body, contact, hits};
 use bevy::prelude::*;
@@ -15,8 +16,9 @@ const SAME_LIMIT: u32 = 5;
 const WAIT: f32 = 4.0;
 /// Stuck: the same obstacle for more than this many thinks while overlapping its sphere (gap under 1 unit) and barely moving.
 const STUCK_THINKS: u32 = 10;
-/// "Barely moving": the original tests the last position change per physics tick (0.033 s) under 0.1 units. PROVISIONAL: read as speed.
-const STUCK_SPEED: f32 = 0.1 / crate::TICK_SECS;
+/// "Barely moving": the squared size of the ship's last position change below this (under 0.1 units), whichever write came last in
+/// its tick: its own move, a push-out or a tow (docs/re/movement.md). Not a speed test.
+const STUCK_MOVE_SQ: f32 = 0.01;
 /// Priority a moving ship of the human's gets on top of its speed: computer ships give way to it.
 pub(super) const HUMAN_PRIORITY: f32 = 50.0;
 
@@ -52,6 +54,8 @@ pub struct Me {
     pub radius: f32,
     pub priority: f32,
     pub lifeboat: bool,
+    /// The squared size of the ship's last position change (`collision::sail` records it).
+    pub moved: f32,
 }
 
 /// One ship's avoider state between thinks.
@@ -111,12 +115,12 @@ impl Avoid {
             (self.cap, self.last, self.same, self.stuck) = (1.0, None, 0, None);
             return;
         };
-        self.same = if self.last == Some(o.key) { self.same + 1 } else { 0 };
-        self.last = Some(o.key);
         // Wedged: turn in place toward the smaller clear turn (a tie, or none clear: as the original, minus on a tie, else port),
-        // the side fixed until any condition fails on a later think.
+        // the side fixed until any condition fails on a later think. The test reads the same-obstacle count as the normal path left
+        // it and does not check that this is that obstacle; only the normal path below changes the count, so a ship released with the
+        // count still above the limit is wedged again on its next think against the same land.
         let sphere_gap = (o.centre - me.pos).with_y(0.0).length() - me.radius - o.radius;
-        if sphere_gap < 1.0 && me.speed.abs() < STUCK_SPEED && self.same > STUCK_THINKS {
+        if sphere_gap < 1.0 && me.moved < STUCK_MOVE_SQ && self.same > STUCK_THINKS {
             if self.stuck.is_none() {
                 self.detour = None;
                 self.stuck = Some(clear_heading(me, dest_heading, t, &cands).map_or(1.0, |h| if crate::ship::angdiff(h, me.heading) > 0.0 { 1.0 } else { -1.0 }));
@@ -124,6 +128,8 @@ impl Avoid {
             return;
         }
         self.stuck = None;
+        self.same = if self.last == Some(o.key) { self.same + 1 } else { 0 };
+        self.last = Some(o.key);
         if self.same > SAME_LIMIT && o.priority >= me.priority {
             (self.cap, self.wait) = (0.0, WAIT);
             return;
@@ -156,7 +162,7 @@ fn sweep<'a>(me: &Me, heading: f32, secs: f32, others: &[&'a Other<'a>]) -> Opti
         let hit = others
             .iter()
             .filter(|o| match &o.shape {
-                Shape::Fixed { obstacle, .. } => hits(&body, obstacle),
+                Shape::Fixed { obstacle, .. } => super::avoider_hits(me.bounds, &tf, obstacle),
                 Shape::Ship { bounds, heading, velocity } => {
                     let other = box_body(*bounds, &Transform::from_translation(o.centre + *velocity * t).with_rotation(Quat::from_rotation_y(*heading)));
                     body.bounds.overlaps(other.bounds) && contact(&body.points, &other.points).is_some()

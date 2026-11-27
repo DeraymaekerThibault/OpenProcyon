@@ -762,3 +762,28 @@ fn avoiders_sail_alike_whatever_the_query_order() {
     assert!(plain.1.iter().any(|s| s.2 < 1.0), "the avoiders slow someone down: {:?}", plain.1);
     assert_eq!(plain.1, moved.1, "the same battle whatever the query order");
 }
+
+/// Border Dispute, lobby battle (seed 1): a computer Procyon Frigate stopped on the shore of the rotated, four-layer Island_Mega_05 and
+/// turned in place for the rest of the battle. There the island's triangles overlap the hull at every heading while its box tree, the
+/// collision pass's contact, does not, so the avoider (which tested triangles) saw land on every think and nothing pushed the ship
+/// free. The avoider now tests the tree, as the original does: it sees land only where the collision pass would push.
+#[test]
+#[ignore = "needs imported assets"]
+fn the_avoider_sees_land_only_where_the_collision_pass_has_contact() {
+    let shapes = Shapes::from_world(&mut World::new());
+    let lib = crate::testutil::lib();
+    let bounds = lib.classes[lib.index("Ship_Procyon_Frigate")].collision_bounds;
+    let rot = crate::scenario::game_rotation(&serde_json::json!([-0.788011, -0.615662, 0.0, 0.615662, -0.788011, 0.0, 0.0, 0.0, 1.0]));
+    let island = shapes.obstacle("Island_Mega_05", &Transform::from_xyz(657.445_7, 54.0, -269.49).with_rotation(rot)).unwrap();
+    let centre = Vec3::new(657.445_7, 0.0, -269.49);
+    let stuck = Vec3::new(186.1, 0.0, -1094.8);
+    for deg in (0..360).step_by(15) {
+        let tf = Transform::from_translation(stuck).with_rotation(Quat::from_rotation_y((deg as f32).to_radians()));
+        assert!(hits(&box_body(bounds, &tf), &island), "heading {deg}: the triangles overlap here (the case this test is about)");
+        assert!(!in_contact(bounds, &tf, &island), "heading {deg}: no contact for the collision pass");
+        assert!(!avoider_hits(bounds, &tf, &island), "heading {deg}: so the avoider sees no land");
+    }
+    // A few units further in, the tree touches: both see it.
+    let tf = Transform::from_translation(stuck + (centre - stuck).normalize() * 6.0).with_rotation(Quat::from_rotation_y(0.7));
+    assert!(in_contact(bounds, &tf, &island) && avoider_hits(bounds, &tf, &island));
+}
