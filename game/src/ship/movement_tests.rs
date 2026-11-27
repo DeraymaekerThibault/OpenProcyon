@@ -1238,6 +1238,7 @@ fn attack(w: &mut World, e: Entity, target: Entity) {
 /// The original's promotion touches neither ship's target (procyon-re `evidence/ai-captain/`, stage 2 Read): the old command ship keeps
 /// its attack click, still ordered, and fights it as a computer captain; the new one keeps whatever its captain held.
 #[test]
+#[ignore = "needs imported assets"]
 fn promotion_leaves_both_target_slots_alone() {
     let (mut w, ids) = fleet_world();
     crate::testutil::set_command_target(&mut w, Some(ids[5]));
