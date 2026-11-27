@@ -84,6 +84,10 @@ impl Players {
         let list = [(PlayerId(0), Player { owner, side: crate::Side::Player, human: true })].into();
         world.insert_resource(Players { list, local: PlayerId(0) });
     }
+    /// Whether a person plays the fleet `owner` (#369 D: "a human player" is per owner, not per side).
+    pub fn human_owner(&self, owner: &crate::names::Owner) -> bool {
+        self.list.values().any(|p| p.human && &p.owner == owner)
+    }
 }
 
 /// The player this machine plays (0 without a table).
@@ -173,6 +177,32 @@ pub enum Kind {
     Lob { ship: Entity, shot: Option<(usize, Vec3)> },
 }
 
+impl Kind {
+    /// The ship the order is for; none for the fleet orders (the sender's fleet).
+    pub fn ship(&self) -> Option<Entity> {
+        match *self {
+            Kind::Engine { ship, .. }
+            | Kind::Target { ship, .. }
+            | Kind::Move { ship, .. }
+            | Kind::Course { ship, .. }
+            | Kind::Cancel { ship }
+            | Kind::Stop { ship }
+            | Kind::Hold { ship, .. }
+            | Kind::Cloak { ship, .. }
+            | Kind::Dock { ship, .. }
+            | Kind::Tow { ship, .. }
+            | Kind::Board { ship, .. }
+            | Kind::Grapple { ship, .. }
+            | Kind::CancelDock { ship }
+            | Kind::DropGrapple { ship }
+            | Kind::Promote { ship }
+            | Kind::PanicFire { ship }
+            | Kind::Lob { ship, .. } => Some(ship),
+            Kind::Formation { .. } | Kind::FleetAttack | Kind::CeaseFire => None,
+        }
+    }
+}
+
 /// One player order.
 #[derive(Clone, Debug, PartialEq)]
 pub struct PlayerCommand {
@@ -215,6 +245,12 @@ pub struct Clock {
 /// Applies one command. Validation stays what the UI already checks (#369 design: single-player behaviour does not change); a command
 /// whose ship is gone does nothing.
 pub fn apply(world: &mut World, player: PlayerId, kind: &Kind) {
+    if let Some(ship) = kind.ship()
+        && !may_order(world, player, ship)
+    {
+        debug!("command dropped: player {} does not own {ship}: {kind:?}", player.0);
+        return;
+    }
     match *kind {
         Kind::Move { .. } | Kind::Course { .. } | Kind::Cancel { .. } => apply_movement(world, player, kind),
         Kind::Stop { .. } | Kind::Hold { .. } | Kind::Cloak { .. } => apply_menu(world, kind),
@@ -290,6 +326,15 @@ fn attackable(world: &World, ship: Entity, target: Entity) -> bool {
 
 /// Direct control: `ship` is the command ship of the player who gave the order (`Commander`); an order to any other ship is a
 /// captain's order (`Fleets::direct`, what the input handlers decided on, for the local player).
+/// Whether `player` may order `ship` (#369 D, section 7): a ship with an owner takes orders only from the player commanding that fleet,
+/// so a ship captured by boarding follows its new owner at once, on every machine alike. A ship of no owner, or a sender with no fleet
+/// (unit tests), is not checked. A remake rule, not the original's: its command check only tests that the named objects still exist,
+/// and only its interface limits what a player can order. Single player is unchanged: the one human owns every ship the UI orders.
+fn may_order(world: &World, player: PlayerId, ship: Entity) -> bool {
+    let Some(fleet) = fleet_of(world, player) else { return true };
+    crate::ship::owner_of(world, ship).is_none_or(|owner| owner == fleet)
+}
+
 fn direct(world: &World, ship: Entity, player: PlayerId) -> bool {
     world.get::<Commander>(ship).is_some_and(|c| c.0 == player)
 }

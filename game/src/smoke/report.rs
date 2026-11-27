@@ -125,7 +125,7 @@ fn watch(
     mut report: ResMut<Report>,
     (cfg, sk): (Res<crate::Config>, Res<crate::menu::Skirmish>),
     ships: Query<(Entity, &Ship, &Transform, &Health, Option<&crate::ship::FleetMember>, Option<&crate::docking::Docker>)>,
-    fleets: Res<crate::ship::Fleets>,
+    (fleets, players): (Res<crate::ship::Fleets>, Option<Res<crate::commands::Players>>),
     obstacles: Query<(Entity, &crate::collision::Obstacle, Option<&Visibility>), (Without<Ship>, Without<crate::combat::Asteroid>)>,
     mut fired: MessageReader<Fired>,
     mut hits: MessageReader<Hit>,
@@ -162,8 +162,8 @@ fn watch(
         let class = &lib.classes[ship.class];
         if !report.ships.contains_key(&e) {
             report.sides.entry(side.clone()).or_default().ships += 1;
-            // The same test the captain AI uses (ship.rs `ai`): only the human's own fleet waits for orders.
-            let computer = !crate::ship::is_human_ship(ship.side, member, Some(&fleets));
+            // The same test the captain AI uses (ship.rs `ai`): a human player's ships never explore or dock for repair on their own.
+            let computer = !crate::ship::is_human_ship(ship.side, member, players.as_deref(), Some(&fleets));
             report.ships.insert(
                 e,
                 ShipLine {

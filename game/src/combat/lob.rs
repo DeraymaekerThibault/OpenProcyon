@@ -314,11 +314,11 @@ pub fn ram_damage(
     difficulty: Res<crate::scenario::Difficulty>,
     mut msgs: MessageReader<crate::collision::Ram>,
     mut ships: Query<(&Ship, &Transform, &mut Health, Option<&crate::campaign::MissionShip>, Option<&crate::ship::FleetMember>)>,
-    fleets: Option<Res<crate::ship::Fleets>>,
+    (fleets, players): (Option<Res<crate::ship::Fleets>>, Option<Res<crate::commands::Players>>),
     mut sfx: MessageWriter<crate::audio::Sfx>,
     mut last: ResMut<super::LastDamager>,
 ) {
-    let human = |s: &Ship, m: Option<&crate::ship::FleetMember>| crate::ship::is_human_ship(s.side, m, fleets.as_deref());
+    let human = |s: &Ship, m: Option<&crate::ship::FleetMember>| crate::ship::is_human_ship(s.side, m, players.as_deref(), fleets.as_deref());
     let mut sounded: Vec<(Entity, Entity, &'static str)> = vec![];
     for r in msgs.read() {
         let rammer = ships.get(r.b).ok().map(|(s, _, _, _, m)| human(s, m));

@@ -240,6 +240,14 @@ human player separately:
   P promotes a ship of the sender's own fleet only, and only the local player's selection follows it.
 - **Who counts as `Captain_Human`.** Each human's command ship is under human control (the rules' `HUMAN CONTROLLED COMMAND SHIP`,
   `Set Group/Unit AI Captain` with `Captain_Human`); every other ship, a human's secondaries included, has a computer captain.
+- **Who counts as a human player.** A ship belongs to a human player when a person plays its fleet (the lobby slot's), on any
+  team; an allied computer fleet on the same side does not. Keyed on it: a human's ships never dock for repair or explore on their
+  own, the difficulty factor on fire and ramming (one match-wide difficulty, [movement.md](movement.md)), and victory's "no
+  human-controlled ships remain". This is the original's split: a human *captain* per ship, the command ship only, and a human
+  *player* per owner.
+- **Orders follow ownership (remake rule).** A command naming a ship is dropped unless its sender's fleet owns that ship now, so a
+  ship captured by boarding takes its new owner's orders at once, and every machine drops the old owner's alike. The original
+  checks only that the named objects still exist; its interface alone limits what a player can order. Single player is unchanged.
 - **Hand-over.** When a human's command ship sinks or is captured, the first living ship left in that player's fleet becomes the
   command ship (fallback 2 below, for every human). A fleet with no ship left has none.
 

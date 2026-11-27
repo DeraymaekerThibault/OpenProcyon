@@ -59,7 +59,7 @@ pub fn outcome(
     mut message: ResMut<EndMessage>,
     mut line: ResMut<EndLine>,
     mut cfg: ResMut<Config>,
-    player: Query<&Health, With<crate::commands::Commander>>,
+    player: Query<(&Health, &crate::commands::Commander)>,
     ships: Query<(&Health, &Ship), Without<crate::commands::Commander>>,
     rules: (
         Option<Res<victory::Victory>>,
@@ -67,6 +67,7 @@ pub fn outcome(
         Option<Res<ship::Fleets>>,
         Option<Res<crate::rules::skirmish::SkirmishScript>>,
         Option<Res<campaign::Mission>>,
+        Option<Res<crate::commands::Players>>,
     ),
     all: Query<(Entity, &Health, &Ship, &Transform, Option<&ship::FleetMember>, Option<&MapObject>), Without<crate::lifeboats::Lifeboat>>,
     mut sunk: Local<Vec<(Entity, victory::ShipState)>>,
@@ -93,11 +94,14 @@ pub fn outcome(
         sunk.clear();
     }
     let local = rules.2.as_ref().map(|f| f.local.as_str());
+    // A human player's ship (#369 D): a ship of a fleet a person plays, on any team; without a players table, the local fleet's.
+    let players = rules.5.as_deref().filter(|p| !p.list.is_empty());
+    let human = |m: &ship::FleetMember| players.map_or(Some(m.0.as_str()) == local, |p| p.human_owner(&m.0));
     let state = |(_, h, s, tf, m, o): (Entity, &Health, &Ship, &Transform, Option<&ship::FleetMember>, Option<&MapObject>)| victory::ShipState {
         side: s.side,
         start: o.map_or(s.side, |o| o.start),
         alive: !h.destroyed,
-        human: m.is_some_and(|m| Some(m.0.as_str()) == local),
+        human: m.is_some_and(human),
         id: o.and_then(|o| o.id),
         at: Vec2::new(tf.translation.x, -tf.translation.z),
     };
@@ -127,7 +131,11 @@ pub fn outcome(
         let decided = victory.decide_with_message(&snap).or_else(|| rules.3.as_ref().and_then(|s| s.script.end.as_ref()).map(|end| victory.decide_end(&snap, end)));
         end_message = decided.as_ref().and_then(|d| d.1.clone());
         decided.map_or(Outcome::Playing, |d| d.0)
-    } else if player.single().is_err() || player.single().is_ok_and(|h| h.destroyed) {
+    } else if {
+        // No map rules (the test arena): the battle is the local player's, lost with its command ship.
+        let me = rules.5.as_deref().map_or_else(crate::commands::PlayerId::default, |p| p.local);
+        player.iter().find(|(_, c)| c.0 == me).is_none_or(|(h, _)| h.destroyed)
+    } {
         Outcome::Defeat
     } else if enemies().count() + gone.iter().filter(|g| !table.with_human(g.side)).count() > 0 && enemies().all(|h| h.destroyed) {
         Outcome::Victory
