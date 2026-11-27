@@ -1034,8 +1034,7 @@ fn replayed(world: &mut World, at: At) -> Option<Vec<PlayerCommand>> {
         return None;
     }
     let replay = world.get_resource::<Replay>().filter(|r| !r.finished)?;
-    let saved: Vec<(PlayerId, Saved)> =
-        replay.commands.iter().filter(|(a, p, _)| *a == at && Some(*p) != replay.live).map(|(_, p, s)| (*p, s.clone())).collect();
+    let saved: Vec<(PlayerId, Saved)> = replay.commands.iter().filter(|(a, p, _)| *a == at && Some(*p) != replay.live).map(|(_, p, s)| (*p, s.clone())).collect();
     Some(
         saved
             .iter()

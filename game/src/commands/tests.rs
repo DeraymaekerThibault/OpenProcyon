@@ -373,10 +373,14 @@ fn a_replay_keeps_the_player_of_each_command() {
 fn a_replay_as_one_player_takes_that_players_orders_live_and_the_others_from_the_log() {
     let header = r#"{"format":2,"version":"0.0.0","seed":5,"args":[],"mods":[]}"#;
     let line = |p: u8| format!(r#"{{"command":{{"at":{{"tick":0}},"player":{p},"order":{{"cease_fire":null}}}}}}"#);
-    let text = format!("{header}
+    let text = format!(
+        "{header}
 {}
 {}
-", line(0), line(1));
+",
+        line(0),
+        line(1)
+    );
     let (_, mut replay, _) = Replay::read(text.as_bytes()).unwrap();
     replay.live = Some(PlayerId(1));
     let mut app = battle();
