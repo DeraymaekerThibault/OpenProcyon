@@ -39,7 +39,78 @@ def code_without_tests(path: Path) -> str:
     return code
 
 
+# Simulation modules (#369 phase 2): what they decide is the same on every machine of a lock-step match, so they never read the
+# local player's view state: the view's ship marker (`PlayerShip`), the local fleet and selection (`Fleets.local`/`selected`) or the
+# old global target (`combat::Target`). A human's ship is `commands::Commander`, a human player is `commands::Players`.
+SIMULATION = (
+    "ship.rs", "ship/", "combat/", "collision.rs", "collision/", "docking.rs", "boarding.rs", "boarding/",
+    "scenario/outcome.rs", "rules/", "cloak.rs", "dragons.rs", "lifeboats.rs", "blackhole.rs", "nebula.rs", "victory.rs",
+    "environment.rs", "crew_arms.rs", "crew_arms/", "alliance.rs", "commands.rs",
+)  # fmt: skip
+VIEW_STATE = re.compile(
+    r"\bPlayerShip\b|\bcombat::Target\b|\bfleets\b[^;\n]{0,40}?\.(?:local|selected)\b"
+)
+# The functions in those modules that may: the local player's input, the view's own systems, dev and smoke hooks acting as the
+# local player, the marker's own bookkeeping, and the no-table fallbacks of unit-test worlds. (file, function): why.
+VIEW_STATE_OK = {
+    ("alliance.rs", "update"): "the alliance roster panel's rows (view)",
+    (
+        "alliance.rs",
+        "click",
+    ): "the roster panel's clicks; alliance changes are not commands yet (phase 3)",
+    ("boarding.rs", "dev_board"): "dev hook --script board",
+    ("boarding/grapple.rs", "cancel_grapple_order"): "the local player's Backspace",
+    ("cloak.rs", "cloak_smoke"): "smoke hook",
+    ("combat/asteroid.rs", "asteroid_demo"): "dev hook",
+    ("combat/mod.rs", "draw"): "the view's target marker",
+    ("commands.rs", "commander_set"): "the marker follows the local Commander",
+    ("commands.rs", "commander_removed"): "the marker follows the local Commander",
+    ("crew_arms.rs", "screen"): "the campaign crew screen (view)",
+    ("docking.rs", "cancel_input"): "the local player's Backspace",
+    ("environment.rs", "sensor_smoke"): "smoke hook",
+    (
+        "rules/systems/dev_console.rs",
+        "run",
+    ): "the developer console acts as the local player",
+    ("ship.rs", "is_human_ship"): "the fallback of a world without a players table",
+    ("ship.rs", "promote"): "only the local player's selection follows a P",
+    ("ship.rs", "reconcile_fleets"): "the local selection stays on a live ship",
+}
+
+
+def view_state_reads(path: Path):
+    """(function, text) of each view-state read in `path` outside tests, `use` lines and the marker's own definition."""
+    code = code_without_tests(path)
+    code = re.sub(r"^\s*use [^;]*;", "", code, flags=re.MULTILINE)
+    code = re.sub(r"pub struct PlayerShip;", "", code)
+    for m in VIEW_STATE.finditer(code):
+        fns = re.findall(r"\bfn (\w+)", code[: m.start()])
+        yield (fns[-1] if fns else "-"), m[0]
+
+
 class Layers(unittest.TestCase):
+    def test_simulation_does_not_read_the_local_players_view_state(self):
+        for path in sorted(SRC.rglob("*.rs")):
+            rel = path.relative_to(SRC).as_posix()
+            if rel.endswith("tests.rs") or not any(
+                rel == s or (s.endswith("/") and rel.startswith(s)) for s in SIMULATION
+            ):
+                continue
+            for fn, text in view_state_reads(path):
+                self.assertIn(
+                    (rel, fn),
+                    VIEW_STATE_OK,
+                    f"{rel} `{fn}` reads {text!r}: simulation keys on commands::Commander / Players, not the local view",
+                )
+
+    def test_the_view_state_guard_finds_a_read(self):
+        code = "fn decide(q: Query<&Ship, With<PlayerShip>>) {}\nfn other(fleets: Res<Fleets>) { let o = fleets.local.clone(); }"
+        found = [
+            re.findall(r"\bfn (\w+)", code[: m.start()])[-1]
+            for m in VIEW_STATE.finditer(code)
+        ]
+        self.assertEqual(found, ["decide", "other"])
+
     def test_shared_code_does_not_build_widgets(self):
         for path in SRC.rglob("*.rs"):
             rel = path.relative_to(SRC)

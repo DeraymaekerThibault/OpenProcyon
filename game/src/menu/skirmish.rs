@@ -913,8 +913,10 @@ impl Skirmish {
     pub fn plan(&self, lib: &Library) -> Vec<crate::Group> {
         let Some(h) = self.human() else { return vec![] };
         let open = self.open();
-        // The computer slots' sides in slot order: Enemy for the first, then Side(2), Side(3), ...
+        // The computer slots' sides in slot order: Enemy for the first, then Side(2), Side(3), ... The first human row is the
+        // player's side; a second human (#369 phase 2 E) takes the next side like a computer, the same on every machine.
         let mut computers = 0;
+        let first_human = self.slots.iter().position(|s| s.kind == Kind::Human);
         self.slots
             .iter()
             .enumerate()
@@ -932,7 +934,7 @@ impl Skirmish {
                     let names = s.ship_names(lib);
                     (s.fleet.iter().zip(names).map(|(n, label)| (n.clone(), None, label)).collect(), vec![], None)
                 };
-                let side = if s.kind == Kind::Human {
+                let side = if Some(slot) == first_human {
                     crate::Side::Player
                 } else {
                     computers += 1;

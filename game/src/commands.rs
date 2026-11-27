@@ -90,6 +90,11 @@ impl Players {
     }
 }
 
+/// `--as-player N`: the lobby slot this machine plays (#369 decision 4; a developer and test flag until phase 4).
+pub fn as_player() -> Option<PlayerId> {
+    crate::cli::value("--as-player").and_then(|v| v.trim().parse().ok()).map(PlayerId)
+}
+
 /// The player this machine plays (0 without a table).
 pub fn local_player(world: &World) -> PlayerId {
     world.get_resource::<Players>().map_or_else(PlayerId::default, |p| p.local)
@@ -225,6 +230,10 @@ impl Orders<'_> {
     /// An order from the local player.
     pub fn send(&mut self, kind: Kind) {
         let player = self.players.as_ref().map_or_else(PlayerId::default, |p| p.local);
+        self.send_as(player, kind);
+    }
+    /// An order from `player`: a smoke script giving another human's orders (`smoke::orders`), as a peer's would arrive.
+    pub fn send_as(&mut self, player: PlayerId, kind: Kind) {
         self.outbox.0.push(PlayerCommand { player, kind });
     }
 }
@@ -544,7 +553,13 @@ pub fn apply_tick(world: &mut World) {
     };
     let sent = std::mem::take(&mut world.resource_mut::<Outbox>().0);
     if live {
-        let mut todo = replayed(world, At::Tick(tick)).unwrap_or(sent);
+        let mut todo = match replayed(world, At::Tick(tick)) {
+            Some(mut todo) => {
+                todo.extend(live_in_replay(world, sent));
+                todo
+            }
+            None => sent,
+        };
         // Every machine applies a tick's commands in one order: by player, then in the order that player sent them (#369 section 3).
         todo.sort_by_key(|c| c.player);
         for c in todo {
@@ -562,6 +577,12 @@ pub fn apply_tick(world: &mut World) {
     }
 }
 
+/// In a replay with `--as-player N`, the orders of `sent` that are N's (the others' come from the log); none without it.
+fn live_in_replay(world: &World, sent: Vec<PlayerCommand>) -> Vec<PlayerCommand> {
+    let live = world.get_resource::<Replay>().and_then(|r| r.live);
+    sent.into_iter().filter(|c| Some(c.player) == live).collect()
+}
+
 /// End of a paused frame: no tick will run, so the frame's commands are applied now (in a replay, the recording's for this frame).
 fn apply_paused(world: &mut World) {
     let clock = world.resource::<Clock>();
@@ -570,7 +591,14 @@ fn apply_paused(world: &mut World) {
     }
     let frame = clock.frame;
     let todo = match replayed(world, At::Frame(frame)) {
-        Some(todo) => todo,
+        Some(mut todo) => {
+            // A frame the recording spent paused (no game time): the live player's orders of this frame land here, as they did then.
+            if world.get_resource::<Replay>().and_then(|r| r.frames.get(frame as usize)).is_some_and(|f| f.0.is_zero()) {
+                let sent = std::mem::take(&mut world.resource_mut::<Outbox>().0);
+                todo.extend(live_in_replay(world, sent));
+            }
+            todo
+        }
         None if world.resource::<Time<Virtual>>().is_paused() => std::mem::take(&mut world.resource_mut::<Outbox>().0),
         None => return,
     };
@@ -1005,8 +1033,9 @@ fn replayed(world: &mut World, at: At) -> Option<Vec<PlayerCommand>> {
     if world.resource::<Clock>().battle != 0 {
         return None;
     }
+    let replay = world.get_resource::<Replay>().filter(|r| !r.finished)?;
     let saved: Vec<(PlayerId, Saved)> =
-        world.get_resource::<Replay>().filter(|r| !r.finished)?.commands.iter().filter(|(a, ..)| *a == at).map(|(_, p, s)| (*p, s.clone())).collect();
+        replay.commands.iter().filter(|(a, p, _)| *a == at && Some(*p) != replay.live).map(|(_, p, s)| (*p, s.clone())).collect();
     Some(
         saved
             .iter()
@@ -1029,9 +1058,15 @@ pub struct Replay {
     /// When, by whom, what.
     commands: Vec<(At, PlayerId, Saved)>,
     finished: bool,
+    /// `--as-player N`: this player's orders come live, as in a match, and the log's are left out; the other players' come from the log.
+    live: Option<PlayerId>,
 }
 
 impl Replay {
+    /// Whether `player`'s orders come live during this replay (`--as-player`), not from the log.
+    pub fn takes_live(&self, player: PlayerId) -> bool {
+        self.finished || self.live == Some(player)
+    }
     /// Reads a recording: (header, replay, unrecorded count).
     fn read(text: impl BufRead) -> Result<(Header, Replay, usize), String> {
         let mut lines = text.lines().enumerate();
@@ -1042,7 +1077,7 @@ impl Replay {
         if !(OLDEST_FORMAT..=FORMAT).contains(&header.format) {
             return Err(format!("format {} (this game reads {OLDEST_FORMAT} to {FORMAT})", header.format));
         }
-        let mut replay = Replay { frames: vec![], commands: vec![], finished: false };
+        let mut replay = Replay { frames: vec![], commands: vec![], finished: false, live: None };
         let mut unrecorded = 0;
         for (i, l) in lines {
             let l = l.map_err(|e| e.to_string())?;
@@ -1158,7 +1193,9 @@ pub fn plugin(app: &mut App) {
         if unrecorded > 0 {
             warn!("--replay: the recording has {unrecorded} command(s) it could not name; the battle differs from the first of them");
         }
-        info!("--replay {path}: {} frames, {} commands", replay.frames.len(), replay.commands.len());
+        let mut replay = replay;
+        replay.live = as_player();
+        info!("--replay {path}: {} frames, {} commands{}", replay.frames.len(), replay.commands.len(), replay.live.map_or(String::new(), |p| format!("; player {} live", p.0)));
         app.insert_resource(replay).add_systems(Last, replay_clock);
     }
     if let Ok(path) = std::env::var("PROCYON_COMMANDS") {

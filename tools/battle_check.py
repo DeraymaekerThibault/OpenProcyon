@@ -79,7 +79,9 @@ def lobby(name, spec, seconds, expect):
 # (the human fleet receives no orders, so its firing is not guaranteed). "patrol": every computer-commanded ship
 # (allied computer fleets included, the human's own fleet excluded) that is still afloat sails at least 300 units. "fire": every side fires within FIRE_BY
 # s, and on a side with computer ships one of them fires. "budget": every computer fleet spends most of its victory points.
-# "resolve": the battle ends (one side left) or a ship sinks within the time. PROVISIONAL.
+# "resolve": the battle ends (one side left) or a ship sinks within the time. "as-player": with --replay, a second replay plays
+# player 1 live (`--as-player 1 --script commands`, the others from the log) and must give the same report (#369 phase 2 E).
+# PROVISIONAL.
 # Every scenario also checks for panics, grinding, non-finite or far-off positions, runaway entity counts and stutter ("no-stutter" skips the last, only with an open issue).
 SCENARIOS = [
     shortcut("ambush", "ambush", 120, {"engage"}),  # starts 514 apart among 22 islands
@@ -101,6 +103,14 @@ SCENARIOS = [
     # mixed fleets have not been watched for long; loosen "engage" if the first real runs say so.
     shortcut("red_rover", "red_rover", 120, {"engage"}),
     shortcut("mixed_fleets", "red_rover", 120, set(), fleets=MIXED),
+    # Two humans (#369 phase 2 E): the second human row is a person on its own side, ordered by `--script commands` as a peer's
+    # orders would arrive. With --replay: record, replay from the log, then replay with player 1 live; all three reports equal.
+    lobby(
+        "two_humans",
+        "map=border_dispute;points=1000;limit=10;slots=human,human,2*computer",
+        150,
+        {"patrol", "as-player"},
+    ),
 ]
 
 
@@ -335,6 +345,16 @@ def main():
         )
         if passed and args.replay:
             passed, summary = replay(name, game_args, seconds, text, log)
+        if passed and args.replay and "as-player" in expect:
+            passed, summary = replay(
+                name,
+                game_args,
+                seconds,
+                text,
+                log,
+                ["--as-player", "1", "--script", "commands"],
+                "as-player",
+            )
         if passed and args.twice:
             passed, summary = same_run(
                 text,
@@ -354,9 +374,10 @@ def main():
             )
         return passed, line
 
-    def replay(name, game_args, seconds, text, log):
+    def replay(name, game_args, seconds, text, log, live=(), tag="replay"):
         """(same, why) for the recorded run `text` (log `log`) and a replay of its command log. A lobby scenario replays from the
-        log alone (`--replay <file>`, no `--lobby`): the log's header holds the lobby's whole setup."""
+        log alone (`--replay <file>`, no `--lobby`): the log's header holds the lobby's whole setup. `live`: more arguments, such as
+        `--as-player 1 --script commands` (that player's orders come live, the others' from the log); `tag` names its log."""
         commands = log.with_suffix(".commands.jsonl")
         if not commands.exists():
             return False, f"the run wrote no command log ({commands})"
@@ -364,16 +385,17 @@ def main():
             name,
             replay_args(game_args),
             seconds,
-            out / f"{name}.replay.log",
-            ["--replay", str(commands)],
+            out / f"{name}.{tag}.log",
+            ["--replay", str(commands), *live],
             {},
         )
+        what = "the replay" if not live else f"the replay with {' '.join(live)}"
         return same_run(
             text,
             again,
             replayable,
-            "the replay gave the same report",
-            "the replay gave a different report",
+            f"{what} gave the same report",
+            f"{what} gave a different report",
         )
 
     def play(name, game_args, seconds, log, extra, env_extra):

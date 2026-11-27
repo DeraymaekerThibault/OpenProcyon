@@ -367,6 +367,31 @@ fn a_replay_keeps_the_player_of_each_command() {
     assert_eq!(got.iter().map(|c| c.player).collect::<Vec<_>>(), [PlayerId(0), PlayerId(3)]);
 }
 
+/// `--as-player N` in a replay (#369 phase 2 E): N's recorded orders are left out and N's live ones go in at the same tick; the
+/// other players' come from the log, and a live order of theirs is dropped.
+#[test]
+fn a_replay_as_one_player_takes_that_players_orders_live_and_the_others_from_the_log() {
+    let header = r#"{"format":2,"version":"0.0.0","seed":5,"args":[],"mods":[]}"#;
+    let line = |p: u8| format!(r#"{{"command":{{"at":{{"tick":0}},"player":{p},"order":{{"cease_fire":null}}}}}}"#);
+    let text = format!("{header}
+{}
+{}
+", line(0), line(1));
+    let (_, mut replay, _) = Replay::read(text.as_bytes()).unwrap();
+    replay.live = Some(PlayerId(1));
+    let mut app = battle();
+    fleet(&mut app);
+    app.insert_resource(replay);
+    loaded(&mut app);
+    let got = replayed(app.world_mut(), At::Tick(0)).unwrap();
+    assert_eq!(got.iter().map(|c| c.player).collect::<Vec<_>>(), [PlayerId(0)], "player 1's recorded order is left out");
+    let sent = vec![PlayerCommand { player: PlayerId(1), kind: Kind::FleetAttack }, PlayerCommand { player: PlayerId(0), kind: Kind::FleetAttack }];
+    let live = live_in_replay(app.world(), sent);
+    assert_eq!(live, [PlayerCommand { player: PlayerId(1), kind: Kind::FleetAttack }], "only the live player's own orders go in");
+    let r = app.world().resource::<Replay>();
+    assert!(r.takes_live(PlayerId(1)) && !r.takes_live(PlayerId(0)));
+}
+
 #[test]
 fn a_command_keeps_its_meaning_through_the_file() {
     let mut app = battle();
@@ -523,7 +548,7 @@ fn orders_work_the_same_in_a_second_battle() {
 fn live_orders_work_again_after_the_end_of_a_replay() {
     let mut app = battle();
     let (me, ..) = fleet(&mut app);
-    app.insert_resource(Replay { frames: vec![(Duration::from_millis(40), 1); 2], commands: vec![], finished: false }).add_systems(Last, replay_clock);
+    app.insert_resource(Replay { frames: vec![(Duration::from_millis(40), 1); 2], commands: vec![], finished: false, live: None }).add_systems(Last, replay_clock);
     loaded(&mut app);
     for _ in 0..4 {
         app.update();

@@ -20,9 +20,10 @@ const fn flag(name: &'static str, value: bool, scripted: bool, recorded: bool) -
     Flag { name, value, scripted, recorded }
 }
 /// The flags the game knows by kind. Flags that only need their text in `HELP` and are read where they are used are not listed.
-pub const FLAGS: [Flag; 27] = [
+pub const FLAGS: [Flag; 28] = [
     flag("--script", true, true, false),
     flag("--replay", true, false, false),
+    flag("--as-player", true, false, false),
     flag("--speed", true, false, false),
     flag("--shot", true, true, false),
     flag("--shot-frame", true, false, false),
@@ -129,6 +130,7 @@ Developer and smoke-test flags (docs/development.md):
   --speed <x>                 game speed multiplier (default 1)
   --seed <n>                  replay a battle's random seed (also PROCYON_SEED); --fixed-step: one 33 ms tick per frame (PROCYON_FIXED_STEP=1)
   --replay <file.jsonl>       play back a command log recorded with PROCYON_COMMANDS=<file> (same scenario arguments, seed, mods)
+  --as-player <n>             play lobby slot n (a human row) on this machine; with --replay, n's orders come live, the others' from the log
   --cam <yaw,pitch,dist>      camera orbit (also --yaw, --pitch, --dist); --look <x,y[,z]> aims it at a point (game axes)
   --starmap                   open the star map on the first frame
   --autolaunch                with --menu lobby: fill the human fleet and launch

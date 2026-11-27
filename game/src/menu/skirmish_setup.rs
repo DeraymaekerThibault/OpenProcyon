@@ -154,9 +154,9 @@ impl SkirmishSetup {
         let (open, free) = (sk.open(), sk.free_teams());
         for (i, want) in self.slots.iter().enumerate() {
             let row = &sk.slots[i];
-            // The human's row is the map's; the others can be anything but human.
-            if (want.kind == SlotKind::Human) != (row.kind == Kind::Human) {
-                return Err(format!("lobby setup row {i}: the human plays row {}", sk.slots.iter().position(|s| s.kind == Kind::Human).unwrap_or(0)));
+            // The map's human row stays human; another row may be a second human (#369 phase 2 E).
+            if row.kind == Kind::Human && want.kind != SlotKind::Human {
+                return Err(format!("lobby setup row {i}: the human plays row {i}"));
             }
             if !(-1..TEAMS).contains(&want.team) {
                 return Err(format!("lobby setup row {i}: team {} (-1 for none, 0-{})", want.team, TEAMS - 1));
