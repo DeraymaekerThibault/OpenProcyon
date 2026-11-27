@@ -304,6 +304,27 @@ fn space_animals_and_bases_without_guns_have_ids() {
     assert!(Saved::save(w, &Kind::Target { ship: me, target: Some(whale), spot: None }).is_ok(), "a whale is a target with an id");
 }
 
+/// Two humans in one world: each player's attack click and panic button land on that player's own command ship, never on the
+/// other's (one target slot per ship; #369 phase 2 C).
+#[test]
+fn two_command_ships_each_hold_their_own_target_and_manual_fire() {
+    let mut app = battle();
+    let (me, _, enemy) = fleet(&mut app);
+    let theirs = app.world_mut().spawn((Ship::new(0, Side::Enemy), SpawnIndex(3), Commander(PlayerId(1)))).id();
+    loaded(&mut app);
+    let push = |app: &mut App, player: u8, kind: Kind| app.world_mut().resource_mut::<Outbox>().0.push(PlayerCommand { player: PlayerId(player), kind });
+    push(&mut app, 0, Kind::Target { ship: me, target: Some(enemy), spot: Some(Vec3::X) });
+    push(&mut app, 1, Kind::Target { ship: theirs, target: Some(me), spot: None });
+    push(&mut app, 1, Kind::PanicFire { ship: theirs });
+    frame(&mut app, 40);
+    assert_eq!(ordered(&app, me), Some((enemy, Some(Vec3::X))));
+    assert_eq!(ordered(&app, theirs), Some((me, None)));
+    assert_eq!((manual_fire(&app, me).panic, manual_fire(&app, theirs).panic), (false, true));
+    push(&mut app, 0, Kind::Target { ship: me, target: None, spot: None });
+    frame(&mut app, 40);
+    assert_eq!((ordered(&app, me), ordered(&app, theirs).map(|o| o.0)), (None, Some(me)), "clearing one leaves the other");
+}
+
 /// `Commander` follows `PlayerShip` (battle start, promotion, loss), and "direct" is decided by the command's player: another
 /// player's order to this command ship is not its commander's.
 #[test]
