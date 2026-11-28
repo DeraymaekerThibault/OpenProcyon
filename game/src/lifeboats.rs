@@ -56,7 +56,7 @@ pub fn plugin(app: &mut App) {
     app.add_message::<ShipLost>().add_systems(
         FixedUpdate,
         // Consume combat deaths before the next rules tick.
-        lifeboats.in_set(crate::BattleSet::Cleanup).in_set(crate::battle::BattleActive),
+        lifeboats.in_set(crate::battle::Step::Boats).in_set(crate::battle::BattleActive),
     );
 }
 

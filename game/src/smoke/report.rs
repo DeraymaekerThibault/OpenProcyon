@@ -67,7 +67,7 @@ pub fn plugin(app: &mut App) {
         farthest: 0.0,
         entities: 0,
     })
-    .add_systems(FixedUpdate, watch.in_set(crate::BattleSet::Outcome).run_if(in_state(crate::menu::Screen::Battle)))
+    .add_systems(FixedUpdate, watch.in_set(crate::battle::Step::Report).run_if(in_state(crate::menu::Screen::Battle)))
     .add_systems(Update, frame_time.run_if(in_state(crate::menu::Screen::Battle)));
 }
 

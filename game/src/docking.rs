@@ -287,12 +287,12 @@ pub fn plugin(app: &mut App) {
     // Backspace's dock cancel is an order (`commands::Kind::CancelDock`).
     app.add_message::<DockMsg>()
         .init_resource::<crate::commands::Outbox>()
-        .add_systems(FixedUpdate, handle_messages.in_set(crate::BattleSet::Commands).in_set(crate::battle::BattleActive))
-        .add_systems(FixedUpdate, docked_hold.in_set(crate::BattleSet::Forces).in_set(crate::battle::BattleActive))
-        .add_systems(FixedUpdate, dock_glide.in_set(crate::BattleSet::Simulate).after(crate::collision::sail).before(crate::out_of_map).in_set(crate::battle::BattleActive))
-        .add_systems(FixedUpdate, (ai_repair_dock, routine, tow_routine).chain().in_set(crate::BattleSet::Ai).in_set(crate::battle::BattleActive))
-        .add_systems(FixedUpdate, docks_lost.in_set(crate::BattleSet::Combat).run_if(in_state(crate::menu::Screen::Battle)))
-        .add_systems(FixedUpdate, docked_repair.in_set(crate::BattleSet::Combat).in_set(crate::battle::BattleActive))
+        .add_systems(FixedUpdate, handle_messages.in_set(crate::battle::Step::Orders).in_set(crate::battle::BattleActive))
+        .add_systems(FixedUpdate, docked_hold.in_set(crate::battle::Step::Links).in_set(crate::battle::BattleActive))
+        .add_systems(FixedUpdate, dock_glide.in_set(crate::battle::Step::Ships).after(crate::collision::sail).before(crate::out_of_map).in_set(crate::battle::BattleActive))
+        .add_systems(FixedUpdate, (ai_repair_dock, routine, tow_routine).chain().in_set(crate::battle::Step::Routines).in_set(crate::battle::BattleActive))
+        .add_systems(FixedUpdate, docks_lost.in_set(crate::battle::Step::Repair).before(docked_repair).run_if(in_state(crate::menu::Screen::Battle)))
+        .add_systems(FixedUpdate, docked_repair.in_set(crate::battle::Step::Repair).in_set(crate::battle::BattleActive))
         .add_systems(Update, play_cranes.run_if(in_state(crate::menu::Screen::Battle)))
         .add_systems(Update, (cancel_input, markers).chain().before(crate::input).in_set(crate::battle::BattleActive));
 }
@@ -538,7 +538,7 @@ fn away_target(p: Vec3, fwd: Vec3, heading: f32, lengths: f32, y: f32) -> Vec3 {
 }
 
 /// The link keeper's hold on a docked ship (step 7.1): it stays where the glide left it, carried along by a moving dockee.
-fn docked_hold(mut dockers: Query<(&Docker, &mut Transform)>, dockees: Query<&Transform, Without<Docker>>) {
+pub(crate) fn docked_hold(mut dockers: Query<(&Docker, &mut Transform)>, dockees: Query<&Transform, Without<Docker>>) {
     for (docker, mut tf) in &mut dockers {
         if docker.phase == Phase::Docked
             && let Ok(dockee_tf) = dockees.get(docker.dockee)

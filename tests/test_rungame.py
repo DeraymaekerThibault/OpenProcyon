@@ -114,6 +114,10 @@ class GameEnv(unittest.TestCase):
         self.assertEqual(env["A"], "1")
         self.assertEqual(env["WGPU_BACKEND"], "gl")
 
+    def test_every_tool_run_checks_the_tick_order(self):
+        env = rungame.game_env("/x", rungame.Launch("window", [], {}))
+        self.assertEqual(env["PROCYON_SCHEDULE_CHECK"], "1")
+
 
 class Summary(unittest.TestCase):
     LOG = (

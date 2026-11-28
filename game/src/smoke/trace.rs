@@ -33,7 +33,7 @@ pub fn plugin(app: &mut App) {
     let ships = open(format!("{base}.csv"), "gt,ship,x,y,vx,vy,fx,fy,hp");
     let shells = open(format!("{base}.shells.csv"), "gt,id,class,x,y,z,vx,vy,vz");
     app.insert_resource(Trace { base, ships, shells, time: 0.0, names: HashMap::new() })
-        .add_systems(FixedUpdate, write.in_set(crate::BattleSet::Outcome).run_if(in_state(crate::menu::Screen::Battle)));
+        .add_systems(FixedUpdate, write.in_set(crate::battle::Step::Report).run_if(in_state(crate::menu::Screen::Battle)));
 }
 
 /// Bevy (x, y up, -z forward) to game axes (x, y forward, z up).

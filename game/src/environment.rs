@@ -508,7 +508,7 @@ pub fn plugin(app: &mut App) {
                 .run_if(in_state(crate::menu::Screen::Battle)),
         )
         .add_systems(FixedUpdate, refresh_sensors.in_set(crate::BattleSet::Sense).run_if(in_state(crate::menu::Screen::Battle)))
-        .add_systems(FixedUpdate, update.in_set(crate::BattleSet::Forces).run_if(in_state(crate::menu::Screen::Battle)))
+        .add_systems(FixedUpdate, update.in_set(crate::battle::Step::Move).before(crate::combat::asteroid_motion).run_if(in_state(crate::menu::Screen::Battle)))
         .add_systems(Update, (current_fx, flow_currents, mark_unseen_ship_effects).run_if(in_state(crate::menu::Screen::Battle)))
         .add_systems(Update, (play_clips, clip_rates).chain());
 }

@@ -75,8 +75,8 @@ impl Dragon {
 
 pub fn plugin(app: &mut App) {
     // The dragon's decisions run after collision (step 8) and only set how it steers; the ship movement code moves it (step 7.2) next tick.
-    app.add_systems(FixedUpdate, think.in_set(crate::BattleSet::Ai).run_if(in_state(crate::menu::Screen::Battle)))
-        .add_systems(FixedUpdate, fly.in_set(crate::BattleSet::Simulate).run_if(in_state(crate::menu::Screen::Battle)));
+    app.add_systems(FixedUpdate, think.in_set(crate::battle::Step::Animals).run_if(in_state(crate::menu::Screen::Battle)))
+        .add_systems(FixedUpdate, fly.in_set(crate::battle::Step::Move).after(crate::collision::update_asteroids).run_if(in_state(crate::menu::Screen::Battle)));
 }
 
 pub fn spawn(commands: &mut Commands, assets: &AssetServer, data: &Value) {
