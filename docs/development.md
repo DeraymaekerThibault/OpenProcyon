@@ -41,6 +41,9 @@ Git Bash (`GIT_BASH=<path>` if it is not in the default place), and the screensh
    resets the developer view (`hud`, `cam`, `show`), a restart of the same mission keeps it.
    While it is open the battle is paused and the game sees no keyboard or mouse. Add a command by extending `console::parse`,
    `Command::needs` and `Script::console_run` with a test in `rules/console/tests.rs`; `--script console --mission 1` is the runtime smoke test.
+   The battle tick's order is written down (`battle::Step`, docs/re/tick.md): `PROCYON_SCHEDULE_CHECK=1`, set by every tool run
+   (`tools/rungame.py`), fails the run at its first frame when two tick systems touch the same data with no order between them. Give a
+   new system its step (or a `before`/`after`); `=warn` lists the pairs, with names in a build with `--features bevy/debug`.
    `PROCYON_TRACE=<file.csv>` (`smoke/trace.rs`) logs every ship (position, velocity, heading, section hit points) and every shell
    once per simulation step, in game axes: the table to lay beside a measurement of the original when a battle plays out
    differently (how close ships come, how often they fire and hit). Stage the same start points with a small mod that replaces

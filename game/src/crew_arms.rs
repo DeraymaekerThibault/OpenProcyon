@@ -48,7 +48,7 @@ pub fn plugin(app: &mut App) {
     app.init_resource::<ScreenModel>()
         .add_systems(Update, button_sounds.run_if(|m: Res<ScreenModel>| m.open))
         .add_systems(Update, (screen, skirmish_screen).chain().in_set(CrewSet).after(crate::menu::RunButtons).before(crate::input))
-        .add_systems(FixedUpdate, (apply_outfit, apply_skirmish_weapons, apply_skirmish_crew).chain().in_set(crate::BattleSet::Commands));
+        .add_systems(FixedUpdate, (apply_outfit, apply_skirmish_weapons, apply_skirmish_crew).chain().in_set(crate::battle::Step::Joining));
 }
 
 /// The retail front-end sound for pointing at (`select == false`) or pressing a widget of these screens (names as `menu::button_sound`).

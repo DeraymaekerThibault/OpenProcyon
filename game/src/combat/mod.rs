@@ -335,13 +335,13 @@ pub fn plugin(app: &mut App) {
         .add_systems(
             FixedUpdate,
             (
-                (minefield::arm, fire, beam::burn, base_fire, lob::shoot, shells, lob::detonate, lob::blasts, lob::grav_wells, lob::ram_damage, lob::strikes).chain(),
-                (asteroid_deaths, fires, status::tick_nets, crew_repair, sink_clock, note_damagers, deaths).chain(),
-            )
-                .chain()
-                .in_set(crate::BattleSet::Combat),
+                (minefield::arm, fire, beam::burn, base_fire, lob::shoot, shells, lob::detonate, lob::blasts, lob::grav_wells, lob::ram_damage, lob::strikes)
+                    .chain()
+                    .in_set(crate::battle::Step::Guns),
+                (asteroid_deaths, fires, status::tick_nets, crew_repair, sink_clock, note_damagers, deaths).chain().in_set(crate::battle::Step::Upkeep),
+            ),
         )
-        .add_systems(FixedUpdate, (asteroid_motion, crate::collision::update_asteroids).chain().in_set(crate::BattleSet::Forces).run_if(in_state(crate::menu::Screen::Battle)))
+        .add_systems(FixedUpdate, (asteroid_motion, crate::collision::update_asteroids).chain().in_set(crate::battle::Step::Move).run_if(in_state(crate::menu::Screen::Battle)))
         .add_systems(Update, (breakup, draw, engine_rate, damage_fx, debris, swap_meshes, beam::draw).chain())
         .add_systems(Update, asteroid_demo.run_if(in_state(crate::menu::Screen::Battle)));
 }

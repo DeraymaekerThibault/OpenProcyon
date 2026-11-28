@@ -662,7 +662,10 @@ pub fn plugin(app: &mut App) {
         .init_resource::<StormShift>()
         .init_resource::<InNebula>()
         .add_systems(Update, update.run_if(in_state(crate::menu::Screen::Battle)))
-        .add_systems(FixedUpdate, (route_meteors, move_meteors, storms, slowdown).chain().in_set(crate::BattleSet::Forces).run_if(in_state(crate::menu::Screen::Battle)));
+        .add_systems(
+            FixedUpdate,
+            (route_meteors, move_meteors, storms, slowdown).chain().in_set(crate::battle::Step::Fields).after(crate::blackhole::pull).run_if(in_state(crate::menu::Screen::Battle)),
+        );
 }
 
 fn update(

@@ -160,8 +160,11 @@ def silent_data_home(xdg):
 
 def game_env(xdg, launch, **extra):
     """The environment of a tool-run game: the scratch XDG_DATA_HOME, the assets and the `launch` plan's settings (display,
-    graphics). `extra` (PROCYON_* settings) wins over all of it."""
+    graphics). `extra` (PROCYON_* settings) wins over all of it. Every tool run checks the battle tick's order
+    (PROCYON_SCHEDULE_CHECK, game/src/battle.rs `Step`): two tick systems that touch the same data with no order between them
+    fail the run at the first frame. A caller's own PROCYON_SCHEDULE_CHECK wins (`warn` lists the pairs instead)."""
     return {
+        "PROCYON_SCHEDULE_CHECK": "1",
         **os.environ,
         "XDG_DATA_HOME": str(xdg),
         **assets_env(),

@@ -82,9 +82,9 @@ pub fn plugin(app: &mut App) {
         .add_systems(
             FixedUpdate,
             (
-                crate::briefing::autoplay_skip.in_set(crate::BattleSet::Commands),
-                crate::smoke::autoplay_end.in_set(crate::BattleSet::Outcome),
-                (mission_ai, leash_player).chain().after(crate::ai).in_set(crate::BattleSet::Ai),
+                crate::briefing::autoplay_skip.in_set(crate::battle::Step::Script),
+                crate::smoke::autoplay_end.in_set(crate::battle::Step::End),
+                (mission_ai, leash_player).chain().after(crate::ai).in_set(crate::battle::Step::Captains),
             )
                 .run_if(in_state(Screen::Battle))
                 .run_if(resource_exists::<Mission>),

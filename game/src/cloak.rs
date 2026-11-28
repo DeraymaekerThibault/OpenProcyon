@@ -137,7 +137,7 @@ impl Cloak {
 }
 
 pub fn plugin(app: &mut App) {
-    app.add_systems(FixedUpdate, (attach, advance, spotted, ai, slow).chain().in_set(crate::BattleSet::Commands).run_if(in_state(crate::menu::Screen::Battle)))
+    app.add_systems(FixedUpdate, (attach, advance, spotted, ai, slow).chain().in_set(crate::battle::Step::Cloak).run_if(in_state(crate::menu::Screen::Battle)))
         .add_systems(Update, (present, fade).chain().run_if(in_state(crate::menu::Screen::Battle)))
         .add_systems(Update, cloak_smoke.before(present).run_if(in_state(crate::menu::Screen::Battle)));
 }

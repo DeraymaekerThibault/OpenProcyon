@@ -80,13 +80,55 @@ pub enum BattleSet {
     Outcome,
 }
 
+/// The order inside the stages, from the original's tick (docs/re/tick.md "One tick, in order", #700); where the original does not
+/// say, the order the tick ran in before it was written down. Every two systems of the tick that touch the same data have an order
+/// (`PROCYON_SCHEDULE_CHECK`, run by the gate), so a new system cannot silently reorder two others.
+#[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Step {
+    /// Commands: the autoplay's briefing skip, then the orders in queue order (dock, board, grapple), then the fleets' bookkeeping
+    /// (captures, promotions), then the outfit of ships that joined, then the cloak.
+    Script,
+    Orders,
+    Fleets,
+    Joining,
+    Cloak,
+    /// Forces: the field effects (black hole and gravity wells, then the nebula), then the link keeper (docked hold, winch).
+    Fields,
+    Links,
+    /// Movement: animals, dragons and asteroids move in the one physics list with the ships, before the ships' collision pass.
+    Move,
+    Ships,
+    /// Decisions: the dragons' think, then a ship's always-on routine (a computer's grapple-and-board, whose roll comes before the
+    /// current routine's), then the captain and the mission AI, then the current routine's dock and tow decisions.
+    Animals,
+    AlwaysOn,
+    Captains,
+    Routines,
+    /// Upkeep: guns and shells, then damage, fires and deaths, then the docked repair, the last part of a ship's upkeep.
+    Guns,
+    Upkeep,
+    Repair,
+    /// Cleanup: battle statistics, then the lifeboats of lost ships. Outcome: the battle's end, then the dev report and trace.
+    Stats,
+    Boats,
+    End,
+    Report,
+}
+
 pub(crate) fn battle_schedule(app: &mut App) {
     // The battle tick runs its systems one at a time, in the schedule's sorted order, the same on every run of a build. The
     // multithreaded executor orders two systems that touch the same data but have no `before`/`after` between them by whichever
-    // becomes ready first, so two runs of one seed could roll the battle generator in another order (#536: 104 such pairs, e.g. the
-    // captains and the computer's boarding rolls). Lock-step peers run the same build, so this order is the same on every machine.
+    // becomes ready first, so two runs of one seed could roll the battle generator in another order (#536). Every such pair now has
+    // an order (`Step`), and single-threaded the tick also ran about 7 % faster on the heaviest lobby, so it stays.
     app.edit_schedule(FixedUpdate, |s| {
         s.set_executor(bevy::ecs::schedule::SingleThreadedExecutor::new());
+        // `PROCYON_SCHEDULE_CHECK=1`: building the tick fails on any two systems that touch the same data with no order between them
+        // (`=warn` only lists them; names need Bevy's `debug` feature). The gate's startup smoke sets it.
+        if let Ok(v) = std::env::var("PROCYON_SCHEDULE_CHECK") {
+            use bevy::ecs::schedule::{LogLevel, ScheduleBuildSettings};
+            let level = if v == "warn" || v == "list" { LogLevel::Warn } else { LogLevel::Error };
+            s.set_build_settings(ScheduleBuildSettings { ambiguity_detection: level, ..default() });
+        }
     });
     app.insert_resource(Time::<Fixed>::from_duration(BATTLE_TICK)).add_systems(FixedUpdate, tick_start.in_set(BattleSet::Tick)).configure_sets(
         FixedUpdate,
@@ -107,6 +149,14 @@ pub(crate) fn battle_schedule(app: &mut App) {
             .chain()
             .run_if(loading::done),
     );
+    use Step::*;
+    app.configure_sets(FixedUpdate, (Script, Orders, Fleets, Joining, Cloak).chain().in_set(BattleSet::Commands))
+        .configure_sets(FixedUpdate, (Fields, Links).chain().in_set(BattleSet::Forces))
+        .configure_sets(FixedUpdate, (Move, Ships).chain().in_set(BattleSet::Simulate))
+        .configure_sets(FixedUpdate, (Animals, AlwaysOn, Captains, Routines).chain().in_set(BattleSet::Ai))
+        .configure_sets(FixedUpdate, (Guns, Upkeep, Repair).chain().in_set(BattleSet::Combat))
+        .configure_sets(FixedUpdate, (Stats, Boats).chain().in_set(BattleSet::Cleanup))
+        .configure_sets(FixedUpdate, (End, Report).chain().in_set(BattleSet::Outcome));
 }
 
 /// Systems that only run while a battle is on screen and no menu overlay is open. One set carries the two run conditions, so a
@@ -125,11 +175,12 @@ fn systems(app: &mut App) {
         .add_systems(
             FixedUpdate,
             (
-                ship::reconcile_fleets.in_set(BattleSet::Commands),
-                ai.in_set(BattleSet::Ai),
+                ship::reconcile_fleets.in_set(Step::Fleets),
+                ai.in_set(Step::Captains),
                 ship::fleet_follow.in_set(BattleSet::Fleet),
-                (briefing::halt_arrival, blackhole::pull, collision::sail, out_of_map).chain().in_set(BattleSet::Simulate),
-                outcome.in_set(BattleSet::Outcome),
+                blackhole::pull.in_set(Step::Fields),
+                (briefing::halt_arrival, collision::sail, out_of_map).chain().in_set(Step::Ships),
+                outcome.in_set(Step::End),
             )
                 .in_set(BattleActive),
         )
