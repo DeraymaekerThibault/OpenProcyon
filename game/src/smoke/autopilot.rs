@@ -555,7 +555,7 @@ fn autopilot_tow(sc: &Script, w: &[Unit], data: &Value, extra: &mut Extra) {
         return;
     }
     if let Some(towee) = live_tasks(sc).find_map(|(name, text)| task_towee(name, text, w, p.e)) {
-        extra.dock.write(DockMsg::TowStart { tower: None, towee: towee.e });
+        extra.dock.write(DockMsg::TowStart { tower: p.e, towee: towee.e });
         return;
     }
     // Otherwise a visible ship an unfired rule waits for the player to tow (mission 11's SS Harvester at the black hole), once the
@@ -573,7 +573,7 @@ fn autopilot_tow(sc: &Script, w: &[Unit], data: &Value, extra: &mut Extra) {
         })
         .nearest_to(p.pos, |u| u.pos);
     if let Some(towee) = towee {
-        extra.dock.write(DockMsg::TowStart { tower: None, towee: towee.e });
+        extra.dock.write(DockMsg::TowStart { tower: p.e, towee: towee.e });
     }
 }
 
@@ -595,7 +595,7 @@ fn autopilot_dock(sc: &Script, w: &[Unit], data: &Value, extra: &mut Extra) {
         }
         let base = extra.bases.iter().filter(|(_, _, tf, _)| tf.translation.distance(at) < BASE_RANGE).nearest_to(at, |b| b.2.translation);
         if let Some((dockee, ..)) = base {
-            extra.dock.write(DockMsg::Dock { docker: None, dockee });
+            extra.dock.write(DockMsg::Dock { docker: p.e, dockee });
             return;
         }
     }
@@ -605,7 +605,7 @@ fn autopilot_dock(sc: &Script, w: &[Unit], data: &Value, extra: &mut Extra) {
     if let Some((dockee, at)) = dock_target(sc, w, p.pos).filter(|(_, at)| at.distance(p.pos) < NEAR)
         && (live_tasks(sc).any(|(name, text)| is_dock_task(name, text)) || point.is_some_and(|q| q.distance(at) < BASE_RANGE))
     {
-        extra.dock.write(DockMsg::Dock { docker: None, dockee });
+        extra.dock.write(DockMsg::Dock { docker: p.e, dockee });
     }
 }
 

@@ -302,7 +302,7 @@ fn update(
             let wants = mission.script.task_active("Dock With Tender");
             let near = extra.sensors.in_sight(p.e, t.e, Some(mission)) && !mission.script.docked.contains(&(p.e, t.e));
             if near && wants && matches!(cfg.script.as_deref(), Some("mission" | "dock")) {
-                extra.fx.dock.write(DockMsg::Dock { docker: None, dockee: t.e });
+                extra.fx.dock.write(DockMsg::Dock { docker: p.e, dockee: t.e });
             }
         }
     }

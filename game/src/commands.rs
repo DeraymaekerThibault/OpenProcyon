@@ -487,20 +487,20 @@ fn apply_links(world: &mut World, kind: &Kind) {
             if release {
                 release_hold(world, ship);
             }
-            dock_msg(world, DockMsg::Dock { docker: Some(ship), dockee });
+            dock_msg(world, DockMsg::Dock { docker: ship, dockee });
         }
         Kind::Tow { ship, towee: Some(towee) } => {
             release_hold(world, ship);
-            dock_msg(world, DockMsg::TowStart { tower: Some(ship), towee });
+            dock_msg(world, DockMsg::TowStart { tower: ship, towee });
         }
-        Kind::Tow { ship, towee: None } => dock_msg(world, DockMsg::TowBreak { tower: Some(ship) }),
+        Kind::Tow { ship, towee: None } => dock_msg(world, DockMsg::TowBreak { tower: ship }),
         Kind::Board { ship, target: Some(target) } => {
             release_hold(world, ship);
-            board_msg(world, BoardMsg::Board { boarder: Some(ship), target });
+            board_msg(world, BoardMsg::Board { boarder: ship, target });
         }
-        Kind::Board { ship, target: None } => board_msg(world, BoardMsg::Unboard { boarder: Some(ship) }),
-        Kind::Grapple { ship, target: Some(target) } => board_msg(world, BoardMsg::Grapple { grappler: Some(ship), target }),
-        Kind::Grapple { ship, target: None } => board_msg(world, BoardMsg::Ungrapple { grappler: Some(ship) }),
+        Kind::Board { ship, target: None } => board_msg(world, BoardMsg::Unboard { boarder: ship }),
+        Kind::Grapple { ship, target: Some(target) } => board_msg(world, BoardMsg::Grapple { grappler: ship, target }),
+        Kind::Grapple { ship, target: None } => board_msg(world, BoardMsg::Ungrapple { grappler: ship }),
         Kind::CancelDock { ship } => dock_msg(world, DockMsg::CancelShip(ship)),
         Kind::DropGrapple { ship } => {
             if let Ok(mut e) = world.get_entity_mut(ship) {

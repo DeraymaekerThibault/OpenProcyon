@@ -96,7 +96,8 @@ which is the same split; its generator and seeding differ, so the sequences are 
 The remake reseeds its battle generator (`combat::SimRng`) at every battle start, a restart included, from `--seed N` / `PROCYON_SEED`
 or a fixed default, and logs the seed (`battle seed ...`), so the same seed and input replay the same battle. The original's seed comes
 from the map (PROVISIONAL: the remake uses one default for every map). Nebula storm and cloak-spotting rolls draw from their own named
-streams, as they had private generators before; boarding draws from the battle generator, as in the original. Objects carry their
+streams, as they had private generators before; boarding draws from the battle generator, as in the original, and its crew lines
+(the take, and whether one plays: only for the local command ship) from a cosmetic generator on each machine (`boarding::say`, #699). Objects carry their
 creation number within their kind (`scenario::SpawnIndex`, from 0 each battle), and systems whose rolls or tie-breaks depend on order
 (shells, blasts, beams, crew repair, captains, cloak watchers, the shooters of `fire` and the island gun towers, the ship-against-rock and
 ship-against-ship collision passes with their bump-sound rolls, the AI boarding rolls, lifeboat drift, asteroid set-up and break-up)
@@ -105,7 +106,7 @@ explore quadrant) and the think timer's start delay come from it instead of enti
 run on the tick, and the battle reads the difficulty as it stood at battle start (`scenario::Difficulty`); the effect-detail factor that scales
 particle emission is a battle-start snapshot too (`fx::DetailScale`; PROVISIONAL: the original may apply a changed option at once). Per-entity state
 that systems keep between ticks (captain think clocks and break-offs, collision avoiders and ram clocks, gun ground-aim state) is dropped at each
-battle start (`scenario::BattleStart`). Still in query order: the grapple hook-flight speech roll, and cosmetic entity-derived values.
+battle start (`scenario::BattleStart`). Still in query order: cosmetic entity-derived values.
 
 ## Unmeasured
 

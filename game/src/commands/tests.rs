@@ -232,15 +232,15 @@ fn dock_tow_board_and_grapple_orders_send_what_the_menu_sent() {
     let docks = |app: &mut App| app.world_mut().resource_mut::<Messages<DockMsg>>().drain().map(|m| format!("{m:?}")).collect::<Vec<_>>();
     let boards = |app: &mut App| app.world_mut().resource_mut::<Messages<BoardMsg>>().drain().map(|m| format!("{m:?}")).collect::<Vec<_>>();
     let cases: Vec<(Kind, bool, String, bool)> = vec![
-        (Kind::Dock { ship: me, dockee: captain, release: false }, true, format!("{:?}", DockMsg::Dock { docker: Some(me), dockee: captain }), true),
-        (Kind::Dock { ship: me, dockee: captain, release: true }, false, format!("{:?}", DockMsg::Dock { docker: Some(me), dockee: captain }), true),
-        (Kind::Tow { ship: me, towee: Some(captain) }, false, format!("{:?}", DockMsg::TowStart { tower: Some(me), towee: captain }), true),
-        (Kind::Tow { ship: me, towee: None }, true, format!("{:?}", DockMsg::TowBreak { tower: Some(me) }), true),
+        (Kind::Dock { ship: me, dockee: captain, release: false }, true, format!("{:?}", DockMsg::Dock { docker: me, dockee: captain }), true),
+        (Kind::Dock { ship: me, dockee: captain, release: true }, false, format!("{:?}", DockMsg::Dock { docker: me, dockee: captain }), true),
+        (Kind::Tow { ship: me, towee: Some(captain) }, false, format!("{:?}", DockMsg::TowStart { tower: me, towee: captain }), true),
+        (Kind::Tow { ship: me, towee: None }, true, format!("{:?}", DockMsg::TowBreak { tower: me }), true),
         (Kind::CancelDock { ship: me }, true, format!("{:?}", DockMsg::CancelShip(me)), true),
-        (Kind::Board { ship: me, target: Some(enemy) }, false, format!("{:?}", BoardMsg::Board { boarder: Some(me), target: enemy }), false),
-        (Kind::Board { ship: me, target: None }, true, format!("{:?}", BoardMsg::Unboard { boarder: Some(me) }), false),
-        (Kind::Grapple { ship: me, target: Some(enemy) }, true, format!("{:?}", BoardMsg::Grapple { grappler: Some(me), target: enemy }), false),
-        (Kind::Grapple { ship: me, target: None }, true, format!("{:?}", BoardMsg::Ungrapple { grappler: Some(me) }), false),
+        (Kind::Board { ship: me, target: Some(enemy) }, false, format!("{:?}", BoardMsg::Board { boarder: me, target: enemy }), false),
+        (Kind::Board { ship: me, target: None }, true, format!("{:?}", BoardMsg::Unboard { boarder: me }), false),
+        (Kind::Grapple { ship: me, target: Some(enemy) }, true, format!("{:?}", BoardMsg::Grapple { grappler: me, target: enemy }), false),
+        (Kind::Grapple { ship: me, target: None }, true, format!("{:?}", BoardMsg::Ungrapple { grappler: me }), false),
     ];
     for (kind, keeps_hold, msg, dock) in cases {
         send(&mut app, kind.clone());

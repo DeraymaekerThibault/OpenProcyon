@@ -223,7 +223,7 @@ pub(in crate::rules) fn apply(
                         ms.stop_at_end = false;
                     }
                     if let Some(t) = dockees.first() {
-                        env.dock.write(DockMsg::Dock { docker: Some(d), dockee: *t });
+                        env.dock.write(DockMsg::Dock { docker: d, dockee: *t });
                     }
                 }
             }
@@ -235,7 +235,7 @@ pub(in crate::rules) fn apply(
                     env.script.set_tow(tower, towee, true); // tugs placed alongside their tow (missions 1, 4, 5, 13)
                 } else {
                     // Mission 10's Plunder starts ~700 units from the merchant it tows. PROVISIONAL: the original's approach is not traced.
-                    env.dock.write(DockMsg::TowStart { tower: Some(tower), towee });
+                    env.dock.write(DockMsg::TowStart { tower, towee });
                 }
             }
             // Each boarder takes the nearest live ship of the target group through the order a player's menu gives (boarding.rs): a

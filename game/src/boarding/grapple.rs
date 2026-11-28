@@ -158,11 +158,11 @@ pub(super) fn hook_flight(
     mut commands: Commands,
     time: Res<Time>,
     assets: Option<Res<AssetServer>>,
-    mut rng: ResMut<SimRng>,
+    mut voice: Local<crate::combat::Rng>,
     mut sfx: MessageWriter<Sfx>,
     mut hooks: Query<&mut Grapple>,
     ships: Query<&Transform>,
-    player: Query<Entity, With<crate::commands::Commander>>,
+    local: Query<Entity, With<PlayerShip>>,
 ) {
     let dt = time.delta_secs();
     for mut g in &mut hooks {
@@ -177,8 +177,10 @@ pub(super) fn hook_flight(
         g.flight -= dt;
         if g.flight <= 0.0 {
             sfx.write(Sfx { name: "Weapon_GrapHarpoon_Impact_Wood".into(), at: Some(tf.translation), vol: 1.0, max: 600.0 });
-            if Some(g.target) == player.single().ok() {
-                say(&mut commands, assets.as_deref(), "grappled", rng.f());
+            // Said only on the machine whose own command ship was hit, picked off a cosmetic generator (#699). A harpoon is fired only at a
+            // hostile ship, so the shooter is always another owner's.
+            if Some(g.target) == local.single().ok() {
+                say(&mut commands, assets.as_deref(), "grappled", voice.f());
             }
             info!("grapple: {e} holds {}", g.target);
         }
