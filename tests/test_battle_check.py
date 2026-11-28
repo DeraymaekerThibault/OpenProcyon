@@ -5,6 +5,7 @@ from tools.battle_check import (
     FIRE_BY_FOR,
     SCENARIOS,
     evaluate,
+    longest_contact,
     outcome,
     recorded,
     replay_args,
@@ -99,17 +100,19 @@ class Evaluate(unittest.TestCase):
             evaluate(sunk, {"patrol"}), [], "a ship sunk early is not parked"
         )
 
-    def test_a_computer_ship_grinding_on_scenery_always_fails(self):
+    def test_grinding_on_scenery_is_reported_not_judged(self):
+        # The original's ships grind too (#697): a wedged ship turns for up to half a turn, a pushed one grinds on.
+        self.assertEqual(evaluate(report(contact=43.3), set()), [])
         self.assertEqual(
-            evaluate(report(contact=12.5), set()),
-            ["Ship_Pirate_Barque (side1) ground on scenery for 12.5 s"],
+            longest_contact(report(contact=43.3)),
+            "; longest scenery contact 43.3 s (Ship_Pirate_Barque, side1)",
         )
+        self.assertEqual(longest_contact(report()), "")
 
-    def test_the_humans_ships_are_not_judged_for_grinding(self):
-        # They skip the avoider on attack and move orders and sail into land, as in the original.
+    def test_the_humans_ships_are_not_in_the_contact_line(self):
         r = report()
         r["ships"][0]["worst_contact"] = 31.9
-        self.assertEqual(evaluate(r, set()), [])
+        self.assertEqual(longest_contact(r), "")
 
     def test_stutter_fails(self):
         # Border Dispute before the lazy planner: a 0.5 s route plan every few seconds.

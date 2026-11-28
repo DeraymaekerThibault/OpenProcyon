@@ -23,8 +23,8 @@ Git Bash (`GIT_BASH=<path>` if it is not in the default place), and the screensh
    table per mission: outcome (won, lost, time limit, stuck in NIS, panic), peak entities/particles, slowest frame and how many
    mission rules never fired (named in the log). It finds crashes and soft-locks, not fidelity problems.
    `make battles [ARGS=ambush]` (`tools/battle_check.py [--jobs N]`, part of `make check --full` when assets are imported; stutter is judged only with `--jobs 1`) plays short skirmishes with
-   fixed fleets at 16x and fails when one stops behaving like a battle: a side never fires or hits, a computer ship parks, a ship
-   grinds on scenery, or the game panics. Every run is fixed-step with the seed 1, so a failure reproduces exactly with the rerun
+   fixed fleets at 16x and fails when one stops behaving like a battle: a side never fires or hits, a computer ship parks, or the game
+   panics (the longest scenery contact is reported, not judged: the original's ships grind too, #697). Every run is fixed-step with the seed 1, so a failure reproduces exactly with the rerun
    line it prints. The game writes one `battle report {json}` line (`PROCYON_REPORT=<game s>`,
    `smoke/report.rs`); read it before adding print statements. When a change touches targeting, steering or what counts as a
    base/ship, add or tighten a scenario there rather than relying on a long manual run.

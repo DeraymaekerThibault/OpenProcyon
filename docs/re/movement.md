@@ -368,7 +368,13 @@ Static analysis of the original's AI, written as rules; it explains the island b
   on a wedged ship. The wedged test does not check which obstacle it met and leaves the same-obstacle count alone (only the normal path
   changes it), so a ship released while the count is still 11 or more is wedged again on its next think when it meets the same land and
   barely moves. Retail saves never caught a ship in it: a last resort, since a moving ship's look-ahead keeps it off land. At a standstill
-  the look-ahead covers only obstacles the ship already touches. (Static reading, 2026-11-27; not yet checked in play.)
+  the look-ahead covers only obstacles the ship already touches. (Static reading, 2026-11-27.) Checked in play (2026-11-28, two computer
+  ships wedged in a ring of rocks on a small island): a Carrack, its last position change under 0.1 for about 6 s, turned in place at a
+  constant 5.66 deg/s with its position frozen and its speed (1.7 u/s) kept, passed headings that looked open, and was released after
+  30.6 s and 173 deg, with no push-out over 0.1 while turning (the largest 0.055); the next tick it sailed off at its kept speed, and it
+  was wedged again 10 s later. A Barque turning the other way (4.69 deg/s) was released on its next think after 2.5 deg. A ship pushed
+  back 0.3-0.6 units every tick never counts as wedged: the same Barque ground against rocks at full speed for 150 s. So grinding on
+  land, wedged or not, is the original's behaviour; not checked: whether the remake's look-ahead comes clear at the same heading.
 - Fits play: computer ships keep clear of each other (both sides steer) but meet the human's command ship, which does not steer for them, and stop in
   front of it while it moves.
 - Remake: `collision/avoid.rs`, run from `collision::sail` for every ship but a `commands::Commander` (every computer-captained ship) and for a
