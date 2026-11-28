@@ -243,10 +243,14 @@ The rope also turns the towee about its tow point so it trails the rope: PROVISI
   dock glide (static reading, 2026-11-27). Inside 80 units of the point (centre to point, 3D, not a hull gap) the ship only stops:
   course cleared, rudder and throttle 0, avoider reset and not run, no reverse, no hold distance, no hull clearance. It coasts on
   toward the point until drag stops it, so it can come to rest against a base's hull, pushed out every tick (Border Dispute, seed 2:
-  a computer ManOWar waiting 16 s at the centre base). The battle check does not count that contact as grinding (`smoke/report.rs`
-  `on_scenery`). Not measured: how close a waiting ship really ends up (its coast past 80 and where the point sits against the hull);
-  one lab run with two ships ordered to the same base point, logging the second's distance to the point and its gap to the base, would
-  settle it.
+  a computer ManOWar waiting 16 s at the centre base). The battle report leaves that contact out of a ship's scenery contact
+  (`smoke/report.rs` `on_scenery`). Measured in play (2026-11-28, #698; a Frigate waiting while a FastFrigate held the single point of a
+  Navy base on Border Dispute): throttle 0 at 80 from the point (8.1 u/s), a coast at throttle 0 (8.1 -> 6.8 after 1 s -> 4.5 after
+  3 s -> 2.3 after 6 s -> 1.2 after 9 s), a dead stop just under 1 u/s, and rest 46.3 from the point, 170 from the base's centre, clear of
+  the hull; no push-out during the coast. That is the hull's own drag (thrust / mass / top speed, 0.214/s for a Frigate) and the stop
+  below 1 u/s, nothing more: the remake's waiting Frigate rests 46.9 from the point
+  (`docking::tests::a_waiting_frigate_cuts_at_eighty_and_coasts_to_rest_as_in_retail`). Not measured: a ManOWar. Its drag is lower
+  (0.16-0.18/s), so it coasts further, and its hull is longer, so resting against the base is plausible for it in the original too.
 - Obstacle avoidance for AI ships: the original's avoider, see [movement.md](movement.md#collision-avoidance-read-from-the-originals-code-2026-10-31).
 - Course preview (`course.rs`) is clipped at the first pose whose box touches visible scenery (`collision::clear_prefix`). It still uses free motion (no drift, no steer-away) and 0.1 s samples, so very thin walls can be stepped over in the preview.
 - Collision sound: not wired. `audio.rs` has only the generic `Sfx` message and no collision event; the `Ship_Collision_*` pools stay unused until the response/sound trigger is recovered.

@@ -546,3 +546,41 @@ fn a_base_loses_its_docks_with_the_section_under_a_dock_point() {
     dk.enabled = true; // 'Set Group/Unit Dockable' TRUE does not reopen lost docks
     assert!(!dk.open());
 }
+
+/// Retail (#698, Border Dispute): a Frigate waiting for a taken point cuts its throttle 80 from the node at 8.1 u/s, coasts on with throttle
+/// 0 (8.1 -> 6.8 after 1 s -> 4.5 after 3 s -> 2.3 after 6 s -> 1.2 after 9 s), stops dead just under 1 u/s and rests 46.3 from the node.
+/// The coast is the hull's own drag (thrust / mass / top speed) and the stop below 1 u/s; nothing holds it short.
+#[test]
+#[ignore = "needs imported assets"]
+fn a_waiting_frigate_cuts_at_eighty_and_coasts_to_rest_as_in_retail() {
+    fn sail(time: Res<Time>, lib: Res<Library>, mut ships: Query<(&mut Ship, &mut Transform, &Health)>) {
+        for (mut ship, mut tf, health) in &mut ships {
+            let class = &lib.classes[ship.class];
+            crate::ship::step(&mut ship, &mut tf, class, health, time.delta_secs());
+        }
+    }
+    let (mut app, lib) = app();
+    app.add_systems(Update, sail.after(routine));
+    // The point is held for the whole run by a ship nearer to it than the waiter (retail: a FastFrigate docked there).
+    let holder = app.world_mut().spawn(Transform::from_xyz(0.0, 0.0, -5.0)).id();
+    let mut dock = Dockable::new(vec![point(0.0)], true);
+    dock.taken[0] = Some(holder);
+    let dockee = app.world_mut().spawn((Transform::default(), dock)).id();
+    let (w, hw) = ship(&lib, "Ship_Navy_Frigate", Side::Player);
+    let waiter = app.world_mut().spawn((Transform::from_xyz(0.0, 0.0, 79.9), Ship { speed: 8.1, ..w }, hw)).id();
+    app.world_mut().resource_mut::<Messages<DockMsg>>().write(DockMsg::Dock { docker: waiter, dockee });
+    let mut speeds = vec![];
+    for i in 0..(30.0 / crate::TICK_SECS) as usize {
+        tick(&mut app, crate::TICK_SECS);
+        if i % (1.0 / crate::TICK_SECS).round() as usize == 0 {
+            speeds.push(app.world().get::<Ship>(waiter).unwrap().speed);
+        }
+    }
+    let d = app.world().get::<Docker>(waiter).unwrap();
+    assert_eq!((d.phase, d.point), (Phase::Wait, None), "still waiting for the taken point");
+    let rest = app.world().get::<Transform>(waiter).unwrap().translation.distance(Vec3::ZERO);
+    let speed = |s: usize| speeds[s];
+    assert!((speed(1) - 6.8).abs() < 0.3 && (speed(3) - 4.5).abs() < 0.3 && (speed(6) - 2.3).abs() < 0.3 && (speed(9) - 1.2).abs() < 0.3, "{speeds:?}");
+    assert_eq!(speed(12), 0.0, "stopped dead below 1 u/s: {speeds:?}");
+    assert!((rest - 46.3).abs() < 2.0, "rests {rest:.1} from the node (retail 46.3)");
+}
