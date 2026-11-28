@@ -136,20 +136,20 @@ pub struct GrappleOrder(pub(crate) Entity);
 
 #[derive(Message, Debug)]
 pub enum BoardMsg {
-    /// `boarder: None` is the player's ship.
+    /// Every order names its ship: the original has no "the player's ship" default (#699).
     Board {
-        boarder: Option<Entity>,
+        boarder: Entity,
         target: Entity,
     },
     Unboard {
-        boarder: Option<Entity>,
+        boarder: Entity,
     },
     Grapple {
-        grappler: Option<Entity>,
+        grappler: Entity,
         target: Entity,
     },
     Ungrapple {
-        grappler: Option<Entity>,
+        grappler: Entity,
     },
     /// 'Set Group/Unit Boardable'.
     Boardable(Entity, bool),
@@ -191,9 +191,10 @@ impl BoardStatus {
         self.targets.get(&target).map_or((false, false), |s| if s.2 { (true, true) } else { (false, self.can_grapple) })
     }
 }
-fn status(boarders: Boarders, mut st: ResMut<BoardStatus>, ships: Query<Entity, With<Ship>>) {
+/// The boarding menu's state for the local player's ship (view).
+fn status(boarders: Boarders, mut st: ResMut<BoardStatus>, ships: Query<Entity, With<Ship>>, player: Query<Entity, With<PlayerShip>>) {
     st.targets.clear();
-    let Some(me) = boarders.me() else { return };
+    let Ok(me) = player.single() else { return };
     st.can_grapple = boarders.can_grapple(me);
     for e in ships.iter().filter(|e| *e != me) {
         st.targets.insert(e, (boarders.boarding(me, e), boarders.can_board(me, e), boarders.grappling(me, e)));
@@ -232,23 +233,23 @@ fn dev_board(
     status: Res<BoardStatus>,
     mut msg: MessageWriter<BoardMsg>,
     mut step: Local<u8>,
-    me: Query<&Transform, With<PlayerShip>>,
+    me: Query<(Entity, &Transform), With<PlayerShip>>,
     foes: Query<(Entity, &Transform, &Ship)>,
 ) {
     if cfg.script.as_deref() != Some("board") || cfg.frame < 5 {
         return;
     }
-    let Ok(me) = me.single() else { return };
+    let Ok((e, me)) = me.single() else { return };
     let Some((foe, ..)) = foes.iter().filter(|f| f.2.side != Side::Player).nearest_to(me.translation, |a| a.1.translation) else {
         return;
     };
     match *step {
         0 => {
-            msg.write(BoardMsg::Grapple { grappler: None, target: foe });
+            msg.write(BoardMsg::Grapple { grappler: e, target: foe });
             *step = 1;
         }
         1 if status.board(foe).1 => {
-            msg.write(BoardMsg::Board { boarder: None, target: foe });
+            msg.write(BoardMsg::Board { boarder: e, target: foe });
             *step = 2;
         }
         _ => {}

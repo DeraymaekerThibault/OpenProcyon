@@ -40,15 +40,14 @@ pub(super) fn ai_boarding(
     }
     attacked.extend(fired.read().filter_map(|f| f.target.map(|t| (f.shooter, t))));
     let dt = time.delta_secs();
-    let me = boarders.me();
     // In spawn order: every captain rolls from the battle generator.
     for (e, ship, tf, health, guns, own, ms, pilot) in crate::scenario::in_spawn_order(&spawn_order, ships, |t| t.0) {
         if ms.is_some_and(|m| m.stance == crate::rules::Stance::Dummy || m.hold_fire) || pilot.is_some_and(|p| p.hold_fire) {
             continue;
         }
-        // An explicit fleet order, else the ship's target slot (ship::TargetSlot), else (computer ships off the human's side) the
-        // player's ship.
-        let target = captains.get(e).ok().and_then(crate::ship::TargetSlot::target).or_else(|| me.filter(|_| !boarders.table().with_human(ship.side)));
+        // The captain's target slot only (an explicit fleet order, else its own pick; ship::TargetSlot): an empty slot never grapples
+        // (#699).
+        let target = captains.get(e).ok().and_then(crate::ship::TargetSlot::target);
         let strong = own.strength.attack > AI_MIN_ATTACK;
         if let Some(t) = target.filter(|t| boarders.hostile(e, *t))
             && let Ok((ttf, tship)) = targets.get(t)
@@ -65,7 +64,7 @@ pub(super) fn ai_boarding(
                 sfx.write(Sfx { name: "Weapon_GrapHarpoon_Fire".into(), at: Some(tf.translation), vol: 0.7, max: 600.0 });
             }
             if strong && boarders.can_board(e, t) && rng.f() < per_tick(AI_BOARD_CHANCE, dt) {
-                msg.write(BoardMsg::Board { boarder: Some(e), target: t });
+                msg.write(BoardMsg::Board { boarder: e, target: t });
             }
         }
         // PROVISIONAL: mission ships also board a boardable hostile base in reach without targeting it.
@@ -74,7 +73,7 @@ pub(super) fn ai_boarding(
             && let Some(t) = bases.iter().find(|t| boarders.can_board(e, *t))
             && rng.f() < per_tick(AI_BOARD_CHANCE, dt)
         {
-            msg.write(BoardMsg::Board { boarder: Some(e), target: t });
+            msg.write(BoardMsg::Board { boarder: e, target: t });
         }
     }
 }

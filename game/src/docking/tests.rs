@@ -46,7 +46,7 @@ fn mission_two_base_docking_from_the_far_side_reaches_the_dock_round_the_island(
     let dockee = dockee.unwrap();
     let (s, h) = ship(&lib, "Ship_Navy_Torpedo", Side::Player);
     let me = app.world_mut().spawn((Transform::from_translation(start), s, h, PlayerShip, crate::collision::Drift::default())).id();
-    app.world_mut().resource_mut::<Messages<DockMsg>>().write(DockMsg::Dock { docker: None, dockee });
+    app.world_mut().resource_mut::<Messages<DockMsg>>().write(DockMsg::Dock { docker: me, dockee });
     tick(&mut app, 0.1);
     tick(&mut app, 0.1);
     // The original plans no route: one approach point on the dock axis, and the collision avoider bends the course round the island.
@@ -84,7 +84,7 @@ fn docks_at_island(map: &str, island: &str, class: &str, start: Vec3, secs: u32)
     }
     let (s, h) = ship(&lib, class, Side::Enemy);
     let me = app.world_mut().spawn((Transform::from_translation(start), s, h, crate::collision::Drift::default())).id();
-    app.world_mut().resource_mut::<Messages<DockMsg>>().write(DockMsg::Dock { docker: Some(me), dockee: dockee.unwrap() });
+    app.world_mut().resource_mut::<Messages<DockMsg>>().write(DockMsg::Dock { docker: me, dockee: dockee.unwrap() });
     (0..secs * 10).any(|_| {
         tick(&mut app, 0.1);
         app.world().get::<Docker>(me).is_some_and(Docker::is_docked)
@@ -121,7 +121,7 @@ fn coventry_docks_and_repairs_at_norville_on_the_flight_plane() {
     h.core *= 0.25;
     let start = point + axis * lib.classes[s.class].length * 2.0;
     let me = app.world_mut().spawn((Transform::from_translation(start), s, h, crate::collision::Drift::default())).id();
-    app.world_mut().resource_mut::<Messages<DockMsg>>().write(DockMsg::Dock { docker: Some(me), dockee });
+    app.world_mut().resource_mut::<Messages<DockMsg>>().write(DockMsg::Dock { docker: me, dockee });
     for _ in 0..6000 {
         tick(&mut app, 0.1);
         if app.world().get::<Docker>(me).is_some_and(Docker::is_docked) {
@@ -251,7 +251,7 @@ fn player_docks_repairs_and_leaves_its_slot_free() {
     hurt.sections[0] = 0.0;
     let dockee = app.world_mut().spawn((Transform::from_xyz(100.0, 0.0, 0.0), Dockable::new(vec![point(-20.0)], true))).id();
     let me = app.world_mut().spawn((Transform::from_xyz(60.0, 0.0, 90.0), s, hurt, PlayerShip)).id();
-    app.world_mut().resource_mut::<Messages<DockMsg>>().write(DockMsg::Dock { docker: None, dockee });
+    app.world_mut().resource_mut::<Messages<DockMsg>>().write(DockMsg::Dock { docker: me, dockee });
     tick(&mut app, 0.1);
     tick(&mut app, 0.1);
     let d = app.world().get::<Docker>(me).unwrap();
@@ -311,11 +311,11 @@ fn closer_ship_takes_over_a_point_and_ai_ship_returns_home() {
     let (b, hb) = ship(&lib, "Ship_Navy_Cutter", Side::Player);
     let far = app.world_mut().spawn((Transform::from_xyz(10.0, 0.0, 300.0), a, ha)).id();
     let near = app.world_mut().spawn((Transform::from_xyz(10.0, 0.0, 120.0), b, hb)).id();
-    app.world_mut().resource_mut::<Messages<DockMsg>>().write(DockMsg::Dock { docker: Some(far), dockee });
+    app.world_mut().resource_mut::<Messages<DockMsg>>().write(DockMsg::Dock { docker: far, dockee });
     tick(&mut app, 0.1);
     tick(&mut app, 0.1);
     assert_eq!(app.world().get::<Docker>(far).unwrap().point, Some(0));
-    app.world_mut().resource_mut::<Messages<DockMsg>>().write(DockMsg::Dock { docker: Some(near), dockee });
+    app.world_mut().resource_mut::<Messages<DockMsg>>().write(DockMsg::Dock { docker: near, dockee });
     tick(&mut app, 0.1);
     tick(&mut app, 0.1);
     tick(&mut app, 0.1);
@@ -347,7 +347,7 @@ fn disabled_dockee_refuses_and_exported_points_load() {
     let (s, h) = ship(&lib, "Ship_Navy_Cutter", Side::Player);
     let dockee = app.world_mut().spawn((Transform::default(), Dockable::new(vec![point(0.0)], false))).id();
     let me = app.world_mut().spawn((Transform::from_xyz(0.0, 0.0, 30.0), s, h, PlayerShip)).id();
-    app.world_mut().resource_mut::<Messages<DockMsg>>().write(DockMsg::Dock { docker: None, dockee });
+    app.world_mut().resource_mut::<Messages<DockMsg>>().write(DockMsg::Dock { docker: me, dockee });
     tick(&mut app, 0.1);
     assert!(app.world().get::<Docker>(me).is_none());
     let docks = load_docks();
@@ -521,7 +521,7 @@ fn a_base_dockee_counts_as_docked_for_the_rules_like_a_ship() {
         let dockee = dockee.id();
         let (s, h) = ship(&lib, "Ship_Navy_Cutter", Side::Player);
         let me = app.world_mut().spawn((Transform::from_xyz(60.0, 0.0, 90.0), s, h)).id();
-        app.world_mut().resource_mut::<Messages<DockMsg>>().write(DockMsg::Dock { docker: Some(me), dockee });
+        app.world_mut().resource_mut::<Messages<DockMsg>>().write(DockMsg::Dock { docker: me, dockee });
         tick(&mut app, 0.1);
         tick(&mut app, 0.1);
         app.world_mut().get_mut::<Transform>(me).unwrap().translation = Vec3::new(80.0, 0.0, 2.0);

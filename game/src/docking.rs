@@ -144,28 +144,28 @@ pub fn dockable_for(docks: &Value, entity: &str) -> Option<Dockable> {
 
 #[derive(Message, Debug)]
 pub enum DockMsg {
-    /// `docker: None` is the player's ship.
+    /// Every order names its ship: the original has no "the player's ship" default (#699).
     Dock {
-        docker: Option<Entity>,
+        docker: Entity,
         dockee: Entity,
     },
     /// A computer ship's own choice of a repair dock (it may be replaced by a nearer one until the ship is docked).
     Repair {
-        docker: Option<Entity>,
+        docker: Entity,
         dockee: Entity,
     },
     Enabled(Entity, bool),
     Repairs(Entity, bool),
     /// Abort the player's approach (X, Stop).
     CancelShip(Entity),
-    /// Tow `towee` (`tower: None` is the player's ship): the tower approaches until the link is registered.
+    /// `tower` tows `towee`: it approaches until the link is registered.
     TowStart {
-        tower: Option<Entity>,
+        tower: Entity,
         towee: Entity,
     },
-    /// Break every tow of `tower` (`None` is the player's ship).
+    /// Break every tow of `tower`.
     TowBreak {
-        tower: Option<Entity>,
+        tower: Entity,
     },
 }
 
@@ -355,7 +355,6 @@ fn cancel_input(keys: Res<ButtonInput<KeyCode>>, fleets: Res<crate::ship::Fleets
 fn handle_messages(
     mut msgs: MessageReader<DockMsg>,
     mut commands: Commands,
-    player: Query<Entity, With<crate::commands::Commander>>,
     pos: Query<&Transform, With<Ship>>,
     mut dockables: Query<&mut Dockable>,
     dockers: Query<&Docker>,
@@ -364,7 +363,6 @@ fn handle_messages(
     for m in msgs.read() {
         match *m {
             DockMsg::TowStart { tower, towee } => {
-                let Some(tower) = tower.or_else(|| player.single().ok()) else { continue };
                 // Tow links live in the rules, so only campaign missions (the ones with a `Mission`) can register one.
                 if tower == towee || mission.is_none() || !pos.contains(towee) {
                     continue;
@@ -373,7 +371,6 @@ fn handle_messages(
                 commands.entity(tower).insert(Tower { towee });
             }
             DockMsg::TowBreak { tower } => {
-                let Some(tower) = tower.or_else(|| player.single().ok()) else { continue };
                 commands.entity(tower).remove::<Tower>();
                 if let Some(m) = mission.as_mut() {
                     m.script.break_tows(tower);
@@ -381,7 +378,6 @@ fn handle_messages(
             }
             DockMsg::Dock { docker, dockee } | DockMsg::Repair { docker, dockee } => {
                 let chosen = matches!(*m, DockMsg::Repair { .. });
-                let Some(docker) = docker.or_else(|| player.single().ok()) else { continue };
                 if docker == dockee || dockers.get(docker).is_ok_and(|d| d.dockee == dockee) || !dockables.get(dockee).is_ok_and(Dockable::open) {
                     continue;
                 }
@@ -954,7 +950,7 @@ fn ai_repair_dock(
             && docking.is_none_or(|d| d.dockee != dockee)
         {
             info!("docking: {e} needs repair, sails for {dockee}");
-            msg.write(DockMsg::Repair { docker: Some(e), dockee });
+            msg.write(DockMsg::Repair { docker: e, dockee });
         }
     }
 }

@@ -66,7 +66,9 @@ Per entry and frame:
 5. Results, per side:
    - **target captured**, owners differ: ship → it stops what it was doing, ownership moves to the boarder's player, and the ship
      is crewed afresh (crew list rebuilt from the old per-post counts, one generic crewman per count, crew factors recomputed; only when the capturer is a ship; effects re-initialised); base → ownership moves and its defending strength is reset to the initial value.
-   - first-mate speech depends on whether the *human's* primary is the boarder, the target or another own ship: own boarding starts,
+   - first-mate speech depends on whether the *local* human's primary is the boarder, the target or another own ship (each machine speaks
+     for its own command ship; the "grappled" line plays when a harpoon bites the local command ship and the shooter has another owner;
+     the take is picked off the program generator, never the battle one; #699): own boarding starts,
      the primary is boarded, own ship / base captured, boarding repelled, we captured a ship / base, our boarding failed. Which line plays
      for each is **[? unknown]**; the remake picks the lines by meaning (`boarding_party`, `landing_party`, `repell_boarders`, `own_ship_boarded`, `enemy_ship_conquered`, `enemy_base_conquered`,
      `own_ship_conquered`, `allied_base_conquered`, `boarding_repelled`, `retreat`) from `content/voice/events.json`.
@@ -80,7 +82,9 @@ with ships that stopped being hostile, and once a grapple holds and the start te
 The rule actions `Board Ships` / `Grapple Ship` exist but **no mission uses them**; fights only start from the player's orders and these activities.
 
 **Computer captains** run the grapple-and-board activity on their own: every ship the AI steers (all computer ships; not the
-human's command ship) runs it every tick against its current target, without any order:
+human's command ship) runs it every tick against its current target, without any order. The target comes from the captain's own
+target slot and nothing else: with an empty slot it only drops grapple links to ships that are no longer hostile, and fires no
+harpoon and starts no fight, whatever the number of humans (no "the player's ship" default; static reading, #699):
 - If the target is a hostile ship, the ship has a harpoon gun with a free grapple, and no friendly ship or scenery lies in the
   line of fire, it fires its harpoons at a 5 % chance per tick (otherwise the harpoons hold fire). The harpoon is an ordinary
   gun, so it also has to be able to aim: the target must be inside a harpoon mount's arc and range.

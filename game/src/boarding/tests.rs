@@ -75,17 +75,22 @@ fn drive(time: Res<Time>, mut ships: Query<(&Ship, &mut Transform, &Drift)>) {
     }
 }
 /// A computer Barque with the player's ship on its beam inside harpoon reach, once fired at, grapples it on its own, winches in and boards
-/// (Elite crew); with a boarding strength of 10 it grapples but never sends boarders.
+/// (Elite crew); with a boarding strength of 10 it grapples but never sends boarders; with an empty target slot it leaves the cutter alone.
 #[test]
 #[ignore = "needs imported assets"]
 fn computer_captain_grapples_and_boards_its_target() {
-    for (attack, boards) in [(None, true), (Some(AI_MIN_ATTACK), false)] {
+    // (its target slot holds the cutter, its boarding strength, it grapples, it boards). An empty slot never grapples: the original has
+    // no "the player's ship" fallback (#699).
+    for (slot, attack, grapples, boards) in [(true, None, true, true), (true, Some(AI_MIN_ATTACK), true, false), (false, None, false, false)] {
         let mut app = app();
         app.add_message::<crate::combat::Fired>().add_systems(Update, ai_boarding.after(winch_pull).before(fights));
         let me = spawn(&mut app, "Ship_Navy_Cutter", Side::Player, Vec3::ZERO, Skill::Elite);
         app.world_mut().entity_mut(me).insert(PlayerShip);
         let foe = spawn(&mut app, "Ship_Pirate_Barque", Side::Enemy, Vec3::new(40.0, 0.0, 0.0), Skill::Elite);
         app.world_mut().entity_mut(foe).insert(crate::ship::FleetPilot::default()); // skirmish fleets give every ship a pilot
+        if slot {
+            app.world_mut().entity_mut(foe).insert(crate::ship::TargetSlot::order(Some(me), None));
+        }
         if let Some(a) = attack {
             app.world_mut().get_mut::<Boardable>(foe).unwrap().strength.attack = a;
         }
@@ -100,7 +105,7 @@ fn computer_captain_grapples_and_boards_its_target() {
             grappled |= held(&mut app, foe).iter().any(|g| g.0 == me);
             boarded |= app.world().get::<Boarding>(foe).is_some_and(|f| f.target() == me);
         }
-        assert!(grappled, "the Barque harpooned its target");
+        assert_eq!(grappled, grapples, "slot {slot}: the Barque harpoons the target in its slot, and only that");
         assert_eq!(boarded, boards, "attack {attack:?}: boarding needs an attacking strength above {AI_MIN_ATTACK}");
     }
 }
@@ -167,7 +172,7 @@ fn boarding_a_hostile_skirmish_base_changes_its_side() {
     let me = spawn(&mut app, "Ship_Navy_Cutter", Side::Player, pts[0], Skill::Elite);
     app.world_mut().entity_mut(me).insert((PlayerShip, crate::ship::FleetMember("Player".into(), 0)));
     tick(&mut app, 0.1);
-    app.world_mut().write_message(BoardMsg::Board { boarder: None, target: base });
+    app.world_mut().write_message(BoardMsg::Board { boarder: me, target: base });
     for _ in 0..600 {
         tick(&mut app, 0.1);
     }
@@ -205,7 +210,7 @@ fn grapple_then_board_captures_the_ship_and_tells_the_rules() {
     tick(&mut app, 0.1);
     assert_eq!(app.world().resource::<BoardStatus>().board(foe), (false, false), "no grapple yet: Board greyed");
     assert_eq!(app.world().resource::<BoardStatus>().grapple(foe), (false, true), "the cutter has a harpoon");
-    app.world_mut().write_message(BoardMsg::Grapple { grappler: None, target: foe });
+    app.world_mut().write_message(BoardMsg::Grapple { grappler: me, target: foe });
     tick(&mut app, 0.1);
     assert!(held(&mut app, me).iter().any(|g| g.1 > 0.0), "harpoon in the air");
     let surface = |app: &App| {
@@ -222,7 +227,7 @@ fn grapple_then_board_captures_the_ship_and_tells_the_rules() {
     }
     assert!((surface(&app) - bit).abs() < 0.5, "a grapple alone does not reel the ships together");
     assert!(app.world().resource::<BoardStatus>().board(foe).1, "grappled: Board enabled");
-    app.world_mut().write_message(BoardMsg::Board { boarder: None, target: foe });
+    app.world_mut().write_message(BoardMsg::Board { boarder: me, target: foe });
     tick(&mut app, 0.1);
     assert!(app.world().get::<Boarding>(me).is_some_and(|f| f.target() == foe && !f.live()), "fight registered, crews not yet across");
     assert_eq!(app.world().resource::<BoardStatus>().board(foe), (true, true), "Board shows Stop");
@@ -262,7 +267,7 @@ fn boarding_needs_a_grapple_and_ends_when_the_ships_drift_apart() {
     app.world_mut().spawn(Grapple::new(me, foe, 0.0));
     tick(&mut app, 0.1);
     assert!(app.world().resource::<BoardStatus>().board(foe).1);
-    app.world_mut().write_message(BoardMsg::Board { boarder: None, target: foe });
+    app.world_mut().write_message(BoardMsg::Board { boarder: me, target: foe });
     tick(&mut app, 0.1);
     assert!(app.world().get::<Boarding>(me).is_some());
     app.world_mut().get_mut::<Ship>(foe).unwrap().speed = 8.0; // sails away faster than the relative-speed limit

@@ -49,7 +49,7 @@ pub(super) fn board_orders(
             // Also when the target stopped being an enemy while the hook held (someone else captured it, an alliance changed).
             commands.entity(e).remove::<BoardOrder>();
         } else if boarders.can_board(e, target) {
-            msg.write(BoardMsg::Board { boarder: Some(e), target });
+            msg.write(BoardMsg::Board { boarder: e, target });
             commands.entity(e).remove::<BoardOrder>();
         } else if !waiting && !boarders.grappled(e, target) {
             commands.entity(e).remove::<BoardOrder>();

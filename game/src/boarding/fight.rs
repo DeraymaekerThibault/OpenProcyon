@@ -10,7 +10,6 @@ pub struct Boarders<'w, 's> {
     fighters: Query<'w, 's, (Entity, &'static Boarding)>,
     grapples: Query<'w, 's, (Entity, &'static Grapple)>,
     ships: Query<'w, 's, (&'static Ship, &'static Health, Option<&'static crate::combat::GunStates>)>,
-    player: Query<'w, 's, Entity, With<crate::commands::Commander>>,
     abandoned: Query<'w, 's, (), With<crate::lifeboats::Abandoned>>,
     lib: Res<'w, Library>,
     table: crate::alliance::Hostility<'w>,
@@ -79,9 +78,6 @@ impl Boarders<'_, '_> {
     pub fn grappling(&self, grappler: Entity, target: Entity) -> bool {
         self.grapples.iter().any(|(_, g)| g.grappler == grappler && g.target == target)
     }
-    pub fn me(&self) -> Option<Entity> {
-        self.player.single().ok()
-    }
     /// Not retail: the crew of `e` left it (`OP Abandon Ship`).
     pub fn abandoned(&self, e: Entity) -> bool {
         self.abandoned.contains(e)
@@ -107,6 +103,8 @@ const CREW_LINES: [(&str, &[&str]); 11] = [
 ];
 /// PROVISIONAL: the Navy human-male first mate speaks (as the helmsman does), the event picked by meaning rather than the original's id;
 /// `r` (0..1) picks between a line's variants.
+/// Plays a crew line on this machine. `r` picks among the line's takes and comes from a cosmetic generator (`Local<Rng>`), never the
+/// battle one: the original's speech dispatch draws from its front-end generator, and each machine speaks for its own ship (#699).
 pub(super) fn say(commands: &mut Commands, assets: Option<&AssetServer>, event: &str, r: f32) {
     let (Some(assets), Some((_, files))) = (assets, CREW_LINES.iter().find(|l| l.0 == event)) else { return };
     commands.spawn((
@@ -124,12 +122,20 @@ fn end_fight(commands: &mut Commands, e: Entity, fx: &[Entity]) {
     commands.entity(e).remove::<Boarding>();
 }
 
-pub(super) fn handle_messages(mut msgs: MessageReader<BoardMsg>, mut commands: Commands, assets: Option<Res<AssetServer>>, mut rng: ResMut<SimRng>, boarders: Boarders) {
-    let me = boarders.me();
+#[allow(clippy::too_many_arguments)]
+pub(super) fn handle_messages(
+    mut msgs: MessageReader<BoardMsg>,
+    mut commands: Commands,
+    assets: Option<Res<AssetServer>>,
+    mut rng: ResMut<SimRng>,
+    mut voice: Local<crate::combat::Rng>,
+    boarders: Boarders,
+    local: Query<Entity, With<PlayerShip>>,
+) {
+    let me = local.single().ok();
     for m in msgs.read() {
         match *m {
-            BoardMsg::Board { boarder, target } => {
-                let Some(b) = boarder.or(me) else { continue };
+            BoardMsg::Board { boarder: b, target } => {
                 if !boarders.can_board(b, target) {
                     continue;
                 }
@@ -138,23 +144,20 @@ pub(super) fn handle_messages(mut msgs: MessageReader<BoardMsg>, mut commands: C
                 info!("boarding: {b} boards {target} (attack {} against defend {}, a casualty every {tick:.2}s)", bt.strength.attack, tt.strength.defend);
                 commands.entity(b).insert(Boarding { target, interval: tick, since: 0.0, live: false, fx: vec![] });
             }
-            BoardMsg::Unboard { boarder } => {
-                let Some(b) = boarder.or(me) else { continue };
+            BoardMsg::Unboard { boarder: b } => {
                 if let Some((_, f)) = boarders.fighters.iter().find(|(e, _)| *e == b) {
                     end_fight(&mut commands, b, &f.fx);
                     if Some(b) == me {
-                        say(&mut commands, assets.as_deref(), "retreat", rng.f());
+                        say(&mut commands, assets.as_deref(), "retreat", voice.f());
                     }
                 }
             }
-            BoardMsg::Grapple { grappler, target } => {
-                let Some(g) = grappler.or(me) else { continue };
+            BoardMsg::Grapple { grappler: g, target } => {
                 if g != target && boarders.can_grapple(g) && !boarders.grappling(g, target) && boarders.hostile(g, target) && boarders.ships.contains(target) {
                     commands.entity(g).insert(GrappleOrder(target));
                 }
             }
-            BoardMsg::Ungrapple { grappler } => {
-                let Some(g) = grappler.or(me) else { continue };
+            BoardMsg::Ungrapple { grappler: g } => {
                 commands.entity(g).remove::<GrappleOrder>();
                 for (h, _) in boarders.grapples.iter().filter(|(_, gr)| gr.grappler == g) {
                     commands.entity(h).despawn();
@@ -190,7 +193,7 @@ pub(super) fn fights(
     mut commands: Commands,
     time: Res<Time>,
     lib: Res<Library>,
-    mut rng: ResMut<SimRng>,
+    (mut rng, mut voice): (ResMut<SimRng>, Local<crate::combat::Rng>),
     assets: Option<Res<AssetServer>>,
     fxl: Option<Res<FxLib>>,
     mut sfx: MessageWriter<Sfx>,
@@ -198,13 +201,14 @@ pub(super) fn fights(
     mut settled: MessageWriter<Settled>,
     mut fighters: Query<(Entity, &mut Boarding)>,
     grapples: Query<(Entity, &Grapple)>,
-    player: Query<Entity, With<crate::commands::Commander>>,
+    local: Query<Entity, With<PlayerShip>>,
     mut things: Query<(&Transform, Option<&Ship>, Option<&Drift>, &mut Boardable, Option<&Health>, Option<&MissionShip>, Option<&MissionBase>, Option<&crate::combat::BaseSide>)>,
     spawn_order: Query<&crate::scenario::SpawnIndex>,
 ) {
-    let (dt, me) = (time.delta_secs(), player.single().ok());
-    // In the boarders' spawn order: every fight draws from the shared `SimRng` (its casualty coin, the crew's lines), and two fights at
-    // once must draw in the same order on every run, not in query order (#369).
+    // `me` is the local player's ship, for the crew's lines only (cosmetic, `voice`).
+    let (dt, me) = (time.delta_secs(), local.single().ok());
+    // In the boarders' spawn order: every fight draws its casualty coin from the shared `SimRng`, and two fights at once must draw in
+    // the same order on every run, not in query order (#369).
     let order = crate::scenario::in_spawn_order(&spawn_order, fighters.iter().map(|(e, _)| e), |e| *e);
     let mut walk = fighters.iter_many_mut(&order);
     while let Some(item) = walk.fetch_next() {
@@ -224,7 +228,7 @@ pub(super) fn fights(
             info!("boarding: {b} breaks off {t} (hostile {hostile}, joined {joined}, surface {surface:.1}, relative speed {rel:.1})");
             end_fight(&mut commands, b, &f.fx);
             if Some(b) == me {
-                say(&mut commands, assets.as_deref(), "retreat", rng.f());
+                say(&mut commands, assets.as_deref(), "retreat", voice.f());
             }
             continue;
         }
@@ -255,7 +259,7 @@ pub(super) fn fights(
                 None
             };
             if let Some(line) = line {
-                say(&mut commands, assets.as_deref(), line, rng.f());
+                say(&mut commands, assets.as_deref(), line, voice.f());
             }
         }
         f.since += dt;
@@ -278,7 +282,7 @@ pub(super) fn settled(
     mut msgs: MessageReader<Settled>,
     mut commands: Commands,
     assets: Option<Res<AssetServer>>,
-    mut rng: ResMut<SimRng>,
+    mut voice: Local<crate::combat::Rng>,
     mut sfx: MessageWriter<Sfx>,
     mut captured: MessageWriter<Captured>,
     mut things: Query<(Option<&mut Ship>, Option<&mut MissionShip>, Option<&mut MissionBase>, &mut Boardable, Option<&mut crate::combat::BaseFlag>)>,
@@ -294,7 +298,7 @@ pub(super) fn settled(
             side_of(&tship) == Some(Side::Player) || (tship.is_none() && side_of(&bship).is_some_and(|s| s != Side::Player)),
             tship.is_some(),
         );
-        let r = rng.f();
+        let r = voice.f();
         match s.outcome {
             Outcome::Won => {
                 let owner = |ms: &Option<Mut<MissionShip>>, mb: &Option<Mut<MissionBase>>, ship: &Option<Mut<Ship>>| -> crate::names::Owner {

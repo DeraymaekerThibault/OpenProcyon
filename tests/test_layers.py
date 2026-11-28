@@ -59,6 +59,19 @@ VIEW_STATE_OK = {
         "click",
     ): "the roster panel's clicks; alliance changes are not commands yet (phase 3)",
     ("boarding.rs", "dev_board"): "dev hook --script board",
+    (
+        "boarding.rs",
+        "status",
+    ): "the boarding menu's state for the local player's ship (view)",
+    (
+        "boarding/fight.rs",
+        "handle_messages",
+    ): "the local ship's crew line (cosmetic generator)",
+    ("boarding/fight.rs", "fights"): "the local ship's crew lines (cosmetic generator)",
+    (
+        "boarding/grapple.rs",
+        "hook_flight",
+    ): "the local ship's 'grappled' line (cosmetic generator)",
     ("boarding/grapple.rs", "cancel_grapple_order"): "the local player's Backspace",
     ("cloak.rs", "cloak_smoke"): "smoke hook",
     ("combat/asteroid.rs", "asteroid_demo"): "dev hook",
