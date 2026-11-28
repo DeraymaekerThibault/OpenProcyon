@@ -6,7 +6,8 @@ Launch. The shortcut never plays an allied computer slot or a full lobby; only l
 Each scenario runs the game (Cargo profile `fast` unless --profile) with PROCYON_REPORT (game/src/smoke/report.rs), which logs
 one `battle report {json}` line when one side is gone or the time is up. The expectations below are whole-battle invariants (the computer engages, nobody grinds on
 an island, nothing panics): they catch regressions where one feature quietly changes another (armed volcanoes taken for bases,
-map-script tags hiding the captain's target). Runs take ~10-40 s each; logs go to local/battle_check/<name>.log.
+map-script tags hiding the captain's target). Every run is fixed-step with the seed 1, so a failure reproduces exactly; only
+`--replay` plays the normal clock, and it judges only that the replay gives the same report. Runs take ~10-40 s each; logs go to local/battle_check/<name>.log.
 Needs imported assets; the run mode (window or software) comes from PROCYON_RUN (tools/rungame.py)."""
 
 import argparse
@@ -225,6 +226,19 @@ def evaluate(report, expect, fire_by=FIRE_BY):
     return fails
 
 
+def recorded(log):
+    """(passed, summary) for the recorded run of `--replay`: it ran and its report is sane. The battle's rules are not judged here: a
+    normal-clock run is a different battle every time, so a rule failure in it could not be reproduced. The default mode judges them
+    on fixed-step, seeded battles, which repeat exactly; this mode only asks that the replay gives the same report."""
+    if "panicked at" in log:
+        return False, "PANIC"
+    m = REPORT.search(log)
+    if not m:
+        return False, "no battle report (crash or wall-clock timeout)"
+    fails = sanity(json.loads(m[1]).get("sanity", {}))
+    return not fails, "; ".join(fails) or "recorded"
+
+
 def outcome(log, expect, fire_by=FIRE_BY):
     """(passed, summary) for one run's log text."""
     if "panicked at" in log:
@@ -275,7 +289,8 @@ def main():
         "--replay",
         action="store_true",
         help="play each scenario on the normal clock with `--script commands` recording a command log (PROCYON_COMMANDS), "
-        "replay the log (`--replay`; a lobby scenario from the log alone), and fail when the two reports differ",
+        "replay the log (`--replay`; a lobby scenario from the log alone), and fail when the two reports differ (the battle's "
+        "rules are not judged in this mode)",
     )
     args = ap.parse_args()
     chosen = [s for s in SCENARIOS if not args.names or s.name in args.names]
@@ -305,14 +320,19 @@ def main():
             expect = expect | {"no-stutter"}
         start = time.monotonic()
         log = out / f"{name}.log"
-        extra, env_extra = deterministic(args.twice)
+        # Fixed-step and seeded, so a failure reproduces with the rerun line below (#536: a seed plays the same battle every run).
+        extra, env_extra = deterministic(True)
         if args.replay:
             extra, env_extra = (
                 ["--script", "commands"],
                 {"PROCYON_COMMANDS": str(log.with_suffix(".commands.jsonl"))},
             )
         text = play(name, game_args, seconds, log, extra, env_extra)
-        passed, summary = outcome(text, expect, FIRE_BY_FOR.get(name, FIRE_BY))
+        passed, summary = (
+            recorded(text)
+            if args.replay
+            else outcome(text, expect, FIRE_BY_FOR.get(name, FIRE_BY))
+        )
         if passed and args.replay:
             passed, summary = replay(name, game_args, seconds, text, log)
         if passed and args.twice:
