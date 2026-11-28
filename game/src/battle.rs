@@ -81,6 +81,13 @@ pub enum BattleSet {
 }
 
 pub(crate) fn battle_schedule(app: &mut App) {
+    // The battle tick runs its systems one at a time, in the schedule's sorted order, the same on every run of a build. The
+    // multithreaded executor orders two systems that touch the same data but have no `before`/`after` between them by whichever
+    // becomes ready first, so two runs of one seed could roll the battle generator in another order (#536: 104 such pairs, e.g. the
+    // captains and the computer's boarding rolls). Lock-step peers run the same build, so this order is the same on every machine.
+    app.edit_schedule(FixedUpdate, |s| {
+        s.set_executor(bevy::ecs::schedule::SingleThreadedExecutor::new());
+    });
     app.insert_resource(Time::<Fixed>::from_duration(BATTLE_TICK)).add_systems(FixedUpdate, tick_start.in_set(BattleSet::Tick)).configure_sets(
         FixedUpdate,
         (
