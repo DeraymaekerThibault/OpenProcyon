@@ -10,6 +10,9 @@
 //!   of Auto Assign's. Not checked against the budget here: the lobby's own launch check still applies.
 //! - `slots`: the lobby rows in order, `human`, `computer`, `open` or `closed`; `N*kind` repeats. The first row is always the
 //!   human's. Rows left out stay as the lobby opens them. Computers take the team and fleet type the lobby gives them.
+//!   A later `human` row is a second human player (#369 phase 2 E, replay tests): it takes the team, fleet type and flag a computer
+//!   row would, and its fleet is built at launch as a computer's (PROVISIONAL: until phase 4 a remote player has no lobby of its own).
+//!   Which human this machine plays is `--as-player <row>` (default the first).
 //!
 //! A spec starting with `{` is a whole [`SkirmishSetup`] in JSON instead (teams, fleet types, flags, gun swaps, ship names, named
 //! crew), the form a command log's header holds.
@@ -86,8 +89,8 @@ impl LobbyScenario {
             }
         }
         let map = map.ok_or("lobby spec needs map=<id>")?;
-        if slots.first() != Some(&SlotSpec::Human) || slots.iter().skip(1).any(|s| *s == SlotSpec::Human) {
-            return Err("lobby spec slots: the first row is the human and only that one".into());
+        if slots.first() != Some(&SlotSpec::Human) {
+            return Err("lobby spec slots: the first row is the human".into());
         }
         if !(VICTORY_LIMIT.min..=VICTORY_LIMIT.max).contains(&points) || !(points - VICTORY_LIMIT.min).is_multiple_of(VICTORY_LIMIT.step) {
             return Err(format!("lobby spec points {points}: {}-{} in steps of {}", VICTORY_LIMIT.min, VICTORY_LIMIT.max, VICTORY_LIMIT.step));
@@ -113,7 +116,13 @@ impl LobbyScenario {
         }
         for (i, want) in self.slots.iter().enumerate() {
             let choice = match want {
-                SlotSpec::Human => continue,
+                SlotSpec::Human if sk.slots[i].kind == Kind::Human => continue,
+                // A second human: the row a computer would be, played by a person.
+                SlotSpec::Human => {
+                    sk.choose(Cell::Player(i), Choice::Computer);
+                    sk.slots[i].kind = Kind::Human;
+                    continue;
+                }
                 SlotSpec::Computer => Choice::Computer,
                 SlotSpec::Open => Choice::Open,
                 SlotSpec::Closed => Choice::Close,
@@ -202,7 +211,6 @@ mod tests {
         for (spec, needle) in [
             ("points=300;slots=human", "needs map"),
             ("map=a;slots=computer", "first row is the human"),
-            ("map=a;slots=human,human", "first row is the human"),
             ("map=a;slots=human,2*pirate", "expected human, computer"),
             ("map=a;points=1005;slots=human", "steps of 10"),
             ("map=a;points=5000;slots=human", "points 5000"),
@@ -214,6 +222,25 @@ mod tests {
             let err = LobbyScenario::parse(spec).unwrap_err();
             assert!(err.contains(needle), "{spec:?}: {err}");
         }
+    }
+
+    /// #369 phase 2 E: a later `human` row is a second human player, on its own side (the first human's is the player's), with a
+    /// fleet; the setup it leaves is what a command log's header keeps, and it sets the lobby up again the same.
+    #[test]
+    #[ignore = "needs imported assets"]
+    fn a_second_human_row_plays_its_own_side_and_survives_the_log_header() {
+        let lib = Library::load(crate::assets_dir());
+        let mut sk = crate::menu::tests::skirmish("border_dispute");
+        LobbyScenario::parse("map=border_dispute;slots=human,human,computer").unwrap().apply(&mut sk, &lib).unwrap();
+        let groups = sk.plan(&lib);
+        let humans: Vec<_> = groups.iter().filter(|g| g.human).collect();
+        assert_eq!(humans.iter().map(|g| g.slot).collect::<Vec<_>>(), [Some(0), Some(1)]);
+        assert_eq!(humans[0].side, crate::Side::Player);
+        assert!(humans[1].side != crate::Side::Player && !humans[1].ships.is_empty(), "the second human: its own side and a fleet");
+        let setup = crate::menu::SkirmishSetup::capture(&sk, &lib).unwrap();
+        let mut again = crate::menu::tests::skirmish("border_dispute");
+        setup.apply(&mut again, &lib).unwrap();
+        assert_eq!(crate::menu::SkirmishSetup::capture(&again, &lib), Some(setup), "the header's setup sets the lobby up again");
     }
 
     #[test]

@@ -131,7 +131,7 @@ if [ "$tier" = full ]; then
     # Replay check: skirmishes on the normal clock with scripted orders record a command log (PROCYON_COMMANDS), and their replay
     # (--replay) must give the same battle report (game/src/commands.rs, ~2 min). border_dispute_full is launched through the lobby
     # and replays from the log's skirmish setup alone.
-    step replay-check $py -m tools.battle_check red_rover border_dispute_full --replay
+    step replay-check $py -m tools.battle_check red_rover border_dispute_full two_humans --replay
   else
     skipped="startup smoke, battle check, replay check, "
   fi

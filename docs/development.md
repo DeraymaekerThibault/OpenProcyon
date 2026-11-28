@@ -62,10 +62,13 @@ Git Bash (`GIT_BASH=<path>` if it is not in the default place), and the screensh
    and the header leaves it out of the arguments). `--lobby` also takes a whole setup as JSON (a spec starting with `{`). Only the
    first battle of a run is recorded; a campaign mission started from the menus is marked `from_menu` and refused (neither the
    arguments nor a setup hold it). Arguments that take a path (`--mod <dir>`, ...) are left out of the header. `battle_check
-   --replay` (in `check.sh --full` for `red_rover` and the lobby scenario `border_dispute_full`) records a run of `--script
+   --replay` (in `check.sh --full` for `red_rover` and the lobby scenarios `border_dispute_full` and `two_humans`) records a run of `--script
    commands` and fails when its replay's battle report differs; a lobby scenario replays from the log alone. It plays the normal
    clock, a different battle every run, so it judges only the replay (and that the run did not crash or go insane), not the battle's
-   rules: those are the default mode's.
+   rules: those are the default mode's. The `two_humans`
+   lobby scenario (`slots=human,human,...`, #369 phase 2) has a second human player whose orders the script gives as a peer's
+   would arrive; its replay check also replays with `--as-player 1 --script commands` (player 1's orders live, the other players'
+   from the log), which must give the same report too. `--as-player <row>` picks the human row this machine plays (default the first).
    `--fixed-step` (or `PROCYON_FIXED_STEP=1`; `--shot` implies it unless `PROCYON_FIXED_STEP=0`, `gametime.rs::wants_fixed_step`) makes a scripted run reproducible: each frame is one 33 ms tick at 1x whatever
    the frame rate, and the clock-seeded cosmetic draws (ship names, stars) use a fixed seed. Run twice, it gives the same
    pictures and the same trace. `python3 -m tools.tracediff A.csv B.csv` compares two traces (one line per file, then the

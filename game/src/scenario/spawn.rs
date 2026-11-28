@@ -335,6 +335,16 @@ fn spawn_skirmish(
     let mut namer = Namer::new();
     let mut roster = alliance::Roster { changeable: map["alliance_change"].as_bool().unwrap_or(false), ..default() };
     let mut alliances = battle_alliances(&groups, &players, map.get("alliances"));
+    // The human this machine plays: `--as-player`'s row when it is a human's, else the first human (#369 decision 4).
+    let humans: Vec<Option<u8>> = groups.iter().filter(|g| g.human).map(|g| g.slot).collect();
+    let mine = crate::commands::as_player().map(|p| Some(p.0)).filter(|s| humans.contains(s)).or_else(|| humans.first().copied());
+    if let Some(p) = crate::commands::as_player().filter(|p| !humans.contains(&Some(p.0))) {
+        warn!("--as-player {}: no human plays that row; this machine plays the first human", p.0);
+    }
+    // Before any ship spawns: a command ship's hook marks the view's ship by it (`commands::commander_set`).
+    if let Some(local) = mine.flatten() {
+        commands.queue(move |w: &mut World| w.resource_mut::<crate::commands::Players>().local = crate::commands::PlayerId(local));
+    }
     for g in &groups {
         let Some(p) = players.get(g.player) else { continue };
         let f = game_to_bevy(&p["forward"]);
@@ -355,12 +365,12 @@ fn spawn_skirmish(
         alliances.add_player(&owner, g.side);
         let player = g.slot.map(crate::commands::PlayerId);
         if g.human || player.is_some() {
-            let (owner, side, human) = (owner.clone(), g.side, g.human);
+            let (owner, side, human, local) = (owner.clone(), g.side, g.human, g.human && g.slot == mine.flatten());
             commands.queue(move |w: &mut World| {
                 let mut players = w.resource_mut::<crate::commands::Players>();
                 let id = player.unwrap_or_default();
                 players.list.insert(id, crate::commands::Player { owner: owner.clone(), side, human });
-                if human {
+                if local {
                     players.local = id;
                     w.resource_mut::<ship::Fleets>().local = owner;
                 }
