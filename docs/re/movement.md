@@ -259,9 +259,9 @@ Headless retail skirmishes, one computer ship against our idle or fleeing Navy C
     range against the nearest hostile base, then a fleet mate's target), but never explore or go to repair on their own.
   - Promotion touches neither ship's slot: the old command ship keeps its click (still ordered) and fights it as a computer
     captain; the new one keeps its own target.
-  - Remake: `ship::TargetSlot`; asteroids clicked by hand still use the command ship's slot, a human's secondaries still take the
-    nearest visible enemy that is not human-crewed, and the dock, tow, grapple and board orders do not write a command ship's slot
-    (PROVISIONAL, #369).
+  - Remake: `ship::TargetSlot`; every ship but a human's command ship fires at its slot's target (`combat::gunnery`), a human's
+    secondaries and allied computer fleets included. PROVISIONAL (#369): asteroids clicked by hand still use the command ship's
+    slot, and the dock, tow, grapple and board orders do not write a command ship's slot.
 - **Nothing in sight: map exploration.** Retail saves give every computer ship an explore-map routine with a quadrant index 0-3
   (random per ship). Observed: a Carrack on the Diablo Strait (half-size 1625) ran from (322, -1127) on course (0.27, 0.96) for
   200 s, straight at the (+x, +y) quadrant centre (812, 812) (bearing (0.245, 0.97)); an Assault Cutter on the Zemyatin Anomaly
