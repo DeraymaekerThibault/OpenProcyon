@@ -4,8 +4,8 @@ Two kinds of scenario: a map with the --ship/--allies/--enemies fleet shortcut, 
 game/src/menu/lobby_scenario.rs) that sets the skirmish lobby up like a player (slots, victory points, fleet limit) and presses
 Launch. The shortcut never plays an allied computer slot or a full lobby; only lobby scenarios do.
 Each scenario runs the game (Cargo profile `fast` unless --profile) with PROCYON_REPORT (game/src/smoke/report.rs), which logs
-one `battle report {json}` line when one side is gone or the time is up. The expectations below are whole-battle invariants (the computer engages, nobody grinds on
-an island, nothing panics): they catch regressions where one feature quietly changes another (armed volcanoes taken for bases,
+one `battle report {json}` line when one side is gone or the time is up. The expectations below are whole-battle invariants (the computer engages and
+fires, nothing panics): they catch regressions where one feature quietly changes another (armed volcanoes taken for bases,
 map-script tags hiding the captain's target). Every run is fixed-step with the seed 1, so a failure reproduces exactly; only
 `--replay` plays the normal clock, and it judges only that the replay gives the same report. Runs take ~10-40 s each; logs go to local/battle_check/<name>.log.
 Needs imported assets; the run mode (window or software) comes from PROCYON_RUN (tools/rungame.py)."""
@@ -34,10 +34,9 @@ from tools.rungame import (
 REPORT = re.compile(r"battle report (\{.*\})")
 FLEETS = ["--ship", "Ship_Navy_Cutter", "--allies", "Ship_Navy_Cutter",
           "--enemies", "Ship_Pirate_Barque,Ship_Pirate_Sloop"]  # fmt: skip
-# Seconds a computer ship may stay in contact with scenery without a break before it counts as grinding. A wedged computer ship first
-# waits for the original's unstick (the same obstacle for 5.5 s), then turns in place until it is free (docs/re/movement.md). The
-# human's ships are not judged: they skip the avoider on attack and move orders and sail into land as in the original.
-GRIND = 10.0
+# Grinding on scenery is reported, not judged: the original does it too (#697, docs/re/movement.md "Wedged"). A wedged computer ship
+# turns in place until its look-ahead is clear (30 s and 173 degrees in one retail run), and a ship pushed back over 0.1 units every
+# tick never counts as wedged and grinds on at full speed (150 s in another). The longest computer contact is in the summary line.
 # Frames over 50 ms a battle may have (after the first second) before it counts as stuttering; healthy runs have 0-1.
 STUTTER = 10
 
@@ -82,7 +81,7 @@ def lobby(name, spec, seconds, expect):
 # "resolve": the battle ends (one side left) or a ship sinks within the time. "as-player": with --replay, a second replay plays
 # player 1 live (`--as-player 1 --script commands`, the others from the log) and must give the same report (#369 phase 2 E).
 # PROVISIONAL.
-# Every scenario also checks for panics, grinding, non-finite or far-off positions, runaway entity counts and stutter ("no-stutter" skips the last, only with an open issue).
+# Every scenario also checks for panics, non-finite or far-off positions, runaway entity counts and stutter ("no-stutter" skips the last, only with an open issue).
 SCENARIOS = [
     shortcut("ambush", "ambush", 120, {"engage"}),  # starts 514 apart among 22 islands
     shortcut("bayles_stand", "bayles_stand", 120, {"engage"}),  # starts 464 apart
@@ -228,11 +227,6 @@ def evaluate(report, expect, fire_by=FIRE_BY):
         fails.append(
             f"stutter: {frames['over_50']} frames over 50 ms (worst {frames['worst']:.0f} ms)"
         )
-    for s in report["ships"]:
-        if computer(s) and s["worst_contact"] > GRIND:
-            fails.append(
-                f"{s['class']} ({s['side']}) ground on scenery for {s['worst_contact']} s"
-            )
     return fails
 
 
@@ -247,6 +241,15 @@ def recorded(log):
         return False, "no battle report (crash or wall-clock timeout)"
     fails = sanity(json.loads(m[1]).get("sanity", {}))
     return not fails, "; ".join(fails) or "recorded"
+
+
+def longest_contact(report):
+    """' longest scenery contact ...' for the summary line, or '' when no computer ship touched scenery."""
+    ships = [s for s in report["ships"] if computer(s) and s["worst_contact"] > 0]
+    if not ships:
+        return ""
+    s = max(ships, key=lambda s: s["worst_contact"])
+    return f"; longest scenery contact {s['worst_contact']:.1f} s ({s['class']}, {s['side']})"
 
 
 def outcome(log, expect, fire_by=FIRE_BY):
@@ -265,7 +268,9 @@ def outcome(log, expect, fire_by=FIRE_BY):
     fleets = [f for f in report.get("fleets", []) if not f["human"]]
     if fleets:
         sides += f"; computer fleets spent {sum(f['spent'] for f in fleets)}/{sum(f['budget'] for f in fleets)} points"
-    return not fails, "; ".join(fails) or f"ok at {report['time']:.0f} s ({sides})"
+    return not fails, "; ".join(
+        fails
+    ) or f"ok at {report['time']:.0f} s ({sides}){longest_contact(report)}"
 
 
 def deterministic(on):

@@ -125,8 +125,8 @@ if [ "$tier" = full ]; then
     export PROCYON_BIN=$game
     startup_smoke() { tools/shot.sh local/check/startup.png --menu main --shot-frame 120; }
     step startup-smoke startup_smoke
-    # Battle check: short skirmishes with fixed fleets must still play like battles (the computer engages, nobody grinds on an
-    # island, nothing panics). Whole-battle regressions that single-system tests miss show up here (~1-2 min).
+    # Battle check: short skirmishes with fixed fleets must still play like battles (the computer engages and fires,
+    # nothing panics). Whole-battle regressions that single-system tests miss show up here (~1-2 min).
     step battle-check $py -m tools.battle_check
     # Replay check: skirmishes on the normal clock with scripted orders record a command log (PROCYON_COMMANDS), and their replay
     # (--replay) must give the same battle report (game/src/commands.rs, ~2 min). border_dispute_full is launched through the lobby
