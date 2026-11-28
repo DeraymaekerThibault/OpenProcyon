@@ -90,6 +90,8 @@ None → waiting to dock → approach → pre-docked → docked → moving away 
   state 3 directly, else plan the approach (below) and go to 2. With every point taken: compare own distance to the nearest point with its
   holder's distance (both divided by the *docker's own* speed, 999 when it is ~0, so a stopped ship never wins); if nearer, take the point
   over and send the holder back to waiting (1); otherwise hold (path cleared) inside **80 units** of the point, or path toward it.
+  Holding is only a stop: the ship coasts on with throttle 0 until its drag and the stop below 1 u/s halt it (a Frigate cut at 8.1 u/s
+  rests 46.3 from the point, measured 2026-11-28; [collision.md](collision.md)).
 - **Approach point**: on the dock-point node's own forward axis, on the side the docker is on (axis flipped when the docker is
   ≥ 90° off it), **1.5 × dockee length** out for a ship dockee, **1 × docker length** for a base (lengths = collision-box y extents).
 - **2 dock approach** (unchecked against play, 2026-10-31): within **10 units** → 3. The approach point is recomputed every think (twice a
